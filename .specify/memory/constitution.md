@@ -1,50 +1,143 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+Version change: [none, template placeholders only] → 1.0.0
+Rationale: Initial ratification. No prior filled-in constitution existed (file contained only
+template placeholder tokens), so this is treated as a first adoption, not an amendment.
+Modified principles: n/a (none previously defined)
+Added sections:
+  - Core Principles I–VII (Application Owns the Document, Pi Owns Agent Conversations,
+    Proposals Not Direct Writes, CRDT-Mediated Merging, Enforced Configurable Limits,
+    Sanitize Before Render, No Pi Extension Without Necessity)
+  - Technology & Platform Constraints
+  - Quality & Review Gates
+  - Governance
+Removed sections: none
+Templates requiring alignment check:
+  - .specify/templates/plan-template.md — ⚠ pending manual review (not modified by this command)
+  - .specify/templates/spec-template.md — ⚠ pending manual review (not modified by this command)
+  - .specify/templates/tasks-template.md — ⚠ pending manual review (not modified by this command)
+  - .specify/templates/checklist-template.md — ⚠ pending manual review (not modified by this command)
+Deferred items: RATIFICATION_DATE set to the date of this command's execution since no earlier
+ratification date is recorded anywhere in the repository; correct manually if an earlier date
+should be used.
+-->
+
+# AI Document Review Application Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. The Application Owns the Document
+The application backend is the sole authority over document state: Markdown content, Automerge
+CRDT state, document revisions, staged edits, edit acceptance/rejection, conflict resolution,
+Primary-conversation behavior, conversation metadata, UI state, and the application event stream.
+No other component — including Pi, the frontend, or an agent — may become an independent source
+of truth for the document.
+**Rationale**: A rapid-review workflow depends on the user being able to trust a single,
+consistent document state at all times; splitting authority across the frontend, Pi, and the
+backend would make conflicts and recovery unreliable.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Pi Owns Agent Conversations
+Pi is the sole authority over agent sessions, conversation history, the conversation tree,
+Pi-level branching, model interaction, compaction, tool execution, and agent events. The
+application interacts with these exclusively through the Pi SDK. The application MUST NOT read or
+write Pi's underlying session storage format directly.
+**Rationale**: Treating Pi as an opaque, SDK-mediated subsystem keeps the application resilient to
+changes in Pi's internal storage/session format and keeps the ownership boundary with Principle I
+unambiguous.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Agent Edits Are Proposals, Not Direct Writes
+An agent tool call that modifies the document produces one atomic staged edit, associated with its
+Pi tool-call ID; a single tool call may span multiple disjoint ranges, but partial acceptance of
+those ranges is out of scope until a future version. For the Primary conversation only, the
+proposal is automatically applied and a logical revision is recorded — it is still a proposal that
+passed through the application's edit pipeline, never a direct mutation. The agent MUST NOT bypass
+this pipeline, and MUST NOT resolve conflicts against the document directly; on conflict, the
+application asks the agent to produce a new proposal, and the user or Primary policy decides its
+fate.
+**Rationale**: This is the load-bearing invariant of the design — "Pi proposes agent activity; the
+application controls document state" — and it is what keeps agent behavior reviewable and
+reversible for both Primary and non-Primary conversations.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. CRDT-Mediated Merging, With Revisions as a Separate Concept
+All document edits are first attempted through Automerge merge. A logical revision (what the user
+sees, e.g. v17) is a meaningful, explicitly created milestone — via an applied agent edit or a
+debounced batch of manual edits — and is distinct from the underlying CRDT operation log. Restoring
+a past revision MUST be implemented as a new forward operation, never as destructive deletion of
+CRDT or revision history.
+**Rationale**: Separating "what Automerge merged" from "what the user perceives as a version"
+lets the system give users a small, meaningful history while Automerge handles the underlying
+concurrency correctness.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Configurable Limits Are Enforced, Not Advisory
+Application-level limits — including maximum conversation branching depth, maximum editing depth,
+maximum concurrent agents, and the manual-edit revision debounce period — are configurable, but
+once configured they MUST be enforced by the application. Code paths MUST NOT allow these limits to
+be silently exceeded.
+**Rationale**: These limits exist to bound cost, complexity, and review burden; a limit that can be
+bypassed provides no actual guarantee to the user or the operator.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+### VI. Sanitize Before Render
+Any content that reaches the DOM through the Markdown rendering pipeline — standard Markdown,
+Mermaid diagrams, SVG, or any future rendering extension — MUST pass through an abstracted
+sanitization layer first. The sanitizer abstraction MUST allow new rendering formats to be added
+without changes to the document model.
+**Rationale**: Markdown authored or influenced by an LLM agent is untrusted content by default;
+rendering it without sanitization is a direct XSS exposure.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### VII. No Pi Extension Without Demonstrated Necessity
+The architecture MUST NOT require a Pi extension in the initial implementation. A Pi extension MAY
+be introduced later, but only once the Pi SDK has been demonstrated to be insufficient for a
+specific, stated requirement.
+**Rationale**: Avoids speculative infrastructure; keeps the integration surface with Pi as small as
+possible until a concrete need proves otherwise (YAGNI applied to the Pi integration boundary).
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## Technology & Platform Constraints
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+* Frontend: Vue / TypeScript. Backend: TypeScript. Persistence: SQLite in v1, behind an abstracted
+  storage layer so a future backing store (e.g. PostgreSQL) can be substituted without changing
+  callers.
+* Document CRDT: Automerge is the only authoritative document CRDT. Agent/session infrastructure:
+  Pi, accessed only via the Pi SDK (Principle II).
+* Deployment: self-hosted, Dockerized. Users: v1 supports a single local user/account; the schema
+  and service boundaries MUST NOT preclude multiple documents or multiple accounts in a later
+  version, even though v1 implements only one document.
+* Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): multiple
+  documents, storage backends beyond SQLite, additional agent tools beyond document read/edit,
+  additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
+  integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi export viewing, and
+  importable contextual reference material.
+
+## Quality & Review Gates
+
+* Every user-facing behavior change MUST be expressible as Given/When/Then acceptance criteria
+  before implementation is considered complete, consistent with the BDD requirements already
+  captured for this feature.
+* Application operations that can be retried or duplicated (notably applying a staged edit tied to
+  a Pi tool-call ID) MUST be idempotent.
+* A browser disconnecting MUST NOT be treated as an agent or tool-call failure; the backend and Pi
+  remain the source of truth, and reconnection MUST reconcile from the application event stream
+  rather than assuming lost work.
+* A conversation MUST NOT be closable while it has staged edits without a verdict (applied or
+  dropped).
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes conflicting statements in other project documents (including
+`design.md`) for governance purposes; where `design.md` and this constitution diverge on a
+non-negotiable rule, this constitution controls until both are reconciled in the same amendment.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Amendment procedure**: Amendments are made by editing this file via the constitution workflow,
+which regenerates the Sync Impact Report, bumps the version per the policy below, and flags any
+dependent templates (plan/spec/tasks/checklist) that may need alignment. Amendments should record,
+in the commit or PR description, which principle(s) changed and why.
+
+**Versioning policy** (semantic versioning applied to governance):
+* MAJOR — backward-incompatible removal or redefinition of a principle or governance rule.
+* MINOR — a new principle or materially expanded guidance added.
+* PATCH — wording, typo, or clarification changes with no semantic effect.
+
+**Compliance review**: Any plan or task list produced by the Spec Kit workflow MUST be checked
+against these principles before implementation begins; a violation MUST either be justified in the
+plan's complexity-tracking section or the plan MUST be revised to comply.
+
+**Version**: 1.0.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-25
