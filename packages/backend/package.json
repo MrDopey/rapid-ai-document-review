@@ -1,0 +1,33 @@
+{
+  "name": "@rapid-ai-document-review/backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node dist/server.js",
+    "db:migrate": "node --experimental-strip-types src/storage/sqlite/migrate-cli.ts",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:contract": "vitest run tests/contract --exclude '**/live-pi.test.ts'",
+    "test:contract:live": "vitest run tests/contract/live-pi.test.ts"
+  },
+  "dependencies": {
+    "@automerge/automerge": "^3.4.1",
+    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@fastify/websocket": "^11.0.2",
+    "@rapid-ai-document-review/shared": "*",
+    "fastify": "^5.12.1",
+    "pino": "^10.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,2 +1,35 @@
-
 .claude/skills/speckit-*
+settings.local.json
+
+# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Data
+*.sqlite
+*.sqlite3
+/data/
+/pi-sessions/

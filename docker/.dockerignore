@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+**/coverage
+**/*.sqlite
+**/*.sqlite3
+.git
+tests/e2e
+playwright-report
+test-results

@@ -1,0 +1,39 @@
+{
+  "name": "@rapid-ai-document-review/frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "test:unit": "vitest run tests/unit",
+    "test:component": "vitest run tests/component"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.35.0",
+    "@rapid-ai-document-review/shared": "*",
+    "diff": "^9.0.0",
+    "dompurify": "^3.4.0",
+    "markdown-it": "^15.0.0",
+    "mermaid": "^11.4.0",
+    "pinia": "^3.0.0",
+    "vue": "^3.5.41"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.4.6",
+    "@vue/tsconfig": "^0.9.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.9.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.0",
+    "vue-tsc": "^3.3.11"
+  }
+}

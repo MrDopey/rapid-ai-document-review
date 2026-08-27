@@ -1,0 +1,19 @@
+:root {
+  --border-color: #ccc;
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+}
