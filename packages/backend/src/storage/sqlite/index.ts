@@ -640,6 +640,13 @@ export class SqliteStorageAdapter implements StorageAdapter {
     return rows.map(mapEvent);
   }
 
+  listEventsByConversation(conversationId: string): ConversationEventRow[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM conversation_event WHERE conversation_id = ? ORDER BY sequence ASC`)
+      .all(conversationId) as unknown as ConversationEventDbRow[];
+    return rows.map(mapEvent);
+  }
+
   // ---- user_settings ----
 
   getSettings(): UserSettingsRow {

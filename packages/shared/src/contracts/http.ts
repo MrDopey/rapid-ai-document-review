@@ -96,17 +96,30 @@ export const RevisionDto = z.object({
 });
 export type RevisionDto = z.infer<typeof RevisionDto>;
 
+// Shape only, no range constraints: this describes GET/PATCH *responses*, which must always be
+// parseable even if the stored value fell outside the currently-configured legal range before a
+// tighter range was introduced (or, in dev/e2e, via a deliberate out-of-band seed). Range
+// enforcement (FR-041) belongs solely to the write path — see `UserSettingsPatch` below.
 export const UserSettingsDto = z.object({
   thinkingVisible: z.boolean(),
-  revisionDebounceMs: z.number().int().min(10_000).max(3_600_000),
-  maxConcurrentAgents: z.number().int().min(1).max(10),
-  maxEditingDepth: z.number().int().min(0).max(10),
-  maxConversationDepth: z.number().int().min(1).max(10),
-  maxReplacementAttempts: z.number().int().min(0).max(10),
+  revisionDebounceMs: z.number().int(),
+  maxConcurrentAgents: z.number().int(),
+  maxEditingDepth: z.number().int(),
+  maxConversationDepth: z.number().int(),
+  maxReplacementAttempts: z.number().int(),
 });
 export type UserSettingsDto = z.infer<typeof UserSettingsDto>;
 
-export const UserSettingsPatch = UserSettingsDto.partial();
+// The write path: every field optional (a PATCH may update any subset), but each present field
+// is range-checked (FR-041) — out of range is `400 VALIDATION_FAILED`, never clamped.
+export const UserSettingsPatch = z.object({
+  thinkingVisible: z.boolean().optional(),
+  revisionDebounceMs: z.number().int().min(10_000).max(3_600_000).optional(),
+  maxConcurrentAgents: z.number().int().min(1).max(10).optional(),
+  maxEditingDepth: z.number().int().min(0).max(10).optional(),
+  maxConversationDepth: z.number().int().min(1).max(10).optional(),
+  maxReplacementAttempts: z.number().int().min(0).max(10).optional(),
+});
 export type UserSettingsPatch = z.infer<typeof UserSettingsPatch>;
 
 // ---- Pagination ----

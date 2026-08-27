@@ -22,6 +22,7 @@
     "@rapid-ai-document-review/shared": "*",
     "fastify": "^5.12.1",
     "pino": "^10.0.0",
+    "typebox": "^1.3.7",
     "zod": "^4.0.0"
   },
   "devDependencies": {

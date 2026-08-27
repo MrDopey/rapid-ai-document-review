@@ -15,8 +15,7 @@ const md = new MarkdownIt({
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const defaultFenceRenderer: any =
-  md.renderer.rules.fence ?? ((tokens: any, idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options));
+const defaultFenceRenderer: any = md.renderer.rules.fence ?? ((tokens: any, idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options));
 
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   const token = tokens[idx]!;

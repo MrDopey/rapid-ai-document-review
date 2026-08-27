@@ -3,11 +3,18 @@ import {
   CreateDocumentResponse,
   ErrorEnvelope,
   ExportDocumentQuery,
+  GetConversationResponse,
   GetDocumentResponse,
+  ListConversationsResponse,
   ListRevisionsResponse,
   PatchDocumentRequest,
   PatchDocumentResponse,
   RestoreRevisionResponse,
+  RetryResponse,
+  SendMessageRequest,
+  SendMessageResponse,
+  UserSettingsDto,
+  UserSettingsPatch,
 } from '@rapid-ai-document-review/shared/contracts/http';
 
 export class ApiError extends Error {
@@ -93,6 +100,41 @@ export const httpClient = {
   async restoreRevision(revision: number) {
     return request(`/api/revisions/${revision}/restore`, { method: 'POST' }, (j) =>
       RestoreRevisionResponse.parse(j),
+    );
+  },
+
+  async listConversations(params: { cursor?: string; limit?: number } = {}) {
+    const search = new URLSearchParams();
+    if (params.cursor) search.set('cursor', params.cursor);
+    if (params.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return request(`/api/conversations${qs ? `?${qs}` : ''}`, undefined, (j) =>
+      ListConversationsResponse.parse(j),
+    );
+  },
+
+  async getConversation(id: string) {
+    return request(`/api/conversations/${id}`, undefined, (j) => GetConversationResponse.parse(j));
+  },
+
+  async sendMessage(id: string, message: string) {
+    const body: SendMessageRequest = { message };
+    return request(`/api/conversations/${id}/send`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
+      SendMessageResponse.parse(j),
+    );
+  },
+
+  async retryConversation(id: string) {
+    return request(`/api/conversations/${id}/retry`, { method: 'POST' }, (j) => RetryResponse.parse(j));
+  },
+
+  async getSettings() {
+    return request('/api/settings', undefined, (j) => UserSettingsDto.parse(j));
+  },
+
+  async patchSettings(patch: UserSettingsPatch) {
+    return request('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) }, (j) =>
+      UserSettingsDto.parse(j),
     );
   },
 };

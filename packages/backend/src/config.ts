@@ -5,6 +5,8 @@ export interface Config {
   piSessionStoragePath: string;
   piCodingAgentDir: string;
   logLevel: string;
+  /** Test-only: use `FakeAgentSession` instead of the real Pi SDK (e2e, no model credential). */
+  piFakeSessions: boolean;
 }
 
 function readEnv(name: string, fallback?: string): string {
@@ -29,4 +31,5 @@ export const config: Config = {
   piSessionStoragePath: readEnv('PI_SESSION_STORAGE_PATH', './data/pi-sessions'),
   piCodingAgentDir: readEnv('PI_CODING_AGENT_DIR', './data/pi-agent'),
   logLevel: readEnv('LOG_LEVEL', 'info'),
+  piFakeSessions: process.env.PI_FAKE_SESSIONS === '1',
 };

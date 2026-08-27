@@ -184,6 +184,7 @@ export interface StorageAdapter {
   getNextSequence(documentId: string): number;
   getLatestSequence(documentId: string): number;
   listEventsSince(documentId: string, sinceSequence: number | null): ConversationEventRow[];
+  listEventsByConversation(conversationId: string): ConversationEventRow[];
 
   // user_settings
   getSettings(): UserSettingsRow;

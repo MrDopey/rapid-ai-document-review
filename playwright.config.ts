@@ -25,6 +25,10 @@ export default defineConfig({
         PI_CODING_AGENT_DIR: E2E_PI_AGENT_DIR,
         LOG_LEVEL: 'warn',
         E2E_SEED_REVISION_DEBOUNCE_MS: '2000',
+        // No model provider credential is available in this environment (quickstart.md); US2+
+        // specs exercise the real send -> PiService -> EventBridge -> WS path against a
+        // deterministic, credential-free FakeAgentSession instead of a live Pi session.
+        PI_FAKE_SESSIONS: '1',
       },
     },
     {

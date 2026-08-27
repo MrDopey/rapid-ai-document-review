@@ -11,8 +11,14 @@ import { AutomergeStoreHolder } from './document/automerge-store-holder.js';
 import { RevisionService } from './document/revision-service.js';
 import { DocumentService } from './document/document-service.js';
 import { toConversationDto } from './conversation/conversation-mapper.js';
+import { ConversationService } from './conversation/conversation-service.js';
+import { ConcurrencyLimiter } from './conversation/concurrency-limiter.js';
+import { PiService } from './pi/pi-service.js';
+import { RunBuffer } from './events/run-buffer.js';
 import { registerDocumentRoutes } from './api/http/document.js';
 import { registerRevisionRoutes } from './api/http/revisions.js';
+import { registerConversationRoutes } from './api/http/conversations.js';
+import { registerSettingsRoutes } from './api/http/settings.js';
 import { registerWsRoutes } from './api/ws/index.js';
 
 export function buildApp() {
@@ -65,6 +71,25 @@ export function buildApp() {
   // conversations are recovered once ConversationService exists (Phase 4).
   documentService.loadIfExists();
 
+  const runBuffer = new RunBuffer();
+  const piService = new PiService(storage, automergeHolder);
+  const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
+  const conversationService = new ConversationService(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
+
+  // Defensive idempotency: Main is normally created as part of document creation
+  // (DocumentService.create); this only fills a gap if that invariant were ever violated.
+  const existingDocument = storage.getDocument();
+  if (existingDocument) {
+    conversationService.ensureMain(existingDocument.id);
+  }
+
   const app = Fastify({ loggerInstance: logger });
 
   app.get('/healthz', async () => ({ status: 'ok' }));
@@ -73,6 +98,8 @@ export function buildApp() {
   app.register(async (instance) => {
     registerDocumentRoutes(instance, { documentService, revisionService });
     registerRevisionRoutes(instance, { storage, revisionService });
+    registerConversationRoutes(instance, { conversationService, storage });
+    registerSettingsRoutes(instance, { storage, eventService, eventHub });
     registerWsRoutes(instance, { eventHub, storage });
   });
 
