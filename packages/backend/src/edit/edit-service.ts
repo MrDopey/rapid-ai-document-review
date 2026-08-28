@@ -9,10 +9,12 @@ import { reconcile } from '../document/text-anchor.ts';
 import type { RevisionService } from '../document/revision-service.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
+import { EventPublisher } from '../events/event-publisher.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
 import type { ConcurrencyLimiter } from '../conversation/concurrency-limiter.ts';
 import { EventBridge } from '../pi/event-bridge.ts';
 import type { PiService } from '../pi/pi-service.ts';
+import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 import type { ConversationRow, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toStagedEditDto } from './edit-mapper.ts';
 import { previewStagedEdit } from './preview.ts';
@@ -46,6 +48,7 @@ export class EditService {
   private readonly piService: PiService;
   private readonly concurrencyLimiter: ConcurrencyLimiter;
   private readonly runBuffer: RunBuffer;
+  private readonly primaryMutex: PrimaryMutex;
 
   constructor(
     storage: StorageAdapter,
@@ -57,6 +60,7 @@ export class EditService {
     piService: PiService,
     concurrencyLimiter: ConcurrencyLimiter,
     runBuffer: RunBuffer,
+    primaryMutex: PrimaryMutex,
   ) {
     this.storage = storage;
     this.eventService = eventService;
@@ -67,6 +71,7 @@ export class EditService {
     this.piService = piService;
     this.concurrencyLimiter = concurrencyLimiter;
     this.runBuffer = runBuffer;
+    this.primaryMutex = primaryMutex;
   }
 
   /** Non-Primary path (FR-021): always creates a `pending` row. Idempotent on `(conversationId,
@@ -186,64 +191,80 @@ export class EditService {
     return { edit: updated, outcome: result.response.outcome, message: result.conflictMessage };
   }
 
-  /** Reconciles and applies (or supersedes) one pending edit. Idempotent on an already-`applied`
-   *  edit (FR-040). `requestReplacementViaNewTurn` is `false` only when called synchronously from
-   *  within the proposing tool call's own execution (the Primary path) — the caller then embeds
-   *  `conflictMessage` in that same tool's result instead of a new turn being started here. */
+  /**
+   * Reconciles and applies (or supersedes) one pending edit. Idempotent on an already-`applied`
+   * edit (FR-040). `requestReplacementViaNewTurn` is `false` only when called synchronously from
+   * within the proposing tool call's own execution (the Primary path) — the caller then embeds
+   * `conflictMessage` in that same tool's result instead of a new turn being started here.
+   *
+   * FIX 4: the entire read-reconcile-write sequence runs under this document's `PrimaryMutex`
+   * lock, so two overlapping `apply()` calls for the same document — e.g. an HTTP accept racing
+   * another accept, or a manual edit racing an accept — always serialize instead of both reading
+   * document content before either has written its own change. Previously only the
+   * `propose_document_edit` tool path (document-tools.ts) acquired this lock at all; the
+   * HTTP-triggered accept/accept-remaining path (edits.ts) went completely unlocked. `PrimaryMutex`
+   * is reentrant per document within one call chain, so `stageAndApplyPrimary` below — itself
+   * already invoked from inside document-tools.ts's own `withLock` — calling back into `apply()`
+   * does not deadlock against itself.
+   */
   async apply(editId: string, opts: { requestReplacementViaNewTurn?: boolean } = {}): Promise<ApplyOutcomeInternal> {
     const requestViaNewTurn = opts.requestReplacementViaNewTurn ?? true;
-    const edit = this.storage.getStagedEdit(editId);
-    if (!edit) throw new EditNotFoundError(`Staged edit not found: ${editId}`);
+    const initial = this.storage.getStagedEdit(editId);
+    if (!initial) throw new EditNotFoundError(`Staged edit not found: ${editId}`);
 
-    if (edit.status === 'applied') {
-      return {
-        response: {
-          outcome: 'applied',
-          stagedEditId: edit.id,
-          revision: edit.appliedRevision ?? 0,
-          content: this.automerge.get().getContent(),
-        },
-      };
-    }
-    if (edit.status !== 'pending') {
-      throw new EditNotPendingError(`Staged edit is not pending: ${editId} (status: ${edit.status})`);
-    }
+    return this.primaryMutex.withLock(initial.documentId, async () => {
+      const edit = this.storage.getStagedEdit(editId) ?? initial;
 
-    const currentText = this.automerge.get().getContent();
-    const result = reconcile(edit.operations, currentText);
-
-    if (result.outcome === 'clean') {
-      return { response: this.applyClean(edit, result.patches) };
-    }
-
-    const conflictOutcome = this.conflictService.recordConflict(edit, result.detail);
-    if (conflictOutcome.replacementRequested && requestViaNewTurn) {
-      const conversation = this.storage.getConversation(edit.conversationId);
-      if (conversation) this.requestReplacement(conversation, conflictOutcome.message);
-    }
-
-    const response: ApplyEditResponse =
-      conflictOutcome.outcome === 'conflict'
-        ? {
-            outcome: 'conflict',
+      if (edit.status === 'applied') {
+        return {
+          response: {
+            outcome: 'applied',
             stagedEditId: edit.id,
-            supersededEditId: edit.id,
-            conflictDetail: conflictOutcome.conflictDetail,
-            replacementRequested: conflictOutcome.replacementRequested,
-            replacementAttempt: conflictOutcome.replacementAttempt,
-            attemptsRemaining: conflictOutcome.attemptsRemaining,
-          }
-        : {
-            outcome: 'conflict_exhausted',
-            stagedEditId: edit.id,
-            supersededEditId: edit.id,
-            originalStagedEditId: conflictOutcome.originalStagedEditId ?? edit.id,
-            conflictDetail: conflictOutcome.conflictDetail,
-            replacementRequested: false,
-            attempts: conflictOutcome.attempts ?? edit.replacementAttempt,
-          };
+            revision: edit.appliedRevision ?? 0,
+            content: this.automerge.get().getContent(),
+          },
+        };
+      }
+      if (edit.status !== 'pending') {
+        throw new EditNotPendingError(`Staged edit is not pending: ${editId} (status: ${edit.status})`);
+      }
 
-    return { response, conflictMessage: conflictOutcome.message };
+      const currentText = this.automerge.get().getContent();
+      const result = reconcile(edit.operations, currentText);
+
+      if (result.outcome === 'clean') {
+        return { response: this.applyClean(edit, result.patches) };
+      }
+
+      const conflictOutcome = this.conflictService.recordConflict(edit, result.detail);
+      if (conflictOutcome.replacementRequested && requestViaNewTurn) {
+        const conversation = this.storage.getConversation(edit.conversationId);
+        if (conversation) this.requestReplacement(conversation, conflictOutcome.message);
+      }
+
+      const response: ApplyEditResponse =
+        conflictOutcome.outcome === 'conflict'
+          ? {
+              outcome: 'conflict',
+              stagedEditId: edit.id,
+              supersededEditId: edit.id,
+              conflictDetail: conflictOutcome.conflictDetail,
+              replacementRequested: conflictOutcome.replacementRequested,
+              replacementAttempt: conflictOutcome.replacementAttempt,
+              attemptsRemaining: conflictOutcome.attemptsRemaining,
+            }
+          : {
+              outcome: 'conflict_exhausted',
+              stagedEditId: edit.id,
+              supersededEditId: edit.id,
+              originalStagedEditId: conflictOutcome.originalStagedEditId ?? edit.id,
+              conflictDetail: conflictOutcome.conflictDetail,
+              replacementRequested: false,
+              attempts: conflictOutcome.attempts ?? edit.replacementAttempt,
+            };
+
+      return { response, conflictMessage: conflictOutcome.message };
+    });
   }
 
   drop(editId: string): StagedEditRow {
@@ -305,50 +326,62 @@ export class EditService {
     return previewStagedEdit(edit, this.automerge.get().getContent());
   }
 
+  /**
+   * FIX 3: `updateStagedEdit` → `updateConversation` → the Automerge splice (which itself writes
+   * a `document_change` row) → `revisionService.createRevision` (its own `revision` +
+   * `document.current_revision` writes) is wrapped as one atomic transaction — previously a
+   * mid-sequence crash could leave a staged edit marked `applied` with no corresponding revision
+   * row, desyncing `document.current_revision` from the actual latest `revision` row. Nests
+   * correctly inside `apply()`'s `PrimaryMutex` lock and inside `createRevision`'s own (redundant
+   * but harmless) `storage.transaction()` call.
+   */
   private applyClean(edit: StagedEditRow, patches: { from: number; to: number; insert: string }[]): ApplyEditResponse {
     const document = this.storage.getDocument();
     if (!document) throw new Error('Document not found');
     const conversation = this.storage.getConversation(edit.conversationId);
     const predictedRevision = document.currentRevision + 1;
 
-    this.automerge.get().splice(patches);
+    const revisionRow = this.storage.transaction(() => {
+      this.automerge.get().splice(patches);
 
-    const resolvedAt = new Date().toISOString();
-    this.storage.updateStagedEdit(edit.id, { status: 'applied', appliedRevision: predictedRevision, resolvedAt });
+      const resolvedAt = new Date().toISOString();
+      this.storage.updateStagedEdit(edit.id, { status: 'applied', appliedRevision: predictedRevision, resolvedAt });
 
-    // FR-016: applying (or auto-applying) its own proposed edit updates this conversation's own
-    // context revision immediately to match — done *before* `revisionService.createRevision`
-    // below so that call's `conversation_stale` notification (document-service.ts
-    // `notifyRevisionCreated`) never sees this conversation as "one behind" a revision it caused
-    // itself.
-    this.storage.updateConversation(edit.conversationId, { contextRevision: predictedRevision });
+      // FR-016: applying (or auto-applying) its own proposed edit updates this conversation's own
+      // context revision immediately to match — done *before* `revisionService.createRevision`
+      // below so that call's `conversation_stale` notification (document-service.ts
+      // `notifyRevisionCreated`) never sees this conversation as "one behind" a revision it caused
+      // itself.
+      this.storage.updateConversation(edit.conversationId, { contextRevision: predictedRevision });
 
-    // Ordering guarantee #4 (websocket-events.md): staged_edit_applied precedes both
-    // document_content_changed and revision_created.
-    this.publish(edit.documentId, edit.conversationId, 'staged_edit_applied', {
-      stagedEditId: edit.id,
-      revision: predictedRevision,
-      autoApplied: edit.autoApplied,
+      // Ordering guarantee #4 (websocket-events.md): staged_edit_applied precedes both
+      // document_content_changed and revision_created.
+      this.publish(edit.documentId, edit.conversationId, 'staged_edit_applied', {
+        stagedEditId: edit.id,
+        revision: predictedRevision,
+        autoApplied: edit.autoApplied,
+      });
+
+      const content = this.automerge.get().getContent();
+      const contentHash = createHash('sha256').update(content).digest('hex');
+      this.publish(edit.documentId, null, 'document_content_changed', {
+        changes: patches,
+        currentRevision: document.currentRevision,
+        originConversationId: edit.conversationId,
+        contentHash,
+      });
+
+      return this.revisionService.createRevision(edit.documentId, {
+        source: 'agent',
+        origin: 'agent_edit',
+        conversationId: edit.conversationId,
+        stagedEditId: edit.id,
+        note: `Applied edit from "${conversation?.name ?? edit.conversationId}"`,
+        autoApplied: edit.autoApplied,
+      });
     });
 
     const content = this.automerge.get().getContent();
-    const contentHash = createHash('sha256').update(content).digest('hex');
-    this.publish(edit.documentId, null, 'document_content_changed', {
-      changes: patches,
-      currentRevision: document.currentRevision,
-      originConversationId: edit.conversationId,
-      contentHash,
-    });
-
-    const revisionRow = this.revisionService.createRevision(edit.documentId, {
-      source: 'agent',
-      origin: 'agent_edit',
-      conversationId: edit.conversationId,
-      stagedEditId: edit.id,
-      note: `Applied edit from "${conversation?.name ?? edit.conversationId}"`,
-      autoApplied: edit.autoApplied,
-    });
-
     return { outcome: 'applied', stagedEditId: edit.id, revision: revisionRow.revision, content };
   }
 

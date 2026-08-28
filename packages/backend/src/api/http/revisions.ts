@@ -4,9 +4,9 @@ import type { RevisionService } from '../../document/revision-service.ts';
 import type { RevisionRow, StorageAdapter } from '../../storage/storage-adapter.ts';
 import { sendError } from './errors.ts';
 
-function toRevisionDto(storage: StorageAdapter, row: RevisionRow) {
+function toRevisionDto(row: RevisionRow, conversationNamesById: Map<string, string>) {
   const conversationName = row.conversationId
-    ? (storage.getConversation(row.conversationId)?.name ?? null)
+    ? (conversationNamesById.get(row.conversationId) ?? null)
     : null;
   return {
     revision: row.revision,
@@ -38,8 +38,16 @@ export function registerRevisionRoutes(
       return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
     }
     const page = storage.listRevisions(doc.id, parsed.data);
+    // Batch-resolve conversation names in one query instead of one lookup per revision row
+    // (up to `limit` extra synchronous SQLite calls per page otherwise).
+    const conversationIds = [
+      ...new Set(page.items.map((r) => r.conversationId).filter((id): id is string => id !== null)),
+    ];
+    const conversationNamesById = new Map(
+      storage.getConversationsByIds(conversationIds).map((c) => [c.id, c.name]),
+    );
     return reply.send({
-      revisions: page.items.map((r) => toRevisionDto(storage, r)),
+      revisions: page.items.map((r) => toRevisionDto(r, conversationNamesById)),
       nextCursor: page.nextCursor,
     });
   });

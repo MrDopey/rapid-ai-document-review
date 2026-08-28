@@ -15,6 +15,8 @@ const DEFAULTS: UserSettingsDto = {
   maxEditingDepth: 2,
   maxConversationDepth: 3,
   maxReplacementAttempts: 2,
+  // Matches the backend's own default (packages/backend/src/storage/sqlite/migrations.ts).
+  softWordCountThreshold: 20_000,
 };
 
 /** `user_settings` singleton (data-model.md §8) — limits and the reasoning-visibility toggle. */
@@ -38,7 +40,13 @@ export const useSettingsStore = defineStore('settings', {
     handleServerFrame(frame: ServerFrame): void {
       if (frame.kind !== 'event') return;
       if (frame.frame.type === 'settings_changed') {
-        this.settings = { ...frame.frame.data };
+        // The `settings_changed` WS event's payload predates `softWordCountThreshold` (shared
+        // contracts/events.ts) and doesn't carry it — preserve whatever value is already known
+        // (falling back to the same default used elsewhere in this store) rather than dropping it.
+        this.settings = {
+          ...frame.frame.data,
+          softWordCountThreshold: this.settings?.softWordCountThreshold ?? DEFAULTS.softWordCountThreshold,
+        };
       }
     },
   },

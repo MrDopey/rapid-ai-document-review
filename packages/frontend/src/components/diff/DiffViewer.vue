@@ -43,27 +43,30 @@ const wordDiffs = computed(() =>
 <template>
   <div ref="rootEl" class="diff-viewer" role="dialog" aria-label="Review proposed edit" aria-modal="true">
     <header class="diff-header">
-      <div class="view-toggle" role="tablist" aria-label="Diff view">
-        <button
-          id="diff-tab-hunks"
-          type="button"
-          role="tab"
-          :aria-selected="view === 'hunks'"
-          aria-controls="diff-panel-hunks"
-          @click="view = 'hunks'"
-        >
-          Added / removed
-        </button>
-        <button
-          id="diff-tab-full"
-          type="button"
-          role="tab"
-          :aria-selected="view === 'full'"
-          aria-controls="diff-panel-full"
-          @click="view = 'full'"
-        >
-          Full document
-        </button>
+      <div class="diff-header-left">
+        <span class="pane-eyebrow">Proposed edit</span>
+        <div class="view-toggle" role="tablist" aria-label="Diff view">
+          <button
+            id="diff-tab-hunks"
+            type="button"
+            role="tab"
+            :aria-selected="view === 'hunks'"
+            aria-controls="diff-panel-hunks"
+            @click="view = 'hunks'"
+          >
+            Added / removed
+          </button>
+          <button
+            id="diff-tab-full"
+            type="button"
+            role="tab"
+            :aria-selected="view === 'full'"
+            aria-controls="diff-panel-full"
+            @click="view = 'full'"
+          >
+            Full document
+          </button>
+        </div>
       </div>
       <button type="button" class="close-button" @click="emit('close')">Close</button>
     </header>
@@ -144,7 +147,26 @@ const wordDiffs = computed(() =>
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  gap: 0.5rem;
+  margin: -1rem -1rem 0.75rem;
+  padding: 0.5rem 1rem;
+  /* Fix 2: a distinct header surface, consistent with the other panes' toolbars. */
+  background: var(--panel-bg, #f7f7f8);
+  border-bottom: 2px solid var(--border-color, #ddd);
+  border-radius: 8px 8px 0 0;
+}
+.diff-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.pane-eyebrow {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
 }
 .view-toggle button[aria-selected='true'] {
   font-weight: 600;

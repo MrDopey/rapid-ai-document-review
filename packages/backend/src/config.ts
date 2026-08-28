@@ -17,7 +17,15 @@ function readEnv(name: string, fallback?: string): string {
   return value;
 }
 
-const host = readEnv('HOST', '0.0.0.0');
+/**
+ * FR-044: loopback is the default and documented access-control model. An operator MAY explicitly
+ * set `HOST` to something else (e.g. a containerized dev environment reached via port-forwarding),
+ * but the default here MUST stay loopback so a plain `npm run dev`/`npm start` is never silently
+ * wide-open; `logging.ts#warnIfHostOverridden` logs a visible warning whenever it is not.
+ */
+export const DEFAULT_HOST = '127.0.0.1';
+
+const host = readEnv('HOST', DEFAULT_HOST);
 
 export const config: Config = {
   port: Number(readEnv('PORT', '3000')),

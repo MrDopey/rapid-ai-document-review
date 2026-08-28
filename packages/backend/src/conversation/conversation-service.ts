@@ -16,6 +16,7 @@ import { logger } from '../logging.ts';
 import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
+import { EventPublisher } from '../events/event-publisher.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
 import { EventBridge } from '../pi/event-bridge.ts';
 import type { PiService } from '../pi/pi-service.ts';
@@ -88,6 +89,7 @@ export class ConversationService {
   private readonly concurrencyLimiter: ConcurrencyLimiter;
   private readonly automerge: AutomergeStoreHolder;
   private readonly primaryService: PrimaryService;
+  private readonly publisher: EventPublisher;
 
   constructor(
     storage: StorageAdapter,
@@ -107,6 +109,7 @@ export class ConversationService {
     this.concurrencyLimiter = concurrencyLimiter;
     this.automerge = automerge;
     this.primaryService = primaryService;
+    this.publisher = new EventPublisher(eventService, eventHub);
   }
 
   /** Idempotent: creates the Main conversation for `documentId` only if one doesn't exist yet. */
@@ -327,6 +330,15 @@ export class ConversationService {
       this.primaryService.closeClears(conversationId);
     }
 
+    if (!(willFold && parent)) {
+      // FIX 5: nothing further will ever call `getOrCreateSession` for this now-closed
+      // conversation (no fold summary is pending), so its cached Pi session can be evicted right
+      // away instead of sitting in `PiService.sessions` for the rest of the process's lifetime.
+      // When a fold *is* pending, `foldSummaryIntoParent` below evicts it once that flow — the
+      // only remaining reader of this conversation's own session — has finished with it.
+      this.piService.evictSession(conversationId);
+    }
+
     if (willFold && parent) {
       // Fire-and-forget (research R1, FR-034): asking Pi for the synopsis half of the fold
       // summary is a genuine model call and must never block this HTTP response — `close()`
@@ -389,6 +401,11 @@ export class ConversationService {
         'Pi failed to generate a fold summary synopsis; parent continues without a folded summary',
       );
       return;
+    } finally {
+      // FIX 5: `generateFoldSynopsis` above was this closed conversation's own last use of
+      // `getOrCreateSession` (`deliverFoldSummary` below only ever touches the *parent*'s
+      // session) — safe to evict now regardless of whether the synopsis call succeeded.
+      this.piService.evictSession(conversation.id);
     }
 
     const summary = `${synopsis.trim()}\n\n${facts}`;
@@ -719,30 +736,14 @@ export class ConversationService {
   }
 
   private publish(documentId: string, conversationId: string | null, type: string, data: unknown): void {
-    const persisted = this.eventService.append(documentId, conversationId, type, data);
-    this.eventHub.broadcast(documentId, {
-      type,
-      sequence: persisted.sequence,
-      documentId,
-      conversationId,
-      at: persisted.createdAt,
-      data,
-    } as unknown as Parameters<EventHub['broadcast']>[1]);
+    this.publisher.publish(documentId, conversationId, type, data);
   }
 
   private publishUserMessage(documentId: string, conversationId: string, text: string): void {
     const data: UserMessageEventData = { messageId: newId('msg'), role: 'user', text, reasoning: null };
-    const row = this.eventService.append(documentId, conversationId, 'message_completed', data);
-    this.eventHub.broadcast(documentId, {
-      type: 'message_completed',
-      sequence: row.sequence,
-      documentId,
-      conversationId,
-      at: row.createdAt,
-      data,
-    });
-    // No separate log here: `eventService.append` above already emits the compliant
-    // `{ event: 'message_completed', documentId, conversationId, sequence }` record (FR-042) —
-    // a second one under a name outside the closed vocabulary would be pure duplication.
+    // No separate log here: `EventPublisher.publish` -> `eventService.append` already emits the
+    // compliant `{ event: 'message_completed', documentId, conversationId, sequence }` record
+    // (FR-042) — a second one under a name outside the closed vocabulary would be pure duplication.
+    this.publisher.publish(documentId, conversationId, 'message_completed', data);
   }
 }

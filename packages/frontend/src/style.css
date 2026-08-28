@@ -1,5 +1,9 @@
 :root {
   --border-color: #ccc;
+  /* Distinct panel surfaces so adjacent regions (HUD, transcript, editor, preview, history) read
+     as physically separate zones rather than blending into one continuous background. */
+  --panel-bg: #f7f7f8;
+  --panel-bg-alt: #eef0f3;
   color-scheme: light dark;
 }
 

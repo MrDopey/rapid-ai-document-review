@@ -36,14 +36,41 @@ watch(
 </script>
 
 <template>
-  <!-- A plain <div>'s implicit "generic" role does not support an author-supplied name — role="region"
-       makes this a genuine labelled landmark so `aria-label` is actually exposed to assistive tech. -->
-  <div ref="hostRef" class="preview-pane" role="region" aria-label="Rendered document preview" v-html="safeHtml"></div>
+  <div class="preview-container">
+    <div class="preview-toolbar">
+      <span class="pane-eyebrow">Preview</span>
+    </div>
+    <!-- A plain <div>'s implicit "generic" role does not support an author-supplied name — role="region"
+         makes this a genuine labelled landmark so `aria-label` is actually exposed to assistive tech. -->
+    <div ref="hostRef" class="preview-pane" role="region" aria-label="Rendered document preview" v-html="safeHtml"></div>
+  </div>
 </template>
 
 <style scoped>
-.preview-pane {
+.preview-container {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 2px solid var(--border-color, #ddd);
+  /* Fix 2/6: same distinct-surface + visible-label treatment as Editor/HUD/transcript. */
+  background: var(--panel-bg, #f7f7f8);
+}
+.pane-eyebrow {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+.preview-pane {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 1rem;
   text-align: left;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useConversationsStore } from '../../stores/conversations.js';
+import { useConversationsStore, type ConversationMessageState } from '../../stores/conversations.js';
 import { ApiError } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import MessageBubble from './MessageBubble.vue';
@@ -30,8 +30,41 @@ useFocusTrap(closeDialogEl, closeDialogOpen, { onEscape: () => cancelCloseDialog
 const reviewing = ref(false);
 const reviewError = ref<string | null>(null);
 
+// FR-007a: a small, unobtrusive, dismiss-once hint pointing at the proposal-based editing path —
+// stored globally (not per-conversation) so dismissing it once keeps it out of the way everywhere.
+const DIRECT_EDIT_HINT_KEY = 'raidr:directEditHintDismissed';
+const directEditHintDismissed = ref(localStorage.getItem(DIRECT_EDIT_HINT_KEY) === '1');
+function dismissDirectEditHint(): void {
+  directEditHintDismissed.value = true;
+  localStorage.setItem(DIRECT_EDIT_HINT_KEY, '1');
+}
+
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+
+// FR-007c: the auto-generated branch-seed message (ConversationService's `branch()`) is sent
+// through the ordinary user-message path — its role is genuinely 'user' (relied on by
+// `.message-bubble[data-role="user"]` elsewhere, e.g. tests/e2e/us3.spec.ts) — so this is a
+// display-only heuristic that recognizes it by its fixed template and position rather than a
+// dedicated flag, and renders it as a distinct context card instead of a normal "You" bubble.
+const BRANCH_SEED_PREFIXES = [
+  'Here is the passage this conversation was branched from',
+  'This conversation was branched from "',
+];
+function isSeedMessage(message: ConversationMessageState, index: number): boolean {
+  return (
+    index === 0 &&
+    message.role === 'user' &&
+    conversation.value?.kind === 'branch' &&
+    BRANCH_SEED_PREFIXES.some((prefix) => message.text.startsWith(prefix))
+  );
+}
+
+/** FR-007h: "1 pending proposal" vs "N pending proposals" — used both for the upfront
+ *  close-dialog notice and the post-failure error banner. */
+function pendingProposalPhrase(count: number): string {
+  return `${count} pending proposal${count === 1 ? '' : 's'}`;
+}
 /** FR-034: set once a fold summary has actually been delivered into this conversation (as the
  *  parent of a conversation that closed with "Fold summary" enabled) — see conversations.ts's
  *  `conversation_summary_folded` handler. */
@@ -125,7 +158,12 @@ async function confirmClose(): Promise<void> {
     // the user needs to resolve it.
     closeDialogOpen.value = false;
     if (err instanceof ApiError && err.code === 'PENDING_EDITS_BLOCK_CLOSE') {
-      closeError.value = err.message;
+      // FR-007h: build our own properly-pluralized message from `details.pendingEditIds` rather
+      // than surfacing the backend's raw "N proposal(s)" string verbatim.
+      const ids = err.details?.pendingEditIds;
+      closeError.value = Array.isArray(ids)
+        ? `Cannot close: ${pendingProposalPhrase(ids.length)} must be resolved first.`
+        : err.message;
     } else {
       closeError.value = err instanceof Error ? err.message : 'Failed to close conversation.';
     }
@@ -153,8 +191,13 @@ async function onRequestReview(): Promise<void> {
 <template>
   <section class="conversation-view" aria-label="Conversation">
     <header class="conversation-header">
-      <h2>{{ conversation?.name ?? 'Conversation' }}</h2>
-      <span v-if="conversation" class="badge" :data-status="conversation.status">{{ conversation.status }}</span>
+      <div class="header-titles">
+        <span class="pane-eyebrow">Conversation</span>
+        <h2>{{ conversation?.name ?? 'Conversation' }}</h2>
+      </div>
+      <span v-if="conversation" class="badge status-badge" :data-status="conversation.status">{{
+        conversation.status
+      }}</span>
       <button
         v-if="conversation && conversation.kind !== 'main' && conversation.status !== 'closed'"
         type="button"
@@ -191,7 +234,12 @@ async function onRequestReview(): Promise<void> {
     </div>
 
     <div ref="listRef" class="message-list" role="log" aria-live="polite" aria-relevant="additions">
-      <MessageBubble v-for="msg in messages" :key="msg.id" :message="msg" />
+      <MessageBubble
+        v-for="(msg, index) in messages"
+        :key="msg.id"
+        :message="msg"
+        :seed="isSeedMessage(msg, index)"
+      />
     </div>
 
     <div v-if="conversation?.status === 'errored'" class="error-banner" role="alert">
@@ -200,6 +248,16 @@ async function onRequestReview(): Promise<void> {
     </div>
 
     <EditsList :conversation-id="conversationId" />
+
+    <div v-if="!directEditHintDismissed" class="composer-hint">
+      <span>
+        Tip: highlight text in the document and click "Start conversation from selection" to get a
+        reviewable edit proposal instead of a direct answer.
+      </span>
+      <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
+        Got it
+      </button>
+    </div>
 
     <form class="composer" @submit.prevent="onSend">
       <label class="visually-hidden" :for="`composer-${conversationId}`">Message {{ conversation?.name }}</label>
@@ -210,11 +268,19 @@ async function onRequestReview(): Promise<void> {
         placeholder="Ask about the document…"
         @keydown="onComposerKeydown"
       ></textarea>
-      <button type="submit" :disabled="!draft.trim() || sending || conversation?.status === 'closed'">Send</button>
+      <button
+        type="submit"
+        title="Send this message as a direct question or instruction to the conversation."
+        :disabled="!draft.trim() || sending || conversation?.status === 'closed' || conversation?.status === 'working'"
+      >
+        {{ conversation?.status === 'working' ? 'Sending…' : 'Send' }}
+      </button>
       <button
         type="button"
-        title="Refresh context to the latest document revision, then send (Ctrl+Enter)"
-        :disabled="!draft.trim() || sending || conversation?.status === 'closed'"
+        class="refresh-send-button"
+        :class="{ emphasized: conversation?.isStale }"
+        title="Refresh this conversation's context to the latest document revision, then send — use this when the document has changed since this conversation last saw it (Ctrl+Enter)."
+        :disabled="!draft.trim() || sending || conversation?.status === 'closed' || conversation?.status === 'working'"
         @click="onRefreshSend"
       >
         Refresh + Send
@@ -224,6 +290,10 @@ async function onRequestReview(): Promise<void> {
     <div v-if="closeDialogOpen" class="close-dialog-overlay">
       <div ref="closeDialogEl" class="close-dialog" role="alertdialog" aria-modal="true" aria-label="Close conversation">
         <p>Close "{{ conversation?.name }}"? This cannot be undone.</p>
+        <p v-if="conversation && conversation.pendingEditCount > 0" class="pending-warning" role="alert">
+          This conversation has {{ pendingProposalPhrase(conversation.pendingEditCount) }}; resolve
+          {{ conversation.pendingEditCount === 1 ? 'it' : 'them' }} before closing.
+        </p>
         <label class="fold-summary-option">
           <input v-model="foldSummaryIntoParent" type="checkbox" />
           Fold a compact summary into the parent conversation
@@ -249,7 +319,22 @@ async function onRequestReview(): Promise<void> {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border-color, #ddd);
+  border-bottom: 2px solid var(--border-color, #ddd);
+  /* Fix 2: a surface distinct from the HUD above it and the transcript below it. */
+  background: var(--panel-bg-alt, #eef0f3);
+}
+.header-titles {
+  display: flex;
+  flex-direction: column;
+  margin-right: auto;
+  min-width: 0;
+}
+.pane-eyebrow {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
 }
 .conversation-header h2 {
   margin: 0;
@@ -260,6 +345,18 @@ async function onRequestReview(): Promise<void> {
   padding: 0 0.35rem;
   font-size: 0.7rem;
   border: 1px solid currentColor;
+}
+.status-badge[data-status='idle'] {
+  color: #4b5563;
+}
+.status-badge[data-status='working'] {
+  color: #1d4ed8;
+}
+.status-badge[data-status='errored'] {
+  color: #b91c1c;
+}
+.status-badge[data-status='closed'] {
+  color: #374151;
 }
 .message-list {
   flex: 1;
@@ -285,6 +382,34 @@ async function onRequestReview(): Promise<void> {
   flex: 1;
   resize: vertical;
   min-height: 2.5rem;
+}
+.composer-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-top: 1px solid #bfdbfe;
+  font-size: 0.75rem;
+}
+.dismiss-notice-button {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+}
+.refresh-send-button.emphasized {
+  font-weight: 700;
+  border-color: #b45309;
+  color: #b45309;
+}
+.pending-warning {
+  padding: 0.4rem 0.6rem;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 4px;
+  font-size: 0.85rem;
 }
 .visually-hidden {
   position: absolute;

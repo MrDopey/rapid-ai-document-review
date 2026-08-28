@@ -47,6 +47,14 @@ export class ConcurrencyLimiter {
   /**
    * Starts `run` immediately if under the limit, else FIFO-queues it and emits `agent_queued`.
    * Cancellation is not supported in v1 — once submitted, a queued prompt always eventually runs.
+   *
+   * FIX 2: a conversation already admitted (its own turn still in flight) is never admitted a
+   * second time, regardless of how much headroom is left under `max_concurrent_agents` — it is
+   * queued instead, same as any other over-the-limit submission. Without this, a fast overlapping
+   * second `send()` on the same conversation would reach `session.prompt()` while the first turn
+   * was still streaming, which throws synchronously ("already streaming") and flips the
+   * conversation to `errored` via the event bridge — a confusing failure mode for what is really
+   * just a double-send, not a genuine agent error.
    */
   acquire(
     documentId: string,
@@ -58,7 +66,7 @@ export class ConcurrencyLimiter {
     const limit = this.storage.getSettings().maxConcurrentAgents;
     const runningSet = this.runningSetFor(documentId);
 
-    if (runningSet.size < limit) {
+    if (runningSet.size < limit && !runningSet.has(conversationId)) {
       runningSet.add(conversationId);
       const immediateRun = run();
       immediateRun.catch(() => {

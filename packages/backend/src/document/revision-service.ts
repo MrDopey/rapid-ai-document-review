@@ -92,44 +92,51 @@ export class RevisionService {
     const heads = JSON.stringify(store.getHeads());
     const createdAt = new Date().toISOString();
 
-    const row = this.storage.createRevision({
-      documentId,
-      revision: revisionNumber,
-      source: options.source,
-      origin: options.origin,
-      conversationId: options.conversationId ?? null,
-      stagedEditId: options.stagedEditId ?? null,
-      restoredFrom: options.restoredFrom ?? null,
-      note: options.note ?? null,
-      autoApplied: options.autoApplied ?? false,
-      heads,
-      createdAt,
-    });
+    // FIX 3: `createRevision` + `updateDocumentRevision` (+ an occasional snapshot write) is
+    // wrapped as one atomic sequence — without this, a crash between the two left
+    // `document.current_revision` desynced from the actual latest `revision` row. Composes
+    // correctly with a caller (e.g. EditService.applyClean) that wraps its own broader write
+    // sequence in `storage.transaction()` too: nested calls just join the outer transaction.
+    return this.storage.transaction(() => {
+      const row = this.storage.createRevision({
+        documentId,
+        revision: revisionNumber,
+        source: options.source,
+        origin: options.origin,
+        conversationId: options.conversationId ?? null,
+        stagedEditId: options.stagedEditId ?? null,
+        restoredFrom: options.restoredFrom ?? null,
+        note: options.note ?? null,
+        autoApplied: options.autoApplied ?? false,
+        heads,
+        createdAt,
+      });
 
-    this.storage.updateDocumentRevision(documentId, revisionNumber, createdAt);
-    if (store.shouldSnapshot()) {
-      store.snapshot(revisionNumber);
-    }
+      this.storage.updateDocumentRevision(documentId, revisionNumber, createdAt);
+      if (store.shouldSnapshot()) {
+        store.snapshot(revisionNumber);
+      }
 
-    this.publish(documentId, {
-      type: 'revision_created',
-      sequence: null,
-      documentId,
-      conversationId: row.conversationId,
-      at: createdAt,
-      data: {
-        revision: row.revision,
-        source: row.source,
-        origin: row.origin,
+      this.publish(documentId, {
+        type: 'revision_created',
+        sequence: null,
+        documentId,
         conversationId: row.conversationId,
-        note: row.note,
-        restoredFrom: row.restoredFrom,
-      },
+        at: createdAt,
+        data: {
+          revision: row.revision,
+          source: row.source,
+          origin: row.origin,
+          conversationId: row.conversationId,
+          note: row.note,
+          restoredFrom: row.restoredFrom,
+        },
+      });
+
+      this.documentService?.notifyRevisionCreated(documentId, row.revision);
+
+      return row;
     });
-
-    this.documentService?.notifyRevisionCreated(documentId, row.revision);
-
-    return row;
   }
 
   restore(documentId: string, revisionNumber: number): RestoreResult {

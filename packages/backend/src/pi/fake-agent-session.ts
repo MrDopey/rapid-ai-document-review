@@ -79,6 +79,41 @@ function parseErrorDirective(text: string): { message?: string } | null {
 }
 
 /**
+ * A message beginning with this prefix causes the fake session to simulate a stuck tool
+ * call/turn: `runScript` never resolves on its own for it. Exists to exercise FIX 1 (a
+ * previously-observed real bug: a hung tool call left `streaming` stuck `true` forever, since
+ * `prompt()` fire-and-forgot `runScript()` with no `.catch` and no timeout, permanently failing
+ * every subsequent send/retry on that conversation with "already streaming"). Only the bounded
+ * timeout in `runTurn` below can settle a turn started with this directive — it always resolves
+ * as `agent_error`, never `agent_settled`.
+ */
+export const HANG_DIRECTIVE = '__HANG__';
+
+function isHangDirective(text: string): boolean {
+  return text.startsWith(HANG_DIRECTIVE);
+}
+
+/** Default bound on how long one fake turn may run before it is force-settled as `agent_error`
+ *  (FIX 1b). Overridable via `PI_FAKE_TURN_TIMEOUT_MS` so tests exercising the hang path don't
+ *  have to wait out a production-sized timeout.
+ *
+ *  Must stay comfortably above the slowest *legitimate* scripted turn any e2e spec drives through
+ *  this session: a plain answer's wall-clock time scales with the echoed user text (`runPlainAnswer`
+ *  chunks it 6 chars per `message_update`, 5ms apart), and us5.spec.ts's "act while active" step
+ *  deliberately sends a ~6000-char message to stay streaming across two test steps — which alone
+ *  takes ~5s to legitimately finish. 5000ms left virtually no margin, so that turn regularly lost
+ *  the race against this very timeout and was force-settled as `agent_error` before it ever
+ *  completed (never a real hang) — this is a fixture-timing constant, not a correctness guard, so
+ *  raising it does not weaken FIX 1b: a genuinely stuck turn (`HANG_DIRECTIVE`) still force-settles,
+ *  just after a longer wait. */
+const DEFAULT_TURN_TIMEOUT_MS = 30_000;
+
+function resolveTurnTimeoutMs(): number {
+  const override = Number(process.env.PI_FAKE_TURN_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : DEFAULT_TURN_TIMEOUT_MS;
+}
+
+/**
  * A deterministic, credential-free stand-in for a real Pi `AgentSession`, used only when
  * `PI_FAKE_SESSIONS=1` (config.ts). Exists so `npm run test:e2e -- --grep "US2"` can exercise the
  * real send → ConcurrencyLimiter → PiService → EventBridge → EventHub → WS → UI path end to end
@@ -100,10 +135,12 @@ export class FakeAgentSession implements AgentSessionLike {
    * very next plain answer so an e2e test can assert the delivered content deterministically,
    * without a real model in the loop. */
   private readonly pendingCustomMessages: string[] = [];
+  private readonly turnTimeoutMs: number;
 
-  constructor(sessionFile?: string, tools: RegisteredToolLike[] = []) {
+  constructor(sessionFile?: string, tools: RegisteredToolLike[] = [], turnTimeoutMs?: number) {
     this.sessionFile = sessionFile;
     this.tools = tools;
+    this.turnTimeoutMs = turnTimeoutMs ?? resolveTurnTimeoutMs();
   }
 
   get isStreaming(): boolean {
@@ -147,19 +184,64 @@ export class FakeAgentSession implements AgentSessionLike {
     }
     this.streaming = true;
     this.emit({ type: 'agent_start' });
-    void this.runScript(text);
+    // Fire-and-forget, deliberately: real `AgentSession.prompt()` resolves once the turn is
+    // *submitted*, not once it settles — the caller (PiService.send) learns the outcome later via
+    // the subscribed event stream. `runTurn` (not `runScript` directly) is what guarantees this
+    // never leaves `streaming` stuck `true` no matter how the turn ends (FIX 1a/1b).
+    void this.runTurn(text);
   }
 
   private emit(event: AgentSessionEventLike): void {
     for (const listener of this.listeners) listener(event);
   }
 
+  /**
+   * Runs one scripted turn to completion, guaranteeing `streaming` resets to `false` and exactly
+   * one of `agent_settled`/`agent_error` fires — regardless of whether `runScript` resolves
+   * normally, throws (e.g. `ERROR_DIRECTIVE`), or never resolves at all (`HANG_DIRECTIVE`, or any
+   * unexpected real-world hang inside a scripted tool call). Previously `prompt()` called
+   * `runScript()` via a bare `void` with no `.catch` and no timeout, so a hang or an unhandled
+   * throw left `streaming` permanently `true` — every later send/retry on the conversation then
+   * failed immediately with "already streaming", with no way to recover (FIX 1).
+   */
+  private async runTurn(userText: string): Promise<void> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timed_out'>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve('timed_out'), this.turnTimeoutMs);
+      timeoutHandle.unref?.();
+    });
+
+    try {
+      const outcome = await Promise.race([this.runScript(userText).then(() => 'done' as const), timedOut]);
+      if (outcome === 'timed_out') {
+        this.emit({
+          type: 'agent_error',
+          message: `Agent turn timed out after ${this.turnTimeoutMs}ms (stuck tool call or unresponsive script).`,
+        });
+        return;
+      }
+      this.emit({ type: 'agent_end', willRetry: false });
+      this.emit({ type: 'agent_settled' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({ type: 'agent_error', message });
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      this.streaming = false;
+    }
+  }
+
   private async runScript(userText: string): Promise<void> {
     const errorDirective = parseErrorDirective(userText);
     if (errorDirective) {
       await sleep(20);
-      this.streaming = false;
-      this.emit({ type: 'agent_error', message: errorDirective.message ?? 'Simulated agent failure (test directive).' });
+      throw new Error(errorDirective.message ?? 'Simulated agent failure (test directive).');
+    }
+
+    if (isHangDirective(userText)) {
+      // Simulates a stuck tool call: this deliberately never resolves — only `runTurn`'s own
+      // timeout above can settle a turn started with it.
+      await new Promise<void>(() => {});
       return;
     }
 
@@ -172,10 +254,6 @@ export class FakeAgentSession implements AgentSessionLike {
     } else {
       await this.runPlainAnswer(userText);
     }
-
-    this.streaming = false;
-    this.emit({ type: 'agent_end', willRetry: false });
-    this.emit({ type: 'agent_settled' });
   }
 
   private async runPlainAnswer(userText: string): Promise<string> {

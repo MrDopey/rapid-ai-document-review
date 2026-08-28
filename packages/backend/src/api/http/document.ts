@@ -44,7 +44,7 @@ export function registerDocumentRoutes(
       return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
     }
     try {
-      const result = documentService.applyChanges(
+      const result = await documentService.applyChanges(
         parsed.data.baseRevision,
         parsed.data.changes,
         parsed.data.title,

@@ -65,11 +65,11 @@ function buildLiveHarness(): LiveHarness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const revisionService = new RevisionService(storage, eventService, eventHub, automerge);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService);
+  const primaryMutex = new PrimaryMutex();
+  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
-  const primaryMutex = new PrimaryMutex();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
@@ -83,6 +83,7 @@ function buildLiveHarness(): LiveHarness {
     piService,
     concurrencyLimiter,
     runBuffer,
+    primaryMutex,
   );
   piService.setEditService(editService);
 

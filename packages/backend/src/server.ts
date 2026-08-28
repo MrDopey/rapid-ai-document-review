@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import { config } from './config.ts';
-import { logger } from './logging.ts';
+import { logger, warnIfHostOverridden } from './logging.ts';
 import { SqliteStorageAdapter } from './storage/sqlite/index.ts';
 import { EventService } from './events/event-service.ts';
 import { EventHub, type DocumentSnapshot } from './events/event-hub.ts';
@@ -64,12 +64,18 @@ export function buildApp() {
   const eventHub = new EventHub(eventService, getSnapshot);
   const automergeHolder = new AutomergeStoreHolder();
   const revisionService = new RevisionService(storage, eventService, eventHub, automergeHolder);
+  // Constructed ahead of DocumentService/EditService (moved up from further below) since both now
+  // depend on it too (FIX 4): PrimaryMutex has generalized from just guarding
+  // `propose_document_edit`/Primary-designation switches into the one per-document write lock
+  // every document-mutating path serializes against (see primary-mutex.ts).
+  const primaryMutex = new PrimaryMutex();
   const documentService = new DocumentService(
     storage,
     eventService,
     eventHub,
     automergeHolder,
     revisionService,
+    primaryMutex,
   );
 
   // Breaks the DocumentService <-> RevisionService construction cycle (see revision-service.ts):
@@ -82,7 +88,6 @@ export function buildApp() {
   documentService.loadIfExists();
 
   const runBuffer = new RunBuffer();
-  const primaryMutex = new PrimaryMutex();
   const piService = new PiService(storage, automergeHolder, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
 
@@ -103,6 +108,7 @@ export function buildApp() {
     piService,
     concurrencyLimiter,
     runBuffer,
+    primaryMutex,
   );
   piService.setEditService(editService);
 
@@ -151,6 +157,7 @@ export function buildApp() {
 
 async function main() {
   const { app } = buildApp();
+  warnIfHostOverridden();
   try {
     await app.listen({ port: config.port, host: config.host });
   } catch (err) {

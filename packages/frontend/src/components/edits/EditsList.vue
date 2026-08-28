@@ -54,6 +54,7 @@ function closePreview(): void {
 
 <template>
   <section class="edits-list" aria-label="Proposed edits">
+    <span class="pane-eyebrow">Proposed edits</span>
     <div v-if="exhausted" class="exhausted-banner" role="alert">
       The agent could not produce an edit that applies to the current document after several
       attempts. The document is unchanged — a new request will start with a fresh budget.
@@ -113,7 +114,18 @@ function closePreview(): void {
 <style scoped>
 .edits-list {
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--border-color, #ddd);
+  border-top: 2px solid var(--border-color, #ddd);
+  /* Fix 2: a surface distinct from the transcript above it. */
+  background: var(--panel-bg, #f7f7f8);
+}
+.pane-eyebrow {
+  display: block;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  margin-bottom: 0.35rem;
 }
 .exhausted-banner {
   padding: 0.5rem;
@@ -162,6 +174,18 @@ function closePreview(): void {
   padding: 0 0.35rem;
   font-size: 0.7rem;
   border: 1px solid currentColor;
+}
+/* Fix 4: color-code proposal status, layered on top of the (unchanged) text label — never
+   relying on color alone (FR-043c). */
+.status-badge[data-status='pending'] {
+  color: #b45309;
+}
+.status-badge[data-status='applied'] {
+  color: #065f46;
+}
+.status-badge[data-status='dropped'],
+.status-badge[data-status='superseded'] {
+  color: #4b5563;
 }
 .preview-overlay {
   position: fixed;

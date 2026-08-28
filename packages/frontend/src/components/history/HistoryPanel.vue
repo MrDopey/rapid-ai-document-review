@@ -5,6 +5,8 @@ import { useDocumentStore } from '../../stores/document.js';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { useEditsStore } from '../../stores/edits.js';
 
+const emit = defineEmits<{ (e: 'close'): void }>();
+
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
 const editsStore = useEditsStore();
@@ -60,7 +62,12 @@ async function onCopy(revision: number): Promise<void> {
 
 <template>
   <div class="history-panel" role="region" aria-label="Revision history">
-    <h2>History</h2>
+    <div class="history-panel-header">
+      <h2>History</h2>
+      <button type="button" class="close-drawer-button" aria-label="Dismiss panel" @click="emit('close')">
+        Close
+      </button>
+    </div>
     <div v-if="restoreReconciliation" class="reconciliation-panel" role="status">
       <div class="reconciliation-header">
         <strong>Pending proposals after this restore</strong>
@@ -113,6 +120,24 @@ async function onCopy(revision: number): Promise<void> {
   height: 100%;
   padding: 0.5rem;
   text-align: left;
+  /* Fix 2: a distinct panel surface, self-contained even when this component is used outside the
+     App.vue drawer overlay that also sets this background. */
+  background: var(--panel-bg, #f7f7f8);
+}
+.history-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--border-color, #ddd);
+}
+.history-panel-header h2 {
+  margin: 0;
+}
+.close-drawer-button {
+  font-size: 0.8rem;
 }
 .history-entry {
   border-bottom: 1px solid var(--border-color, #ddd);

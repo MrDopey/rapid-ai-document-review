@@ -185,6 +185,7 @@ interface UserSettingsDbRow {
   max_editing_depth: number;
   max_conversation_depth: number;
   max_replacement_attempts: number;
+  soft_word_count_threshold: number;
   updated_at: string;
 }
 
@@ -196,12 +197,17 @@ function mapSettings(row: UserSettingsDbRow): UserSettingsRow {
     maxEditingDepth: row.max_editing_depth,
     maxConversationDepth: row.max_conversation_depth,
     maxReplacementAttempts: row.max_replacement_attempts,
+    softWordCountThreshold: row.soft_word_count_threshold,
     updatedAt: row.updated_at,
   };
 }
 
 export class SqliteStorageAdapter implements StorageAdapter {
   private readonly db: DatabaseSync;
+  /** 0 when no transaction is open on this connection; >0 while inside `transaction()`, counting
+   *  nesting depth so an inner call composes with an outer one instead of issuing a second
+   *  `BEGIN` (which `node:sqlite` rejects — "cannot start a transaction within a transaction"). */
+  private transactionDepth = 0;
 
   constructor(databasePath: string) {
     this.db = new DatabaseSync(databasePath);
@@ -411,6 +417,17 @@ export class SqliteStorageAdapter implements StorageAdapter {
       | ConversationDbRow
       | undefined;
     return row ? mapConversation(row) : null;
+  }
+
+  getConversationsByIds(ids: string[]): ConversationRow[] {
+    if (ids.length === 0) return [];
+    // De-dupe so the placeholder count (and IN clause) stays bounded even if callers pass repeats.
+    const uniqueIds = [...new Set(ids)];
+    const placeholders = uniqueIds.map(() => '?').join(', ');
+    const rows = this.db
+      .prepare(`SELECT * FROM conversation WHERE id IN (${placeholders})`)
+      .all(...uniqueIds) as unknown as ConversationDbRow[];
+    return rows.map(mapConversation);
   }
 
   getMainConversation(documentId: string): ConversationRow | null {
@@ -670,7 +687,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         `UPDATE user_settings SET
            thinking_visible = ?, revision_debounce_ms = ?, max_concurrent_agents = ?,
            max_editing_depth = ?, max_conversation_depth = ?, max_replacement_attempts = ?,
-           updated_at = ?
+           soft_word_count_threshold = ?, updated_at = ?
          WHERE id = 1`,
       )
       .run(
@@ -680,9 +697,45 @@ export class SqliteStorageAdapter implements StorageAdapter {
         merged.maxEditingDepth,
         merged.maxConversationDepth,
         merged.maxReplacementAttempts,
+        merged.softWordCountThreshold,
         updatedAt,
       );
     return { ...merged, updatedAt };
+  }
+
+  // ---- transaction ----
+
+  /** See `StorageAdapter.transaction` for the contract (commit-on-return, rollback-on-throw,
+   *  safe to nest). FIX 3: gives callers with several related writes (e.g. applying a staged edit
+   *  — updateStagedEdit, updateConversation, an Automerge splice/appendChange, and a new revision
+   *  row — a way to make that whole sequence atomic, instead of a mid-sequence crash being able to
+   *  leave e.g. a staged edit marked `applied` with no corresponding revision row. */
+  transaction<T>(fn: () => T): T {
+    const isOutermost = this.transactionDepth === 0;
+    if (isOutermost) {
+      this.db.exec('BEGIN');
+    }
+    this.transactionDepth += 1;
+    try {
+      const result = fn();
+      this.transactionDepth -= 1;
+      if (isOutermost) {
+        this.db.exec('COMMIT');
+      }
+      return result;
+    } catch (err) {
+      this.transactionDepth -= 1;
+      if (isOutermost) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          // Best-effort: surfaces the original error, not a rollback failure that would only
+          // happen if the connection itself is already broken.
+          throw new AggregateError([err, rollbackErr], 'transaction failed and rollback also failed');
+        }
+      }
+      throw err;
+    }
   }
 
   close(): void {

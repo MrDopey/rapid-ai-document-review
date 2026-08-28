@@ -49,6 +49,26 @@ function paragraphAfter(content: string, afterOffset: number): string {
 }
 
 /**
+ * Start offset of the paragraph (blank-line-delimited block) containing `offset` — the nearest
+ * `\n\s*\n` boundary at or before `offset`, or 0 if none. Used as the local fallback bound when no
+ * enclosing heading exists on a side, so headless (or edge-of-document) prose doesn't expand all
+ * the way to the document's edge.
+ */
+function paragraphBlockStart(content: string, offset: number): number {
+  const prefix = content.slice(0, offset);
+  const seps = [...prefix.matchAll(/\n\s*\n/g)];
+  const last = seps.at(-1);
+  return last ? last.index! + last[0].length : 0;
+}
+
+/** Symmetric to `paragraphBlockStart`: end offset of the paragraph containing `offset`. */
+function paragraphBlockEnd(content: string, offset: number): number {
+  const suffix = content.slice(offset);
+  const m = /\n\s*\n/.exec(suffix);
+  return m ? offset + m.index! : content.length;
+}
+
+/**
  * FR-012: seed a branch with the nearest enclosing section (heading + content) containing the
  * selection, plus one paragraph immediately before and after the selection, capped at a combined
  * 2,000 words. This is a point-in-time copy — never live-linked to the document.
@@ -65,9 +85,11 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
   }
 
   let sectionStart = 0;
+  let headingBefore = false;
   for (let i = fromLineIndex; i >= 0; i -= 1) {
     if (HEADING_RE.test(lines[i] ?? '')) {
       sectionStart = starts[i]!;
+      headingBefore = true;
       break;
     }
   }
@@ -81,11 +103,24 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
   }
 
   let sectionEnd = content.length;
+  let headingAfter = false;
   for (let i = toLineIndex + 1; i < lines.length; i += 1) {
     if (HEADING_RE.test(lines[i] ?? '')) {
       sectionEnd = starts[i]!;
+      headingAfter = true;
       break;
     }
+  }
+
+  // No enclosing heading on one (or both) sides — e.g. headless prose, or a selection in the
+  // document's first/last section — so don't fall through to the document edge. Bound that side
+  // to the local paragraph containing the selection instead; the bridging paragraphBefore/After
+  // below still adds one paragraph of context beyond it, matching the within-section behavior.
+  if (!headingBefore) {
+    sectionStart = paragraphBlockStart(content, from);
+  }
+  if (!headingAfter) {
+    sectionEnd = paragraphBlockEnd(content, to);
   }
 
   const sectionText = content.slice(sectionStart, sectionEnd).trim();

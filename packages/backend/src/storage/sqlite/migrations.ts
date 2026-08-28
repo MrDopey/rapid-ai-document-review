@@ -131,6 +131,7 @@ const STATEMENTS: string[] = [
     max_editing_depth        INTEGER NOT NULL DEFAULT 2,
     max_conversation_depth   INTEGER NOT NULL DEFAULT 3,
     max_replacement_attempts INTEGER NOT NULL DEFAULT 2,
+    soft_word_count_threshold INTEGER NOT NULL DEFAULT 20000,
 
     updated_at               TEXT NOT NULL
   )`,

@@ -13,6 +13,7 @@ function toDto(row: UserSettingsRow): UserSettingsDto {
     maxEditingDepth: row.maxEditingDepth,
     maxConversationDepth: row.maxConversationDepth,
     maxReplacementAttempts: row.maxReplacementAttempts,
+    softWordCountThreshold: row.softWordCountThreshold,
   };
 }
 

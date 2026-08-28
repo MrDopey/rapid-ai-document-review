@@ -1,16 +1,37 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 /**
- * A minimal per-document async mutex. `propose_document_edit` holds it for the duration of one
- * `execute` call (http-api.md §POST /primary "Primary switch and tool execution are mutually
- * exclusive") so a future `PrimaryService` (US5) designation change can wait for any in-flight
- * proposal to finish before flipping `is_primary`, and a proposal that starts captures the
- * designation for its whole call. US5 is not implemented yet — nothing else contends for this
- * lock today — but the seam is here so designate()/switch logic can plug into the same lock
- * without a rewrite.
+ * The per-document write lock (FIX 4): a minimal async mutex, one FIFO tail-chain per
+ * `documentId`. Originally introduced just for `propose_document_edit` (held for the duration of
+ * one `execute` call — http-api.md §POST /primary "Primary switch and tool execution are mutually
+ * exclusive") and for `PrimaryService`'s designation switch/clear, both of which still use it via
+ * exactly the same `withLock` call. It has since been generalized into the single lock EVERY
+ * document-mutating path serializes against: manual edits (`DocumentService.applyChanges`),
+ * `EditService.apply()` (both the HTTP accept path and `acceptRemaining`), and the
+ * `propose_document_edit` tool path — so none of them can read-then-write document content while
+ * another is doing the same, and none of them can run concurrently with a Primary-designation
+ * switch either.
+ *
+ * Reentrant per document within one async call chain: `AsyncLocalStorage` tracks which
+ * `documentId`s the *current* chain already holds, so e.g. `propose_document_edit`
+ * (document-tools.ts) acquiring the lock and then calling `EditService.stageAndApplyPrimary` →
+ * `EditService.apply()` — which itself calls `withLock` again for the same document — runs inline
+ * instead of deadlocking against its own outer lock. A genuinely separate call chain (a different
+ * HTTP request, a different tool execution) never shares the outer chain's ALS store, so it still
+ * queues normally behind whichever chain is currently holding the document's lock.
  */
 export class PrimaryMutex {
   private readonly tails = new Map<string, Promise<void>>();
+  private readonly held = new AsyncLocalStorage<Set<string>>();
 
   async withLock<T>(documentId: string, fn: () => Promise<T> | T): Promise<T> {
+    const current = this.held.getStore();
+    if (current?.has(documentId)) {
+      // Already held by this same async call chain — run inline rather than awaiting a tail this
+      // chain itself would otherwise never release.
+      return await fn();
+    }
+
     const tail = this.tails.get(documentId) ?? Promise.resolve();
     let release!: () => void;
     const next = new Promise<void>((resolve) => {
@@ -18,8 +39,11 @@ export class PrimaryMutex {
     });
     this.tails.set(documentId, tail.then(() => next));
     await tail;
+
+    const nextHeld = new Set(current ?? []);
+    nextHeld.add(documentId);
     try {
-      return await fn();
+      return await this.held.run(nextHeld, () => fn());
     } finally {
       release();
     }

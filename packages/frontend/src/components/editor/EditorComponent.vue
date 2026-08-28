@@ -124,11 +124,12 @@ defineExpose({
 <template>
   <div class="editor-pane">
     <div class="editor-toolbar">
+      <span class="pane-eyebrow">Editor</span>
       <button
         type="button"
         class="branch-button"
         :disabled="!selection"
-        title="Keyboard shortcut: Alt+Shift+C"
+        title="Highlight text in the editor, then click here to start a focused conversation about just that passage. Keyboard shortcut: Alt+Shift+C"
         @click="requestBranch"
       >
         Start conversation from selection
@@ -148,9 +149,21 @@ defineExpose({
 }
 .editor-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--border-color, #ddd);
+  border-bottom: 2px solid var(--border-color, #ddd);
+  /* Fix 2/6: gives the Editor pane the same distinct-surface + visible-label treatment as the
+     other regions (HUD, transcript, Preview). */
+  background: var(--panel-bg, #f7f7f8);
+}
+.pane-eyebrow {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
 }
 .branch-button {
   font-size: 0.8rem;

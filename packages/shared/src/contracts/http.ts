@@ -110,6 +110,7 @@ export const UserSettingsDto = z.object({
   maxEditingDepth: z.number().int(),
   maxConversationDepth: z.number().int(),
   maxReplacementAttempts: z.number().int(),
+  softWordCountThreshold: z.number().int(),
 });
 export type UserSettingsDto = z.infer<typeof UserSettingsDto>;
 
@@ -122,6 +123,10 @@ export const UserSettingsPatch = z.object({
   maxEditingDepth: z.number().int().min(0).max(10).optional(),
   maxConversationDepth: z.number().int().min(1).max(10).optional(),
   maxReplacementAttempts: z.number().int().min(0).max(10).optional(),
+  // No fixed upper bound (spec Assumptions: configurable soft advisory threshold, default 20,000
+  // words) — only a sensible floor so a degenerate near-zero value can't make the advisory fire
+  // on virtually every document.
+  softWordCountThreshold: z.number().int().min(1_000).optional(),
 });
 export type UserSettingsPatch = z.infer<typeof UserSettingsPatch>;
 

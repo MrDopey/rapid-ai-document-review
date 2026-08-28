@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
   AcceptRemainingResponse,
@@ -324,6 +324,52 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const res = await call(ctx.app, 'GET', '/api/revisions?limit=0');
       expect(res.status).toBe(400);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('resolves conversation names for many agent-attributed revisions via one batch lookup, not one per row (N+1 fix)', async () => {
+      const created = await createDoc(ctx.app);
+      const mainId = created.mainConversation.id;
+
+      // Main is Primary by default, so each proposal here auto-applies immediately, producing an
+      // agent-attributed revision (conversationId = mainId) rather than a pending proposal.
+      const edits = [
+        { old_string: 'The opening paragraph anchors everything else.', new_string: 'Edit one.' },
+        { old_string: 'A second paragraph stays constant across scenarios.', new_string: 'Edit two.' },
+        { old_string: 'Edit one.', new_string: 'Edit three.' },
+      ];
+      let currentRevision = created.document.currentRevision;
+      for (const [i, edit] of edits.entries()) {
+        await waitFor(() => ctx.storage.getConversation(mainId)?.status === 'idle');
+        await call(ctx.app, 'POST', `/api/conversations/${mainId}/send`, {
+          message: proposeDirective(`auto-apply ${i}`, [edit]),
+        });
+        const expected = currentRevision + 1;
+        await waitFor(() => ctx.storage.getDocument()?.currentRevision === expected);
+        currentRevision = expected;
+      }
+      await waitFor(() => ctx.storage.getConversation(mainId)?.status === 'idle');
+
+      const getConversationSpy = vi.spyOn(ctx.storage, 'getConversation');
+      const batchSpy = vi.spyOn(ctx.storage, 'getConversationsByIds');
+
+      const res = await call(ctx.app, 'GET', '/api/revisions');
+      expect(res.status).toBe(200);
+      const parsed = ListRevisionsResponse.parse(res.json);
+
+      // 1 (creation) + 3 auto-applied agent edits = 4 revisions, 3 of them attributed to Main.
+      expect(parsed.revisions).toHaveLength(4);
+      const agentRevisions = parsed.revisions.filter((r) => r.conversationId === mainId);
+      expect(agentRevisions).toHaveLength(3);
+      for (const r of agentRevisions) {
+        expect(r.conversationName).toBe('Main');
+      }
+
+      // The route must not fall back to a per-row lookup for conversation names.
+      expect(getConversationSpy).not.toHaveBeenCalled();
+      expect(batchSpy).toHaveBeenCalledTimes(1);
+
+      getConversationSpy.mockRestore();
+      batchSpy.mockRestore();
     });
   });
 
@@ -1027,6 +1073,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
         maxEditingDepth: 2,
         maxConversationDepth: 3,
         maxReplacementAttempts: 2,
+        softWordCountThreshold: 20_000,
       });
     });
 
@@ -1074,6 +1121,53 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const res = await call(ctx.app, 'PATCH', '/api/settings', { thinkingVisible: 'yes' });
       expect(res.status).toBe(400);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+
+    describe('softWordCountThreshold (advisory notice threshold, spec Assumptions)', () => {
+      it('GET reflects the default and is settable via PATCH', async () => {
+        const getRes = await call(ctx.app, 'GET', '/api/settings');
+        expect(UserSettingsDto.parse(getRes.json).softWordCountThreshold).toBe(20_000);
+
+        const patchRes = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 5_000 });
+        expect(patchRes.status).toBe(200);
+        expect(UserSettingsDto.parse(patchRes.json).softWordCountThreshold).toBe(5_000);
+
+        // Persisted, and other fields are untouched by this patch.
+        const getAfter = await call(ctx.app, 'GET', '/api/settings');
+        const afterParsed = UserSettingsDto.parse(getAfter.json);
+        expect(afterParsed.softWordCountThreshold).toBe(5_000);
+        expect(afterParsed.maxConcurrentAgents).toBe(3);
+      });
+
+      it('accepts the floor (1,000) and large values with no fixed upper bound', async () => {
+        const atFloor = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_000 });
+        expect(atFloor.status).toBe(200);
+        expect(UserSettingsDto.parse(atFloor.json).softWordCountThreshold).toBe(1_000);
+
+        const large = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_000_000 });
+        expect(large.status).toBe(200);
+        expect(UserSettingsDto.parse(large.json).softWordCountThreshold).toBe(1_000_000);
+      });
+
+      it('rejects a value below the floor, and rejects non-positive values', async () => {
+        const belowFloor = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 999 });
+        expect(belowFloor.status).toBe(400);
+        expect(ErrorEnvelope.parse(belowFloor.json).error.code).toBe('VALIDATION_FAILED');
+
+        const zero = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 0 });
+        expect(zero.status).toBe(400);
+        expect(ErrorEnvelope.parse(zero.json).error.code).toBe('VALIDATION_FAILED');
+
+        const negative = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: -1 });
+        expect(negative.status).toBe(400);
+        expect(ErrorEnvelope.parse(negative.json).error.code).toBe('VALIDATION_FAILED');
+      });
+
+      it('rejects a non-integer value', async () => {
+        const res = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_500.5 });
+        expect(res.status).toBe(400);
+        expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+      });
     });
   });
 });

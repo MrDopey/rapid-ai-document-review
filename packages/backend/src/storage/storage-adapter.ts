@@ -123,6 +123,7 @@ export interface UserSettingsRow {
   maxEditingDepth: number;
   maxConversationDepth: number;
   maxReplacementAttempts: number;
+  softWordCountThreshold: number;
   updatedAt: string;
 }
 
@@ -165,6 +166,10 @@ export interface StorageAdapter {
   // conversation
   createConversation(row: ConversationRow): ConversationRow;
   getConversation(id: string): ConversationRow | null;
+  // Batch lookup for display-only joins (e.g. resolving revision -> conversation name for a page
+  // of revisions in one query instead of one per row). Order/duplicates are not guaranteed to
+  // match `ids`; callers should index the result by `id`.
+  getConversationsByIds(ids: string[]): ConversationRow[];
   getMainConversation(documentId: string): ConversationRow | null;
   getPrimaryConversation(documentId: string): ConversationRow | null;
   listConversations(documentId: string, options: ConversationListOptions): Page<ConversationRow>;
@@ -189,6 +194,16 @@ export interface StorageAdapter {
   // user_settings
   getSettings(): UserSettingsRow;
   updateSettings(patch: Partial<Omit<UserSettingsRow, 'updatedAt'>>, updatedAt: string): UserSettingsRow;
+
+  /**
+   * Runs `fn` inside a single SQL transaction: commits if `fn` returns normally, rolls back and
+   * rethrows if it throws. Safe to nest — an inner `transaction()` call while one is already open
+   * (on the same adapter instance) just runs `fn` inline as part of the outer transaction rather
+   * than opening a second one, so a caller that itself calls another method which also wraps its
+   * own writes in `transaction()` composes correctly instead of hitting "cannot start a
+   * transaction within a transaction". Everything stays synchronous — `fn` is never `async`.
+   */
+  transaction<T>(fn: () => T): T;
 
   close(): void;
 }

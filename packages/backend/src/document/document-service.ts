@@ -9,6 +9,7 @@ import type { StorageAdapter } from '../storage/storage-adapter.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import { toConversationDto } from '../conversation/conversation-mapper.ts';
+import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 import { AutomergeStore } from './automerge-store.ts';
 import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
 import type { RevisionService } from './revision-service.ts';
@@ -80,6 +81,7 @@ export class DocumentService {
   private readonly eventHub: EventHub;
   private readonly automerge: AutomergeStoreHolder;
   private readonly revisionService: RevisionService;
+  private readonly primaryMutex: PrimaryMutex;
 
   constructor(
     storage: StorageAdapter,
@@ -87,12 +89,14 @@ export class DocumentService {
     eventHub: EventHub,
     automerge: AutomergeStoreHolder,
     revisionService: RevisionService,
+    primaryMutex: PrimaryMutex,
   ) {
     this.storage = storage;
     this.eventService = eventService;
     this.eventHub = eventHub;
     this.automerge = automerge;
     this.revisionService = revisionService;
+    this.primaryMutex = primaryMutex;
   }
 
   /**
@@ -232,11 +236,20 @@ export class DocumentService {
     }
   }
 
-  applyChanges(
+  /**
+   * FIX 4: the actual content mutation (splice + its `document_content_changed` publish) runs
+   * under this document's `PrimaryMutex` lock, same as every other document-mutating path
+   * (`EditService.apply()`, `acceptRemaining`, the `propose_document_edit` tool) — a manual edit
+   * arriving while an accept or a Primary-designation switch is in flight for the same document
+   * now serializes against it instead of racing it. The splice itself is also wrapped in
+   * `storage.transaction()` (FIX 3) so the Automerge `document_change` write and the
+   * `document_content_changed` event-log write commit atomically.
+   */
+  async applyChanges(
     baseRevision: number | undefined,
     changes: DocumentChangeSpec[] | undefined,
     title: string | undefined,
-  ): ApplyChangesResult {
+  ): Promise<ApplyChangesResult> {
     const doc = this.storage.getDocument();
     if (!doc) throw new DocumentNotFoundError('Document not found');
 
@@ -256,23 +269,28 @@ export class DocumentService {
 
       // Descending offset order keeps earlier offsets valid as each splice is applied.
       const ordered = [...changes].sort((a, b) => b.from - a.from);
-      this.automerge.get().splice(ordered);
 
-      const content = this.automerge.get().getContent();
-      const contentHash = createHash('sha256').update(content).digest('hex');
+      await this.primaryMutex.withLock(doc.id, () => {
+        this.storage.transaction(() => {
+          this.automerge.get().splice(ordered);
 
-      this.publish(doc.id, {
-        type: 'document_content_changed',
-        sequence: null,
-        documentId: doc.id,
-        conversationId: null,
-        at: new Date().toISOString(),
-        data: {
-          changes,
-          currentRevision: doc.currentRevision,
-          originConversationId: null,
-          contentHash,
-        },
+          const content = this.automerge.get().getContent();
+          const contentHash = createHash('sha256').update(content).digest('hex');
+
+          this.publish(doc.id, {
+            type: 'document_content_changed',
+            sequence: null,
+            documentId: doc.id,
+            conversationId: null,
+            at: new Date().toISOString(),
+            data: {
+              changes,
+              currentRevision: doc.currentRevision,
+              originConversationId: null,
+              contentHash,
+            },
+          });
+        });
       });
 
       this.revisionService.scheduleDebounce(doc.id);

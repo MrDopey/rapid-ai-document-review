@@ -57,6 +57,18 @@ export interface RegisteredToolLike {
   execute(...args: unknown[]): Promise<unknown>;
 }
 
+/** Bound on how long one agent turn may run without settling (`agent_settled`/`agent_error`)
+ *  before `PiService` force-completes it as `agent_error` itself (FIX 1b). This is a backstop for
+ *  the real-session path: `FakeAgentSession` has its own, much shorter, internal timeout and
+ *  ordinarily self-heals well before this one would ever fire. Overridable via
+ *  `PI_AGENT_TURN_TIMEOUT_MS` for tests. */
+const DEFAULT_AGENT_TURN_TIMEOUT_MS = 5 * 60 * 1000;
+
+function resolveAgentTurnTimeoutMs(): number {
+  const override = Number(process.env.PI_AGENT_TURN_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : DEFAULT_AGENT_TURN_TIMEOUT_MS;
+}
+
 /**
  * The ONLY module in this codebase that imports `@earendil-works/pi-coding-agent`
  * (Constitution Principle II). Owns one live `AgentSession` per conversation — lazily created on
@@ -193,11 +205,26 @@ export class PiService {
    * Sends a message on `conversation`'s session, subscribing `bridge` to its events until the
    * run settles. Throws (after routing a synthetic `agent_error` through the bridge) if the
    * model call fails immediately — the caller translates that into `AGENT_UNAVAILABLE`.
+   *
+   * FIX 1: a turn that never settles (a stuck tool call, or any other hang) no longer leaves this
+   * conversation's session permanently unusable. A watchdog timer force-completes the turn as
+   * `agent_error` if neither `agent_settled` nor `agent_error` arrives within
+   * `PI_AGENT_TURN_TIMEOUT_MS`, and — on ANY `agent_error` (immediate `prompt()` rejection, a
+   * scripted/real failure during the run, or this watchdog itself) — the cached session for this
+   * conversation is evicted so the *next* send/retry builds a fresh one instead of reusing a
+   * session that may be wedged.
    */
   async send(conversation: ConversationRow, message: string, bridge: EventBridge): Promise<void> {
     const session = await this.getOrCreateSession(conversation);
-    const unsubscribe = session.subscribe((event) => bridge.handle(event));
+    const unsubscribe = session.subscribe((event) => {
+      bridge.handle(event);
+      if (event.type === 'agent_error') {
+        this.evictSession(conversation.id);
+      }
+    });
     bridge.addCleanup(unsubscribe);
+    this.armTurnWatchdog(conversation.id, bridge);
+
     try {
       await session.prompt(message);
     } catch (err) {
@@ -210,7 +237,54 @@ export class PiService {
         'Pi session.prompt() failed',
       );
       bridge.handle({ type: 'agent_error', message: messageText });
+      this.evictSession(conversation.id);
       throw err;
+    }
+  }
+
+  /**
+   * Arms a one-shot watchdog for the turn `bridge` is tracking: if the bridge has not settled
+   * (`agent_settled`/`agent_error`) within the turn timeout, this synthesizes an `agent_error`
+   * through the bridge itself and evicts the conversation's cached session, so a hang that a
+   * session's own internal machinery never recovers from still resolves into a retryable
+   * `errored` conversation instead of hanging forever (FIX 1b). Cleared automatically once the
+   * bridge settles by any other means, via `bridge.addCleanup` (fires immediately if the bridge
+   * has already settled by the time this runs).
+   */
+  private armTurnWatchdog(conversationId: string, bridge: EventBridge): void {
+    const timeoutMs = resolveAgentTurnTimeoutMs();
+    const timer = setTimeout(() => {
+      if (bridge.isSettled) return;
+      logger.warn(
+        { conversationId, timeoutMs },
+        'agent turn exceeded its timeout without settling; forcing agent_error',
+      );
+      bridge.handle({ type: 'agent_error', message: `Agent turn timed out after ${timeoutMs}ms without completing.` });
+      this.evictSession(conversationId);
+    }, timeoutMs);
+    timer.unref?.();
+    bridge.addCleanup(() => clearTimeout(timer));
+  }
+
+  /**
+   * Drops `conversationId`'s cached session (disposing it first, best-effort) so the next
+   * `getOrCreateSession` call builds a fresh one instead of reusing a session that just errored
+   * or hung (FIX 1c) — without this, `PiService.sessions` would keep serving the same broken
+   * session to every subsequent send/retry for the conversation's whole process lifetime. Also
+   * used by `ConversationService.close()` once a closed conversation's session is no longer
+   * needed at all (FIX 5). Safe to call on a conversation with no cached session (no-op).
+   */
+  evictSession(conversationId: string): void {
+    const session = this.sessions.get(conversationId);
+    if (!session) return;
+    this.sessions.delete(conversationId);
+    try {
+      session.dispose();
+    } catch (err) {
+      logger.warn(
+        { conversationId, err: err instanceof Error ? err.message : String(err) },
+        'error disposing evicted Pi session',
+      );
     }
   }
 
