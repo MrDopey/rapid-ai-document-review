@@ -28,8 +28,14 @@ RUN (type -p wget >/dev/null || (apt update && apt install wget -y)) \
 	&& apt update \
 	&& apt install gh -y
 
+RUN apt-get update && apt-get install -y \
+	fd-find \
+	jq \
+	ripgrep
+
 USER $USERNAME
 
-# uv
+# claude + uv + pi
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-	&& curl -LsSf https://astral.sh/uv/install.sh | sh
+	&& curl -LsSf https://astral.sh/uv/install.sh | sh \
+	&& curl -fsSL https://pi.dev/install.sh | sh
