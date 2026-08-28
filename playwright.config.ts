@@ -8,7 +8,7 @@ export default defineConfig({
   reporter: 'list',
   globalSetup: './tests/e2e/global-setup.ts',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:3001',
     trace: 'retain-on-failure',
   },
   // All specs share one backend/database for the whole run (see env.ts). us1's "no document
@@ -45,7 +45,7 @@ export default defineConfig({
     },
     {
       command: 'npm run dev --workspace=packages/frontend',
-      url: 'http://127.0.0.1:5173',
+      url: 'http://127.0.0.1:3001',
       reuseExistingServer: false,
       env: { BACKEND_PORT: String(E2E_BACKEND_PORT) },
     },

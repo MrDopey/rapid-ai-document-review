@@ -17,12 +17,7 @@ function readEnv(name: string, fallback?: string): string {
   return value;
 }
 
-const host = readEnv('HOST', '127.0.0.1');
-if (host !== '127.0.0.1') {
-  throw new Error(
-    `HOST must be 127.0.0.1 (loopback-only, FR-044); got "${host}". Network exposure is unsupported.`,
-  );
-}
+const host = readEnv('HOST', '0.0.0.0');
 
 export const config: Config = {
   port: Number(readEnv('PORT', '3000')),

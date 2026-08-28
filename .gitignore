@@ -1,5 +1,7 @@
 .claude/skills/speckit-*
 settings.local.json
+packages/backend/data
+.qa-scratch/
 
 # Node
 node_modules/

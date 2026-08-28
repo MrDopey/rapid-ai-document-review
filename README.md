@@ -90,7 +90,7 @@ npm run dev
 npm run dev:frontend
 ```
 
-Open `http://127.0.0.1:5173`. The Vite dev server proxies `/api` and `/events` to the backend on port 3000. With no document created yet, the paste screen appears.
+Open `http://127.0.0.1:3001`. The Vite dev server proxies `/api` and `/events` to the backend on port 3000. With no document created yet, the paste screen appears.
 
 ---
 
