@@ -9,11 +9,14 @@ const props = defineProps<{ modelValue: string }>();
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
   (e: 'selection', range: { from: number; to: number } | null): void;
+  (e: 'branch-from-selection', range: { from: number; to: number }): void;
 }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
 let applyingRemote = false;
+
+const selection = ref<{ from: number; to: number } | null>(null);
 
 const CLIENT_BATCH_DEBOUNCE_MS = 250;
 // Composed (not concatenated): each CodeMirror update's offsets are relative to the document
@@ -38,6 +41,16 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(flush, CLIENT_BATCH_DEBOUNCE_MS);
 }
 
+/** FR-011/FR-043a: branching from a selection is reachable both by this focus-reachable toolbar
+ * button and by a keyboard shortcut bound directly in the editor's own keymap below — neither
+ * requires a pointer-triggered context menu, and CodeMirror's own Shift+Arrow/Shift+Ctrl+Arrow
+ * selection extension already makes the selection itself fully keyboard-operable. */
+function requestBranch(): boolean {
+  if (!selection.value) return false;
+  emit('branch-from-selection', selection.value);
+  return true;
+}
+
 onMounted(() => {
   const extensions: Extension[] = [
     history(),
@@ -46,11 +59,20 @@ onMounted(() => {
     // compounding indentation line over line (e.g. in nested lists or fenced code content).
     keymap.of([
       { key: 'Enter', run: insertNewline, shift: insertNewline },
+      // A plain `key` binding (not `mac`-qualified `Mod-`) so this is the same physical shortcut
+      // on every platform and deliberately avoids reserved browser chrome combos like
+      // Ctrl/Cmd+Shift+B (bookmarks bar).
+      { key: 'Alt-Shift-c', run: () => requestBranch() },
       ...defaultKeymap,
       ...historyKeymap,
     ]),
     markdown(),
     EditorView.lineWrapping,
+    // The actual focusable/editable node CodeMirror creates is `.cm-content`, a descendant of
+    // `hostRef` — labelling `hostRef` itself (a plain, non-interactive wrapper div) would leave
+    // the element assistive technology actually focuses without its own accessible name. Setting
+    // these via `contentAttributes` puts role/aria-label/aria-multiline directly on that node.
+    EditorView.contentAttributes.of({ role: 'textbox', 'aria-label': 'Document editor', 'aria-multiline': 'true' }),
     EditorView.updateListener.of((update) => {
       if (!update.docChanged && !update.selectionSet) return;
 
@@ -61,7 +83,9 @@ onMounted(() => {
 
       if (update.selectionSet) {
         const range = update.state.selection.main;
-        emit('selection', range.empty ? null : { from: range.from, to: range.to });
+        const next = range.empty ? null : { from: range.from, to: range.to };
+        selection.value = next;
+        emit('selection', next);
       }
     }),
   ];
@@ -98,14 +122,43 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="hostRef" class="editor-host" role="textbox" aria-label="Document editor" aria-multiline="true"></div>
+  <div class="editor-pane">
+    <div class="editor-toolbar">
+      <button
+        type="button"
+        class="branch-button"
+        :disabled="!selection"
+        title="Keyboard shortcut: Alt+Shift+C"
+        @click="requestBranch"
+      >
+        Start conversation from selection
+      </button>
+    </div>
+    <div ref="hostRef" class="editor-host"></div>
+  </div>
 </template>
 
 <style scoped>
-.editor-host {
+.editor-pane {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  text-align: left;
+  min-height: 0;
   border-right: 1px solid var(--border-color, #ccc);
+}
+.editor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border-color, #ddd);
+}
+.branch-button {
+  font-size: 0.8rem;
+}
+.editor-host {
+  flex: 1;
+  min-height: 0;
+  text-align: left;
 }
 
 /* Without this, CodeMirror's internal .cm-editor sizes to its content, leaving the empty

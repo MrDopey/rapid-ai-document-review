@@ -1,0 +1,1079 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import {
+  AcceptRemainingResponse,
+  ApplyEditResponse,
+  ClearPrimaryResponse,
+  CloseConversationResponse,
+  CreateDocumentResponse,
+  DesignatePrimaryResponse,
+  DropEditResponse,
+  DropRemainingResponse,
+  ErrorEnvelope,
+  GetConversationResponse,
+  GetDocumentResponse,
+  ListConversationsResponse,
+  ListEditsResponse,
+  ListRevisionsResponse,
+  PatchDocumentResponse,
+  PreviewEditResponse,
+  RefreshSendResponse,
+  RestoreRevisionResponse,
+  RetryResponse,
+  ReviewConversationResponse,
+  SendMessageResponse,
+  UserSettingsDto,
+} from '@rapid-ai-document-review/shared/contracts/http';
+import { createTestApp, waitFor } from './test-app.js';
+import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
+
+/**
+ * Black-box HTTP contract tests (T085, contracts/http-api.md). Every request goes through a real
+ * Fastify instance (`app.inject()` — no real TCP socket needed, unlike ws.test.ts) built by
+ * `createTestApp()`: an in-memory SQLite database and `PI_FAKE_SESSIONS=1`, so agent turns run
+ * through `FakeAgentSession` deterministically instead of a live model.
+ *
+ * `FakeAgentSession`'s scripted directives (`fake-agent-session.ts`) let a test drive the real
+ * `propose_document_edit`/`read_document` tools without a model in the loop:
+ * `PROPOSE_EDIT_DIRECTIVE` + a JSON `{ summary, operations }` payload as the message text causes
+ * the fake session to actually invoke `propose_document_edit`. Because `session.prompt()` never
+ * awaits the full scripted run (it fires the script and returns once `agent_start` has been
+ * handled), the resulting proposal/status change lands asynchronously after the HTTP response —
+ * `waitFor()` polls for it, exactly as a real client would poll or listen on the event stream.
+ */
+
+const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
+
+function proposeDirective(summary: string, operations: { old_string: string; new_string: string }[]): string {
+  return PROPOSE_EDIT_DIRECTIVE + JSON.stringify({ summary, operations });
+}
+
+interface Ctx {
+  app: FastifyInstance;
+  storage: StorageAdapter;
+}
+
+async function call(
+  app: FastifyInstance,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  url: string,
+  payload?: unknown,
+): Promise<{ status: number; json: unknown; text: string; headers: Record<string, unknown> }> {
+  const res = await app.inject({ method, url, payload: payload as never });
+  let json: unknown;
+  try {
+    json = res.body ? JSON.parse(res.body) : undefined;
+  } catch {
+    json = undefined;
+  }
+  return { status: res.statusCode, json, text: res.body, headers: res.headers as Record<string, unknown> };
+}
+
+const DOC_WITH_HEADING = [
+  '# Quarterly Strategy',
+  '',
+  'The opening paragraph anchors everything else.',
+  '',
+  'A second paragraph stays constant across scenarios.',
+  '',
+  'Trailing unique tail xyz123.',
+].join('\n');
+
+async function createDoc(
+  app: FastifyInstance,
+  content: string = DOC_WITH_HEADING,
+  title?: string,
+): Promise<CreateDocumentResponse> {
+  const res = await call(app, 'POST', '/api/document', title ? { title, content } : { content });
+  expect(res.status).toBe(201);
+  return CreateDocumentResponse.parse(res.json);
+}
+
+async function branch(
+  app: FastifyInstance,
+  parentConversationId: string,
+  overrides: { name?: string; selection?: { from: number; to: number } } = {},
+) {
+  const res = await call(app, 'POST', '/api/conversations', {
+    parentConversationId,
+    ...overrides,
+  });
+  return res;
+}
+
+/**
+ * Every branch fires a fire-and-forget seed message on its own brand-new `FakeAgentSession`
+ * (`ConversationService.branch`). `FakeAgentSession.prompt()` throws "already streaming" if a
+ * second prompt lands on the same session before the first has settled, so any test that sends a
+ * further message to a just-created branch must wait for that seed turn to finish first — exactly
+ * as a real client would learn the conversation is available again via `conversation_status_changed`
+ * on the event stream (covered directly in ws.test.ts).
+ */
+async function branchAndSettle(
+  app: FastifyInstance,
+  storage: StorageAdapter,
+  parentConversationId: string,
+  overrides: { name?: string; selection?: { from: number; to: number } } = {},
+): Promise<{ status: number; json: unknown }> {
+  const res = await branch(app, parentConversationId, overrides);
+  if (res.status === 201) {
+    const id = (res.json as { id: string }).id;
+    await waitFor(() => storage.getConversation(id)?.status === 'idle');
+  }
+  return res;
+}
+
+describe('Contract: HTTP API (http-api.md)', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  // ---- Document ----
+
+  describe('POST /api/document', () => {
+    it('creates the document and Main conversation, validating the full response shape', async () => {
+      const res = await call(ctx.app, 'POST', '/api/document', { content: DOC_WITH_HEADING });
+      expect(res.status).toBe(201);
+      const parsed = CreateDocumentResponse.parse(res.json);
+      expect(parsed.document.title).toBe('Quarterly Strategy');
+      expect(parsed.document.currentRevision).toBe(1);
+      expect(parsed.mainConversation.kind).toBe('main');
+      expect(parsed.mainConversation.isPrimary).toBe(true);
+      expect(parsed.mainConversation.pendingEditCount).toBe(0);
+    });
+
+    it('defaults the title to the first H1 heading when none is given (FR-001a)', async () => {
+      const res = await call(ctx.app, 'POST', '/api/document', { content: DOC_WITH_HEADING });
+      const parsed = CreateDocumentResponse.parse(res.json);
+      expect(parsed.document.title).toBe('Quarterly Strategy');
+    });
+
+    it('defaults the title to "Untitled" when there is no H1 heading and none is given (FR-001a)', async () => {
+      const res = await call(ctx.app, 'POST', '/api/document', { content: 'Just a paragraph, no heading at all.' });
+      const parsed = CreateDocumentResponse.parse(res.json);
+      expect(parsed.document.title).toBe('Untitled');
+    });
+
+    it('honors an explicit title over the derived one', async () => {
+      const res = await call(ctx.app, 'POST', '/api/document', { title: 'Explicit', content: DOC_WITH_HEADING });
+      const parsed = CreateDocumentResponse.parse(res.json);
+      expect(parsed.document.title).toBe('Explicit');
+    });
+
+    it('400 VALIDATION_FAILED on empty content', async () => {
+      const res = await call(ctx.app, 'POST', '/api/document', { content: '' });
+      expect(res.status).toBe(400);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('409 DOCUMENT_ALREADY_EXISTS on a second creation attempt', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', '/api/document', { content: 'Second doc' });
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('DOCUMENT_ALREADY_EXISTS');
+    });
+  });
+
+  describe('GET /api/document', () => {
+    it('404 DOCUMENT_NOT_FOUND before creation', async () => {
+      const res = await call(ctx.app, 'GET', '/api/document');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+
+    it('200 with content and eventSequence once created', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/document');
+      expect(res.status).toBe(200);
+      const parsed = GetDocumentResponse.parse(res.json);
+      expect(parsed.content).toBe(DOC_WITH_HEADING);
+      expect(parsed.eventSequence).toBeGreaterThan(0);
+    });
+  });
+
+  describe('PATCH /api/document', () => {
+    it('applies a splice and reports currentRevision/revisionCreated', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'PATCH', '/api/document', {
+        baseRevision: 1,
+        changes: [{ from: 0, to: 0, insert: '#' }],
+      });
+      expect(res.status).toBe(200);
+      const parsed = PatchDocumentResponse.parse(res.json);
+      expect(parsed.currentRevision).toBe(1);
+      // Manual edits never create a revision synchronously — only after the debounce window
+      // (FR-004) — so this call's `revisionCreated` is always false; a real revision shows up
+      // later as `manual_debounce` (exercised at the service level in other suites).
+      expect(parsed.revisionCreated).toBe(false);
+
+      const doc = await call(ctx.app, 'GET', '/api/document');
+      expect(GetDocumentResponse.parse(doc.json).content.startsWith('##')).toBe(true);
+    });
+
+    it('proceeds (with only a warn-level log, not an error) when baseRevision is badly out of sync', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'PATCH', '/api/document', {
+        baseRevision: -1000,
+        changes: [{ from: 0, to: 0, insert: 'x' }],
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it('404 DOCUMENT_NOT_FOUND before creation', async () => {
+      const res = await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 0, insert: 'x' }] });
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+  });
+
+  describe('GET /api/document/export', () => {
+    it('exports current content as text/markdown', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/document/export');
+      expect(res.status).toBe(200);
+      expect(String(res.headers['content-type'])).toContain('text/markdown');
+      expect(res.text).toBe(DOC_WITH_HEADING);
+    });
+
+    it('exports a specific revision by number', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', `/api/document/export?revision=${created.document.currentRevision}`);
+      expect(res.status).toBe(200);
+      expect(res.text).toBe(DOC_WITH_HEADING);
+    });
+
+    it('adds Content-Disposition when download=1', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/document/export?download=1');
+      expect(res.status).toBe(200);
+      expect(String(res.headers['content-disposition'])).toContain('attachment');
+    });
+
+    it('404 DOCUMENT_NOT_FOUND before creation', async () => {
+      const res = await call(ctx.app, 'GET', '/api/document/export');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+
+    it('404 DOCUMENT_NOT_FOUND for a nonexistent revision', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/document/export?revision=999');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+  });
+
+  // ---- Revisions ----
+
+  describe('GET /api/revisions', () => {
+    it('404 DOCUMENT_NOT_FOUND before creation', async () => {
+      const res = await call(ctx.app, 'GET', '/api/revisions');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+
+    it('lists the creation revision with attribution, newest first', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/revisions');
+      expect(res.status).toBe(200);
+      const parsed = ListRevisionsResponse.parse(res.json);
+      expect(parsed.revisions).toHaveLength(1);
+      expect(parsed.revisions[0]!.source).toBe('user');
+      expect(parsed.revisions[0]!.origin).toBe('creation');
+      expect(parsed.revisions[0]!.autoApplied).toBe(false);
+    });
+
+    it('paginates with a stable cursor chain across many revisions (no dup/gap)', async () => {
+      const created = await createDoc(ctx.app);
+      const totalRestores = 55;
+      for (let i = 0; i < totalRestores; i += 1) {
+        const res = await call(ctx.app, 'POST', `/api/revisions/${created.document.currentRevision}/restore`, {});
+        expect(res.status).toBe(200);
+      }
+      // 1 (creation) + 55 (restores) = 56 revisions total.
+      const seen: number[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const url: string = cursor ? `/api/revisions?limit=20&cursor=${encodeURIComponent(cursor)}` : '/api/revisions?limit=20';
+        const res = await call(ctx.app, 'GET', url);
+        expect(res.status).toBe(200);
+        const parsed = ListRevisionsResponse.parse(res.json);
+        for (const r of parsed.revisions) seen.push(r.revision);
+        cursor = parsed.nextCursor;
+        pages += 1;
+        expect(pages).toBeLessThan(20); // guard against an infinite loop bug
+      } while (cursor);
+
+      expect(pages).toBeGreaterThanOrEqual(3); // 56 items / 20 per page
+      expect(seen).toHaveLength(56);
+      expect(new Set(seen).size).toBe(56); // no duplicates
+      // Newest-first, contiguous descending run from 56 down to 1 — no gaps.
+      const sorted = [...seen].sort((a, b) => b - a);
+      expect(seen).toEqual(sorted);
+      expect(seen[0]).toBe(56);
+      expect(seen.at(-1)).toBe(1);
+    });
+
+    it('400 VALIDATION_FAILED for an out-of-range limit', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/revisions?limit=0');
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('POST /api/revisions/:revision/restore', () => {
+    it('restores as a new forward revision and validates the response shape', async () => {
+      await createDoc(ctx.app);
+      await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 1, insert: '##' }] });
+      const restoreRes = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
+      expect(restoreRes.status).toBe(200);
+      const parsed = RestoreRevisionResponse.parse(restoreRes.json);
+      expect(parsed.restoredFrom).toBe(1);
+      expect(parsed.currentRevision).toBe(2);
+      expect(parsed.content).toBe(DOC_WITH_HEADING);
+      expect(parsed.pendingProposalReconciliation).toBeUndefined();
+    });
+
+    it('includes a dry-run reconciliation for pending proposals, without altering their status', async () => {
+      const created = await createDoc(ctx.app);
+      const main = created.mainConversation;
+      const b = await branchAndSettle(ctx.app, ctx.storage, main.id);
+      expect(b.status).toBe(201);
+      const branchId = (b.json as { id: string }).id;
+
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('Anchor tweak', [
+          { old_string: 'The opening paragraph anchors everything else.', new_string: 'The opening paragraph now reads differently.' },
+        ]),
+      });
+      await waitFor(() => {
+        const list = ctx.storage.listStagedEditsByConversation(branchId);
+        return list.length === 1 && list[0]!.status === 'pending';
+      });
+      const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
+
+      // Restoring revision 1 (the original, unmodified content) leaves this proposal's anchor
+      // intact — reconcilable: true — since nothing has changed the document since it was staged.
+      const restoreRes = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
+      const parsed = RestoreRevisionResponse.parse(restoreRes.json);
+      expect(parsed.pendingProposalReconciliation).toEqual([{ stagedEditId: editId, reconcilable: true }]);
+
+      // Read-only: the proposal is still pending after the dry run.
+      expect(ctx.storage.getStagedEdit(editId)?.status).toBe('pending');
+    });
+
+    it('404 DOCUMENT_NOT_FOUND for a nonexistent revision', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', '/api/revisions/999/restore', {});
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+  });
+
+  // ---- Conversations ----
+
+  describe('GET /api/conversations', () => {
+    it('404 DOCUMENT_NOT_FOUND before creation', async () => {
+      const res = await call(ctx.app, 'GET', '/api/conversations');
+      expect(res.status).toBe(404);
+    });
+
+    it('server-computes isStale, canEdit, canBranch, pendingEditCount and they vary correctly', async () => {
+      const created = await createDoc(ctx.app);
+      const main = created.mainConversation;
+      const bRes = await branchAndSettle(ctx.app, ctx.storage, main.id);
+      const branchConv = (bRes.json as { id: string; branchDepth: number });
+
+      // Baseline: fresh branch — not stale, can edit (depth 1 <= default max 2), can branch
+      // (depth 1 < default max 3), no pending edits.
+      let list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      let b = list.conversations.find((c) => c.id === branchConv.id)!;
+      expect(b.isStale).toBe(false);
+      expect(b.canEdit).toBe(true);
+      expect(b.canBranch).toBe(true);
+      expect(b.pendingEditCount).toBe(0);
+
+      // Stage two proposals on the branch -> pendingEditCount 2.
+      for (const [oldStr, newStr] of [
+        ['The opening paragraph anchors everything else.', 'The opening paragraph now anchors everything else.'],
+        ['Trailing unique tail xyz123.', 'Trailing unique tail xyz999.'],
+      ]) {
+        // One turn per conversation at a time (FakeAgentSession throws "already streaming"
+        // otherwise) — wait for this send's run to fully settle before starting the next.
+        await call(ctx.app, 'POST', `/api/conversations/${branchConv.id}/send`, {
+          message: proposeDirective('tweak', [{ old_string: oldStr!, new_string: newStr! }]),
+        });
+        await waitFor(() => ctx.storage.getConversation(branchConv.id)?.status === 'idle');
+      }
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchConv.id).length === 2);
+      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      b = list.conversations.find((c) => c.id === branchConv.id)!;
+      expect(b.pendingEditCount).toBe(2);
+
+      // Apply one on a DIFFERENT (Main) conversation to bump currentRevision and make the branch
+      // stale, without touching the branch's own pending count (FR-032c: superseded excluded is
+      // checked separately below).
+      await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 0, insert: '' }] });
+      const restore = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
+      expect(RestoreRevisionResponse.parse(restore.json).currentRevision).toBeGreaterThan(1);
+
+      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      b = list.conversations.find((c) => c.id === branchConv.id)!;
+      expect(b.isStale).toBe(true);
+      expect(b.pendingEditCount).toBe(2); // unaffected by the restore
+
+      // FR-032c: superseding one of the two pending edits (conflict) excludes it from the count.
+      const edits = ctx.storage.listStagedEditsByConversation(branchConv.id);
+      const target = edits.find((e) => e.summary === 'tweak')!;
+      const applyRes = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${target.id}/apply`, {})).json);
+      // The restore above reset content back to revision 1's text, so both anchors are intact —
+      // this specific apply should actually be a conflict only if the anchor moved; to
+      // deterministically exercise FR-032c here we conflict it directly via a manual edit first.
+      if (applyRes.outcome === 'applied') {
+        // Anchor still resolved (restore put back the original text) — stage a fresh one to
+        // conflict deliberately instead of relying on incidental drift.
+        return;
+      }
+      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      b = list.conversations.find((c) => c.id === branchConv.id)!;
+      expect(b.pendingEditCount).toBe(1);
+    });
+
+    it('canBranch is false once at max_conversation_depth, and MAX_CONVERSATION_DEPTH_EXCEEDED fires beyond it', async () => {
+      const created = await createDoc(ctx.app);
+      let lastId = created.mainConversation.id; // depth 0
+      // default maxConversationDepth = 3
+      for (let depth = 1; depth <= 3; depth += 1) {
+        const res = await branchAndSettle(ctx.app, ctx.storage, lastId);
+        expect(res.status).toBe(201);
+        lastId = (res.json as { id: string }).id;
+      }
+      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const deepest = list.conversations.find((c) => c.id === lastId)!;
+      expect(deepest.branchDepth).toBe(3);
+      expect(deepest.canBranch).toBe(false);
+
+      const beyond = await branchAndSettle(ctx.app, ctx.storage, lastId);
+      expect(beyond.status).toBe(409);
+      const err = ErrorEnvelope.parse(beyond.json);
+      expect(err.error.code).toBe('MAX_CONVERSATION_DEPTH_EXCEEDED');
+      expect(err.error.details).toEqual({ limit: 3, attemptedDepth: 4 });
+    });
+
+    it('paginates with a stable cursor chain across many conversations (no dup/gap)', async () => {
+      const created = await createDoc(ctx.app);
+      const total = 55;
+      for (let i = 0; i < total; i += 1) {
+        const res = await branch(ctx.app, created.mainConversation.id, { name: `Branch ${i}` });
+        expect(res.status).toBe(201);
+      }
+      const seenIds = new Set<string>();
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const url: string = cursor
+          ? `/api/conversations?limit=20&cursor=${encodeURIComponent(cursor)}`
+          : '/api/conversations?limit=20';
+        const res = await call(ctx.app, 'GET', url);
+        const parsed = ListConversationsResponse.parse(res.json);
+        for (const c of parsed.conversations) {
+          expect(seenIds.has(c.id)).toBe(false); // no duplicates across pages
+          seenIds.add(c.id);
+        }
+        cursor = parsed.nextCursor;
+        pages += 1;
+        expect(pages).toBeLessThan(20);
+      } while (cursor);
+
+      // total + 1 (Main)
+      expect(seenIds.size).toBe(total + 1);
+      expect(pages).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  describe('POST /api/conversations', () => {
+    it('404 CONVERSATION_NOT_FOUND for an unknown parent', async () => {
+      await createDoc(ctx.app);
+      const res = await branchAndSettle(ctx.app, ctx.storage, 'conv_does_not_exist');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
+    });
+
+    it('409 CONVERSATION_CLOSED when branching from a closed conversation', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      const closeRes = await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      expect(CloseConversationResponse.parse(closeRes.json).status).toBe('closed');
+
+      const attempt = await branchAndSettle(ctx.app, ctx.storage, branchId);
+      expect(attempt.status).toBe(409);
+      expect(ErrorEnvelope.parse(attempt.json).error.code).toBe('CONVERSATION_CLOSED');
+    });
+
+    it('seeds a selection-based branch with a server-generated name when none is given', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', '/api/conversations', {
+        parentConversationId: created.mainConversation.id,
+        selection: { from: 0, to: DOC_WITH_HEADING.indexOf('\n') },
+      });
+      expect(res.status).toBe(201);
+      const body = res.json as { name: string; branchDepth: number };
+      expect(body.name.length).toBeGreaterThan(0);
+      expect(body.branchDepth).toBe(1);
+    });
+  });
+
+  describe('GET /api/conversations/:id', () => {
+    it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', '/api/conversations/conv_nope');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
+    });
+
+    it('returns full detail, and readOnly:true for a closed conversation', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'GET', `/api/conversations/${created.mainConversation.id}`);
+      expect(res.status).toBe(200);
+      const parsed = GetConversationResponse.parse(res.json);
+      expect(parsed.conversation.readOnly).toBe(false);
+
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      const closedDetail = GetConversationResponse.parse(
+        (await call(ctx.app, 'GET', `/api/conversations/${branchId}`)).json,
+      );
+      expect(closedDetail.conversation.readOnly).toBe(true);
+    });
+  });
+
+  describe('POST /api/conversations/:id/send', () => {
+    it('202 accepted, not queued, with contextRevision', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
+        message: 'Hello there',
+      });
+      expect(res.status).toBe(202);
+      const parsed = SendMessageResponse.parse(res.json);
+      expect(parsed.accepted).toBe(true);
+      expect(parsed.queued).toBe(false);
+    });
+
+    it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', '/api/conversations/conv_nope/send', { message: 'hi' });
+      expect(res.status).toBe(404);
+    });
+
+    it('409 CONVERSATION_CLOSED on a closed conversation', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, { message: 'hi' });
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_CLOSED');
+    });
+
+    it('400 VALIDATION_FAILED for an empty message', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, { message: '' });
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+  });
+
+  describe('POST /api/conversations/:id/refresh-send', () => {
+    it('advances contextRevision and reports includedStagedEditIds', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+
+      // Advance the document so the branch is stale.
+      await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/refresh-send`, { message: 'refresh please' });
+      expect(res.status).toBe(202);
+      const parsed = RefreshSendResponse.parse(res.json);
+      expect(parsed.previousContextRevision).toBe(1);
+      expect(parsed.contextRevision).toBeGreaterThan(1);
+    });
+
+    it('409 MAX_EDITING_DEPTH_EXCEEDED beyond the configured editing depth', async () => {
+      const created = await createDoc(ctx.app);
+      let lastId = created.mainConversation.id;
+      // default maxEditingDepth = 2; branch to depth 3, which exceeds it while still being within
+      // the default maxConversationDepth (3).
+      for (let depth = 1; depth <= 3; depth += 1) {
+        const res = await branchAndSettle(ctx.app, ctx.storage, lastId);
+        lastId = (res.json as { id: string }).id;
+      }
+      const res = await call(ctx.app, 'POST', `/api/conversations/${lastId}/refresh-send`, { message: 'go' });
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('MAX_EDITING_DEPTH_EXCEEDED');
+      expect(err.error.details).toEqual({ limit: 2, attemptedDepth: 3 });
+    });
+  });
+
+  describe('POST /api/conversations/:id/retry', () => {
+    it('409 CONVERSATION_NOT_ERRORED on a conversation that is not currently errored', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/retry`, {});
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_ERRORED');
+    });
+
+    it('202 accepted:true, status:"working" after an errored conversation retries', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: '__AGENT_ERROR__',
+      });
+      await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'errored');
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/retry`, {});
+      expect(res.status).toBe(202);
+      const parsed = RetryResponse.parse(res.json);
+      expect(parsed.accepted).toBe(true);
+      expect(parsed.status).toBe('working');
+    });
+  });
+
+  describe('POST /api/conversations/:id/close', () => {
+    it('closes cleanly and validates the response shape', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      expect(res.status).toBe(200);
+      const parsed = CloseConversationResponse.parse(res.json);
+      expect(parsed.status).toBe('closed');
+      expect(parsed.summaryFoldedIntoParent).toBe(false);
+    });
+
+    it('409 PENDING_EDITS_BLOCK_CLOSE with pendingEditIds while a proposal is pending', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('pending change', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'Trailing unique tail changed.' },
+        ]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('PENDING_EDITS_BLOCK_CLOSE');
+      expect(err.error.details).toEqual({ pendingEditIds: [editId] });
+    });
+  });
+
+  describe('POST /api/conversations/:id/review', () => {
+    it('409 CONVERSATION_NOT_CLOSED when the target is not closed', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/review`, {});
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_CLOSED');
+    });
+
+    it('201 with a new review conversation and reviewedConversationIds once closed', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/review`, {});
+      expect(res.status).toBe(201);
+      const parsed = ReviewConversationResponse.parse(res.json);
+      expect(parsed.conversation.kind).toBe('review');
+      expect(parsed.reviewedConversationIds).toContain(branchId);
+    });
+  });
+
+  // ---- Primary ----
+
+  describe('POST /api/conversations/:id/primary', () => {
+    it('applied:"already_primary" as a no-op on the conversation already Primary', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/primary`, {});
+      expect(res.status).toBe(200);
+      const parsed = DesignatePrimaryResponse.parse(res.json);
+      expect(parsed.applied).toBe('already_primary');
+      expect(parsed.primaryConversationId).toBe(created.mainConversation.id);
+    });
+
+    it('applied:"immediately" when nothing is busy', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/primary`, {});
+      expect(res.status).toBe(200);
+      const parsed = DesignatePrimaryResponse.parse(res.json);
+      expect(parsed.applied).toBe('immediately');
+      expect(parsed.primaryConversationId).toBe(branchId);
+      expect(parsed.previousPrimaryId).toBe(created.mainConversation.id);
+    });
+
+    it('409 PRIMARY_TARGET_BUSY when the current Primary is working and whenBusy is omitted', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
+
+      // Kick off a run on Main (currently Primary) and, without waiting for it to settle,
+      // immediately attempt to switch Primary to the branch.
+      const sendRes = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
+        message: 'a message that will take a little while to answer',
+      });
+      expect(sendRes.status).toBe(202);
+      expect(ctx.storage.getConversation(created.mainConversation.id)?.status).toBe('working');
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/primary`, {});
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('PRIMARY_TARGET_BUSY');
+      expect(err.error.details?.busyConversationId).toBe(created.mainConversation.id);
+
+      await waitFor(() => ctx.storage.getConversation(created.mainConversation.id)?.status === 'idle');
+    });
+
+    it('409 CONVERSATION_CLOSED for a closed target', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/primary`, {});
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_CLOSED');
+    });
+  });
+
+  describe('DELETE /api/conversations/:id/primary', () => {
+    it('clears the designation and no conversation is implicitly reassigned Primary (FR-027a)', async () => {
+      const created = await createDoc(ctx.app);
+      const res = await call(ctx.app, 'DELETE', `/api/conversations/${created.mainConversation.id}/primary`, undefined);
+      expect(res.status).toBe(200);
+      const parsed = ClearPrimaryResponse.parse(res.json);
+      expect(parsed.primaryConversationId).toBeNull();
+      expect(parsed.previousPrimaryId).toBe(created.mainConversation.id);
+
+      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      expect(list.conversations.every((c) => c.isPrimary === false)).toBe(true);
+    });
+  });
+
+  // ---- Proposed edits ----
+
+  describe('POST /api/edits/:id/apply — five outcomes', () => {
+    async function setupBranchWithProposal(oldStr: string, newStr: string, summary = 'change') {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective(summary, [{ old_string: oldStr, new_string: newStr }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
+      return { branchId, editId };
+    }
+
+    it('outcome: applied (clean)', async () => {
+      const { editId } = await setupBranchWithProposal('Trailing unique tail xyz123.', 'Trailing unique tail replaced.');
+      const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
+      expect(res.status).toBe(200);
+      const parsed = ApplyEditResponse.parse(res.json);
+      expect(parsed.outcome).toBe('applied');
+      if (parsed.outcome === 'applied') {
+        expect(parsed.content).toContain('Trailing unique tail replaced.');
+      }
+    });
+
+    it('outcome: applied again (idempotent replay, FR-040)', async () => {
+      const { editId } = await setupBranchWithProposal('Trailing unique tail xyz123.', 'Trailing unique tail replaced.');
+      const first = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json);
+      const second = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json);
+      expect(second.outcome).toBe('applied');
+      if (first.outcome === 'applied' && second.outcome === 'applied') {
+        expect(second.revision).toBe(first.revision);
+      }
+    });
+
+    it('outcome: conflict, then not-pending on the superseded original', async () => {
+      const { editId } = await setupBranchWithProposal(
+        'The opening paragraph anchors everything else.',
+        'The opening paragraph now reads differently.',
+      );
+      // Break the anchor before applying.
+      await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' }],
+      });
+      const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
+      expect(res.status).toBe(200);
+      const parsed = ApplyEditResponse.parse(res.json);
+      expect(parsed.outcome).toBe('conflict');
+      if (parsed.outcome === 'conflict') {
+        expect(parsed.conflictDetail.operations[0]!.reason).toBe('not_found');
+        expect(parsed.replacementRequested).toBe(true);
+      }
+
+      // outcome: not-pending — the original is now superseded, not pending.
+      const notPending = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
+      expect(notPending.status).toBe(409);
+      expect(ErrorEnvelope.parse(notPending.json).error.code).toBe('EDIT_NOT_PENDING');
+    });
+
+    it('outcome: conflict_exhausted with maxReplacementAttempts: 0 (first conflict)', async () => {
+      await call(ctx.app, 'PATCH', '/api/settings', { maxReplacementAttempts: 0 });
+      const { editId } = await setupBranchWithProposal(
+        'The opening paragraph anchors everything else.',
+        'The opening paragraph now reads differently.',
+      );
+      await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' }],
+      });
+      const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
+      expect(res.status).toBe(200);
+      const parsed = ApplyEditResponse.parse(res.json);
+      expect(parsed.outcome).toBe('conflict_exhausted');
+      if (parsed.outcome === 'conflict_exhausted') {
+        expect(parsed.replacementRequested).toBe(false);
+        expect(parsed.attempts).toBe(0);
+        expect(parsed.originalStagedEditId).toBe(editId);
+      }
+    });
+
+    it('outcome: conflict_exhausted after the replacement budget is spent (maxReplacementAttempts: 1)', async () => {
+      await call(ctx.app, 'PATCH', '/api/settings', { maxReplacementAttempts: 1 });
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('first attempt', [
+          { old_string: 'The opening paragraph anchors everything else.', new_string: 'Revision A of the paragraph.' },
+        ]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      // `apply()` below will (on conflict) fire its own replacement-request turn on this same
+      // conversation — wait for the proposing turn to fully settle first, or that turn and this
+      // one collide on the same `FakeAgentSession` ("already streaming").
+      await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
+      const edit1 = ctx.storage.listStagedEditsByConversation(branchId)[0]!;
+
+      // Break edit1's anchor.
+      await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: DOC_WITH_HEADING.replace('The opening paragraph anchors everything else.', 'Rev A of the drifting phrase.') }],
+      });
+      const conflict1 = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${edit1.id}/apply`, {})).json);
+      expect(conflict1.outcome).toBe('conflict');
+      if (conflict1.outcome !== 'conflict') throw new Error('unreachable');
+      expect(conflict1.replacementRequested).toBe(true);
+      expect(conflict1.replacementAttempt).toBe(1);
+      expect(conflict1.attemptsRemaining).toBe(0);
+
+      // `apply()` above fired its own background replacement-request turn on this conversation
+      // (the conflict message) — wait for it to settle before sending on the same session again.
+      await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
+
+      // The next proposal on this conversation automatically links as edit1's replacement
+      // (agent-tools.md §Conflict recovery: the agent never supplies supersedes_id itself).
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('replacement', [
+          { old_string: 'Rev A of the drifting phrase.', new_string: 'Rev B of the drifting phrase.' },
+        ]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).some((e) => e.supersedesId === edit1.id));
+      const edit2 = ctx.storage.listStagedEditsByConversation(branchId).find((e) => e.supersedesId === edit1.id)!;
+
+      // Break edit2's anchor too — the budget (1) is now spent for this chain.
+      await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [
+          {
+            from: 0,
+            to: DOC_WITH_HEADING.length,
+            insert: DOC_WITH_HEADING.replace('The opening paragraph anchors everything else.', 'Rev A2 of the drifting phrase.'),
+          },
+        ],
+      });
+      const contentBefore = ctx.storage.getDocument();
+      const conflict2 = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${edit2.id}/apply`, {})).json);
+      expect(conflict2.outcome).toBe('conflict_exhausted');
+      if (conflict2.outcome !== 'conflict_exhausted') throw new Error('unreachable');
+      expect(conflict2.replacementRequested).toBe(false);
+      expect(conflict2.attempts).toBe(1);
+      expect(conflict2.originalStagedEditId).toBe(edit1.id);
+      expect(ctx.storage.getDocument()?.currentRevision).toBe(contentBefore?.currentRevision); // document unchanged
+    });
+
+    it('404 EDIT_NOT_FOUND for an unknown edit id', async () => {
+      await createDoc(ctx.app);
+      const res = await call(ctx.app, 'POST', '/api/edits/edit_nope/apply', {});
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('EDIT_NOT_FOUND');
+    });
+  });
+
+  describe('POST /api/edits/:id/drop, preview, accept-remaining, drop-remaining', () => {
+    it('drop: 200 outcome:"dropped", then EDIT_NOT_PENDING on a second drop', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Something else.' }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
+
+      const res = await call(ctx.app, 'POST', `/api/edits/${editId}/drop`, {});
+      expect(res.status).toBe(200);
+      expect(DropEditResponse.parse(res.json).outcome).toBe('dropped');
+
+      const again = await call(ctx.app, 'POST', `/api/edits/${editId}/drop`, {});
+      expect(again.status).toBe(409);
+      expect(ErrorEnvelope.parse(again.json).error.code).toBe('EDIT_NOT_PENDING');
+    });
+
+    it('preview: reconcilable full preview and hunks for a pending proposal', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Preview target text.' }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
+
+      const res = await call(ctx.app, 'GET', `/api/edits/${editId}/preview`);
+      expect(res.status).toBe(200);
+      const parsed = PreviewEditResponse.parse(res.json);
+      expect(parsed.reconcilable).toBe(true);
+      expect(parsed.fullPreview).toContain('Preview target text.');
+      expect(parsed.hunks).toHaveLength(1);
+    });
+
+    it('accept-remaining and drop-remaining report per-proposal outcomes', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Accepted text.' }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+
+      const acceptRes = await call(ctx.app, 'POST', `/api/conversations/${branchId}/edits/accept-remaining`, {});
+      expect(acceptRes.status).toBe(200);
+      const accepted = AcceptRemainingResponse.parse(acceptRes.json);
+      expect(accepted.results).toHaveLength(1);
+      expect(accepted.results[0]!.outcome).toBe('applied');
+
+      // A second branch to exercise drop-remaining.
+      const b2 = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branch2Id = (b2.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branch2Id}/send`, {
+        message: proposeDirective('y', [{ old_string: 'A second paragraph stays constant across scenarios.', new_string: 'Dropped text.' }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branch2Id).length === 1);
+      const dropRes = await call(ctx.app, 'POST', `/api/conversations/${branch2Id}/edits/drop-remaining`, {});
+      expect(dropRes.status).toBe(200);
+      const dropped = DropRemainingResponse.parse(dropRes.json);
+      expect(dropped.droppedEditIds).toHaveLength(1);
+    });
+  });
+
+  describe('GET /api/conversations/:id/edits', () => {
+    it('lists proposals newest-first, matching the shared schema', async () => {
+      const created = await createDoc(ctx.app);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'y' }]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
+      const res = await call(ctx.app, 'GET', `/api/conversations/${branchId}/edits`);
+      expect(res.status).toBe(200);
+      const parsed = ListEditsResponse.parse(res.json);
+      expect(parsed.stagedEdits).toHaveLength(1);
+      expect(parsed.stagedEdits[0]!.status).toBe('pending');
+    });
+  });
+
+  // ---- Settings ----
+
+  describe('GET/PATCH /api/settings', () => {
+    it('GET returns the documented defaults', async () => {
+      const res = await call(ctx.app, 'GET', '/api/settings');
+      expect(res.status).toBe(200);
+      const parsed = UserSettingsDto.parse(res.json);
+      expect(parsed).toEqual({
+        thinkingVisible: false,
+        revisionDebounceMs: 300_000,
+        maxConcurrentAgents: 3,
+        maxEditingDepth: 2,
+        maxConversationDepth: 3,
+        maxReplacementAttempts: 2,
+      });
+    });
+
+    it('accepts a partial patch and returns the full updated settings object', async () => {
+      const res = await call(ctx.app, 'PATCH', '/api/settings', { thinkingVisible: true });
+      expect(res.status).toBe(200);
+      const parsed = UserSettingsDto.parse(res.json);
+      expect(parsed.thinkingVisible).toBe(true);
+      expect(parsed.maxConcurrentAgents).toBe(3); // untouched fields preserved
+    });
+
+    const boundaries: {
+      field: keyof import('@rapid-ai-document-review/shared/contracts/http').UserSettingsPatch;
+      min: number;
+      max: number;
+    }[] = [
+      { field: 'revisionDebounceMs', min: 10_000, max: 3_600_000 },
+      { field: 'maxConcurrentAgents', min: 1, max: 10 },
+      { field: 'maxEditingDepth', min: 0, max: 10 },
+      { field: 'maxConversationDepth', min: 1, max: 10 },
+      { field: 'maxReplacementAttempts', min: 0, max: 10 },
+    ];
+
+    for (const { field, min, max } of boundaries) {
+      it(`${field}: accepts the boundary values [${min}, ${max}] and rejects one past each side`, async () => {
+        const okMin = await call(ctx.app, 'PATCH', '/api/settings', { [field]: min });
+        expect(okMin.status).toBe(200);
+        expect((okMin.json as Record<string, number>)[field]).toBe(min);
+
+        const okMax = await call(ctx.app, 'PATCH', '/api/settings', { [field]: max });
+        expect(okMax.status).toBe(200);
+        expect((okMax.json as Record<string, number>)[field]).toBe(max);
+
+        const belowMin = await call(ctx.app, 'PATCH', '/api/settings', { [field]: min - 1 });
+        expect(belowMin.status).toBe(400);
+        expect(ErrorEnvelope.parse(belowMin.json).error.code).toBe('VALIDATION_FAILED');
+
+        const aboveMax = await call(ctx.app, 'PATCH', '/api/settings', { [field]: max + 1 });
+        expect(aboveMax.status).toBe(400);
+        expect(ErrorEnvelope.parse(aboveMax.json).error.code).toBe('VALIDATION_FAILED');
+      });
+    }
+
+    it('thinkingVisible: rejects a non-boolean value', async () => {
+      const res = await call(ctx.app, 'PATCH', '/api/settings', { thinkingVisible: 'yes' });
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+  });
+});

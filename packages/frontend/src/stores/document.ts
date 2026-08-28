@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import type { DocumentDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RevisionDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type { RestoreRevisionResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame } from '../transport/ws-client.js';
 
@@ -88,7 +89,11 @@ export const useDocumentStore = defineStore('document', {
       this.revisionsNextCursor = page.nextCursor;
     },
 
-    async restore(revision: number): Promise<void> {
+    // Returns the full response (rather than void) so callers — HistoryPanel.vue — can surface
+    // `pendingProposalReconciliation` (http-api.md §POST /revisions/:revision/restore): a
+    // read-only dry-run that never changes any proposal's status, so there is nothing else here
+    // for this action itself to act on beyond passing it through.
+    async restore(revision: number): Promise<RestoreRevisionResponse> {
       const result = await httpClient.restoreRevision(revision);
       this.content = result.content;
       if (this.document) {
@@ -96,6 +101,7 @@ export const useDocumentStore = defineStore('document', {
       }
       this.revisionsNextCursor = null;
       await this.loadRevisions();
+      return result;
     },
 
     async exportRevision(revision?: number, download = false): Promise<string> {

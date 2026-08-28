@@ -1,16 +1,32 @@
 import {
+  AcceptRemainingResponse,
+  ApplyEditResponse,
+  ClearPrimaryResponse,
+  CloseConversationRequest,
+  CloseConversationResponse,
+  ConversationDto,
+  CreateConversationRequest,
   CreateDocumentRequest,
   CreateDocumentResponse,
+  DesignatePrimaryRequest,
+  DesignatePrimaryResponse,
+  DropEditResponse,
+  DropRemainingResponse,
   ErrorEnvelope,
   ExportDocumentQuery,
   GetConversationResponse,
   GetDocumentResponse,
   ListConversationsResponse,
+  ListEditsResponse,
   ListRevisionsResponse,
   PatchDocumentRequest,
   PatchDocumentResponse,
+  PreviewEditResponse,
+  PrimaryWhenBusy,
+  RefreshSendResponse,
   RestoreRevisionResponse,
   RetryResponse,
+  ReviewConversationResponse,
   SendMessageRequest,
   SendMessageResponse,
   UserSettingsDto,
@@ -124,8 +140,74 @@ export const httpClient = {
     );
   },
 
+  async refreshAndSend(id: string, message: string) {
+    const body: SendMessageRequest = { message };
+    return request(`/api/conversations/${id}/refresh-send`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
+      RefreshSendResponse.parse(j),
+    );
+  },
+
   async retryConversation(id: string) {
     return request(`/api/conversations/${id}/retry`, { method: 'POST' }, (j) => RetryResponse.parse(j));
+  },
+
+  async branchConversation(input: CreateConversationRequest) {
+    CreateConversationRequest.parse(input);
+    return request('/api/conversations', { method: 'POST', body: JSON.stringify(input) }, (j) =>
+      ConversationDto.parse(j),
+    );
+  },
+
+  async closeConversation(id: string, foldSummaryIntoParent = false) {
+    const body: CloseConversationRequest = { foldSummaryIntoParent };
+    return request(`/api/conversations/${id}/close`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
+      CloseConversationResponse.parse(j),
+    );
+  },
+
+  async reviewConversation(id: string) {
+    return request(`/api/conversations/${id}/review`, { method: 'POST' }, (j) =>
+      ReviewConversationResponse.parse(j),
+    );
+  },
+
+  async designatePrimary(id: string, whenBusy?: PrimaryWhenBusy) {
+    const body: DesignatePrimaryRequest = { whenBusy };
+    return request(`/api/conversations/${id}/primary`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
+      DesignatePrimaryResponse.parse(j),
+    );
+  },
+
+  async clearPrimary(id: string) {
+    return request(`/api/conversations/${id}/primary`, { method: 'DELETE' }, (j) => ClearPrimaryResponse.parse(j));
+  },
+
+  async listEdits(conversationId: string) {
+    return request(`/api/conversations/${conversationId}/edits`, undefined, (j) => ListEditsResponse.parse(j));
+  },
+
+  async previewEdit(editId: string) {
+    return request(`/api/edits/${editId}/preview`, undefined, (j) => PreviewEditResponse.parse(j));
+  },
+
+  async applyEdit(editId: string) {
+    return request(`/api/edits/${editId}/apply`, { method: 'POST' }, (j) => ApplyEditResponse.parse(j));
+  },
+
+  async dropEdit(editId: string) {
+    return request(`/api/edits/${editId}/drop`, { method: 'POST' }, (j) => DropEditResponse.parse(j));
+  },
+
+  async acceptRemaining(conversationId: string) {
+    return request(`/api/conversations/${conversationId}/edits/accept-remaining`, { method: 'POST' }, (j) =>
+      AcceptRemainingResponse.parse(j),
+    );
+  },
+
+  async dropRemaining(conversationId: string) {
+    return request(`/api/conversations/${conversationId}/edits/drop-remaining`, { method: 'POST' }, (j) =>
+      DropRemainingResponse.parse(j),
+    );
   },
 
   async getSettings() {

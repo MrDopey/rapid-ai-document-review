@@ -21,9 +21,12 @@ export const ErrorCode = z.enum([
   'PENDING_EDITS_BLOCK_CLOSE',
   'PRIMARY_TARGET_BUSY',
   'EDIT_NOT_PENDING',
+  'EDIT_NOT_FOUND',
   'VALIDATION_FAILED',
   'AGENT_UNAVAILABLE',
   'CONVERSATION_NOT_ERRORED',
+  'CONVERSATION_ERRORED',
+  'CONVERSATION_NOT_CLOSED',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -276,8 +279,11 @@ export const DesignatePrimaryRequest = z.object({ whenBusy: PrimaryWhenBusy.opti
 export type DesignatePrimaryRequest = z.infer<typeof DesignatePrimaryRequest>;
 
 export const DesignatePrimaryResponse = z.object({
-  primaryConversationId: z.string(),
-  applied: z.enum(['immediately', 'deferred_until_idle', 'already_primary']),
+  // Nullable rather than always-a-string: a `cancel` response reports the (possibly nonexistent)
+  // Primary as it stood before the request, and "no Primary" is a valid, reachable state
+  // (FR-027a) that this field must be able to represent even on a no-op outcome.
+  primaryConversationId: z.string().nullable(),
+  applied: z.enum(['immediately', 'deferred_until_idle', 'already_primary', 'cancelled']),
   previousPrimaryId: z.string().nullable(),
   previousPrimaryStillWorking: z.boolean(),
 });

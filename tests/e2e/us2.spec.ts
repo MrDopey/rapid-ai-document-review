@@ -32,7 +32,7 @@ test.describe('US2 — ask the main conversation about the document', () => {
       await composer.fill('What is this document about?');
 
       const sc001Start = pasteStartedAt || Date.now();
-      await page.getByRole('button', { name: 'Send' }).click();
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
 
       // The user's own message is recorded and rendered too (ConversationService.send).
       await expect(page.locator('.message-bubble[data-role="user"]').last()).toContainText(
@@ -62,7 +62,7 @@ test.describe('US2 — ask the main conversation about the document', () => {
 
       const composer = page.getByLabel('Message Main');
       await composer.fill('Follow-up question with reasoning visible.');
-      await page.getByRole('button', { name: 'Send' }).click();
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
 
       const assistantBubble = page.locator('.message-bubble[data-role="assistant"]').last();
       const reasoning = assistantBubble.locator('details.reasoning');
@@ -77,7 +77,7 @@ test.describe('US2 — ask the main conversation about the document', () => {
 
       const composer = page.getByLabel('Message Main');
       await composer.fill('Another question with reasoning hidden.');
-      await page.getByRole('button', { name: 'Send' }).click();
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
 
       const assistantBubble = page.locator('.message-bubble[data-role="assistant"]').last();
       await expect(assistantBubble.locator('.message-text')).toContainText('fake deterministic answer', {

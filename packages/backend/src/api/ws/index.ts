@@ -18,16 +18,18 @@ export function registerWsRoutes(
 
   app.get('/events', { websocket: true }, (socket: WebSocket, _request) => {
     socket.on('message', (raw: Buffer) => {
+      // No `event` field on either warn below: a malformed inbound frame has no counterpart in
+      // the closed WebSocket event vocabulary (FR-042) — it never reaches EventService/EventHub.
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
-        logger.warn({ event: 'ws_invalid_frame' }, 'received non-JSON WebSocket frame');
+        logger.warn('received non-JSON WebSocket frame');
         return;
       }
       const frame = ClientFrame.safeParse(parsed);
       if (!frame.success) {
-        logger.warn({ event: 'ws_invalid_frame' }, 'received frame failing shared schema validation');
+        logger.warn('received frame failing shared schema validation');
         return;
       }
       if (frame.data.type === 'ping') {

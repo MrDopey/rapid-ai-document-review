@@ -12,10 +12,21 @@ export interface EventBridgeContext {
   turnId: string;
 }
 
+/**
+ * `propose_document_edit` (document-tools.ts) reports its proposal id via the `details` field of
+ * the `AgentToolResult` it returns — the SDK-defined slot for "arbitrary structured details for
+ * logs or UI rendering" — which Pi forwards verbatim as `tool_execution_end`'s `result`. A
+ * top-level `stagedEditId` is also accepted for forward/back compatibility with any tool that puts
+ * it there directly.
+ */
 function extractStagedEditId(result: unknown): string | null {
-  if (result && typeof result === 'object' && 'stagedEditId' in result) {
-    const value = (result as { stagedEditId?: unknown }).stagedEditId;
-    return typeof value === 'string' ? value : null;
+  if (!result || typeof result !== 'object') return null;
+  const direct = (result as { stagedEditId?: unknown }).stagedEditId;
+  if (typeof direct === 'string') return direct;
+  const details = (result as { details?: unknown }).details;
+  if (details && typeof details === 'object') {
+    const value = (details as { stagedEditId?: unknown }).stagedEditId;
+    if (typeof value === 'string') return value;
   }
   return null;
 }
@@ -43,7 +54,11 @@ export class EventBridge {
     private readonly runBuffer: RunBuffer,
     private readonly ctx: EventBridgeContext,
     private readonly onSettle?: () => void,
-  ) {}
+  ) {
+    // There is exactly one `RunBuffer` for the app's lifetime, so re-registering it on every turn
+    // is idempotent — see `EventHub.setRunBuffer` (FR-037a).
+    this.eventHub.setRunBuffer(this.runBuffer);
+  }
 
   get isSettled(): boolean {
     return this.settled;
@@ -60,9 +75,10 @@ export class EventBridge {
 
   handle(event: AgentSessionEventLike): void {
     if (this.settled) {
+      // No `event` field: this fires precisely because no application event will be published
+      // for it — the raw Pi SDK event type has no place in the closed vocabulary (FR-042).
       logger.warn(
         {
-          event: 'pi_event_discarded',
           documentId: this.ctx.documentId,
           conversationId: this.ctx.conversationId,
           piEventType: event.type,
@@ -93,6 +109,15 @@ export class EventBridge {
           conversationId: this.ctx.conversationId,
           at: new Date().toISOString(),
           data: { messageId: event.messageId, role: event.role },
+        });
+        // FR-037a: tracked so a client reconnecting mid-run can be caught up on this message's
+        // partial content (EventHub.subscribe) — cleared below on `message_end`, and as a safety
+        // net in `finalizeSettle` for a run that never reaches one.
+        this.eventHub.registerActiveMessage(this.ctx.conversationId, {
+          documentId: this.ctx.documentId,
+          messageId: event.messageId,
+          textKey: this.textBufferKey(event.messageId),
+          reasoningKey: this.reasoningBufferKey(event.messageId),
         });
         break;
 
@@ -137,6 +162,7 @@ export class EventBridge {
         });
         this.runBuffer.clear(this.textBufferKey(event.messageId));
         this.runBuffer.clear(this.reasoningBufferKey(event.messageId));
+        this.eventHub.clearActiveMessage(this.ctx.conversationId);
         break;
 
       case 'tool_execution_start':
@@ -252,6 +278,7 @@ export class EventBridge {
   private finalizeSettle(): void {
     if (this.settled) return;
     this.settled = true;
+    this.eventHub.clearActiveMessage(this.ctx.conversationId);
     this.onSettle?.();
     for (const fn of this.cleanupFns) fn();
     this.cleanupFns.length = 0;

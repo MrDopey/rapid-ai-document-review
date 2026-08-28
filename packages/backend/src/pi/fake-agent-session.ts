@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentSessionEventLike, AgentSessionEventListenerLike, AgentSessionLike } from './agent-session-port.js';
+import type {
+  AgentSessionEventLike,
+  AgentSessionEventListenerLike,
+  AgentSessionLike,
+  CustomMessageLike,
+} from './agent-session-port.js';
+import type { RegisteredToolLike } from './pi-service.js';
 
 function chunk(text: string, size: number): string[] {
   const parts: string[] = [];
@@ -9,6 +15,67 @@ function chunk(text: string, size: number): string[] {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Test-only scripting protocol for driving `propose_document_edit` deterministically through
+ * `FakeAgentSession` (no real model ever decides to call a tool here). A user/system message
+ * beginning with this prefix, followed by a JSON `{ summary, operations }` payload matching
+ * `proposeDocumentEditParams`, causes the fake session to actually invoke the real
+ * `propose_document_edit` tool object it was constructed with — exercising the genuine
+ * EditService/ConflictService pipeline end to end, not a stubbed response.
+ */
+export const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
+
+function parseDirective(text: string): { summary: string; operations: { old_string: string; new_string: string }[] } | null {
+  if (!text.startsWith(PROPOSE_EDIT_DIRECTIVE)) return null;
+  try {
+    return JSON.parse(text.slice(PROPOSE_EDIT_DIRECTIVE.length));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same protocol as `PROPOSE_EDIT_DIRECTIVE`, for `read_document` (US4 staleness/refresh
+ * scenarios): a message beginning with this prefix, optionally followed by a JSON
+ * `{ from_line?, to_line? }` payload, causes the fake session to actually invoke the real
+ * `read_document` tool and echo its full text result back as the assistant's answer. That result
+ * embeds `conversation.context_revision` and the document content served at it (document-
+ * tools.ts's `renderReadResult`), which is what lets a test assert exactly what content/revision
+ * the agent "saw" without any real model in the loop.
+ */
+export const READ_DOCUMENT_DIRECTIVE = '__READ_DOCUMENT__';
+
+function parseReadDirective(text: string): { from_line?: number; to_line?: number } | null {
+  if (!text.startsWith(READ_DOCUMENT_DIRECTIVE)) return null;
+  const rest = text.slice(READ_DOCUMENT_DIRECTIVE.length);
+  if (!rest) return {};
+  try {
+    return JSON.parse(rest);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * A message beginning with this prefix causes the fake session to fail the turn deterministically
+ * (`agent_error` instead of `agent_settled`) rather than answer — US5's FR-029a scenario needs a
+ * conversation to become `errored` on cue, to prove a pending "switch when idle" designation is
+ * silently cancelled rather than applied against a now-ineligible target. Optional JSON after the
+ * prefix may supply a custom `message`; otherwise a default is used.
+ */
+export const ERROR_DIRECTIVE = '__AGENT_ERROR__';
+
+function parseErrorDirective(text: string): { message?: string } | null {
+  if (!text.startsWith(ERROR_DIRECTIVE)) return null;
+  const rest = text.slice(ERROR_DIRECTIVE.length);
+  if (!rest) return {};
+  try {
+    return JSON.parse(rest);
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -26,9 +93,17 @@ export class FakeAgentSession implements AgentSessionLike {
 
   private streaming = false;
   private readonly listeners = new Set<AgentSessionEventListenerLike>();
+  private readonly tools: RegisteredToolLike[];
+  /** Messages queued via `sendCustomMessage` (FR-034's fold-summary delivery, research R1) that
+   * have not yet been picked up by a turn — mirrors real `deliverAs: 'nextTurn'` semantics
+   * (appended for the *next* turn, no turn triggered here). Consumed and echoed back into the
+   * very next plain answer so an e2e test can assert the delivered content deterministically,
+   * without a real model in the loop. */
+  private readonly pendingCustomMessages: string[] = [];
 
-  constructor(sessionFile?: string) {
+  constructor(sessionFile?: string, tools: RegisteredToolLike[] = []) {
     this.sessionFile = sessionFile;
+    this.tools = tools;
   }
 
   get isStreaming(): boolean {
@@ -45,7 +120,15 @@ export class FakeAgentSession implements AgentSessionLike {
   }
 
   getActiveToolNames(): string[] {
-    return ['read_document'];
+    return this.tools.map((t) => t.name);
+  }
+
+  /** Test-mode stand-in for the real SDK's `sendCustomMessage` (research R1). Never triggers a
+   * turn itself (matching `deliverAs: 'nextTurn'`'s real semantics) — it just queues the content
+   * for the next plain answer to echo back, so a test can assert the fold summary actually
+   * reached the parent's session without a real model. */
+  async sendCustomMessage(message: CustomMessageLike): Promise<void> {
+    this.pendingCustomMessages.push(message.content);
   }
 
   async waitForIdle(): Promise<void> {
@@ -72,6 +155,30 @@ export class FakeAgentSession implements AgentSessionLike {
   }
 
   private async runScript(userText: string): Promise<void> {
+    const errorDirective = parseErrorDirective(userText);
+    if (errorDirective) {
+      await sleep(20);
+      this.streaming = false;
+      this.emit({ type: 'agent_error', message: errorDirective.message ?? 'Simulated agent failure (test directive).' });
+      return;
+    }
+
+    const proposeDirective = parseDirective(userText);
+    const readDirective = proposeDirective ? null : parseReadDirective(userText);
+    if (proposeDirective) {
+      await this.runProposeEditDirective(proposeDirective);
+    } else if (readDirective) {
+      await this.runReadDocumentDirective(readDirective);
+    } else {
+      await this.runPlainAnswer(userText);
+    }
+
+    this.streaming = false;
+    this.emit({ type: 'agent_end', willRetry: false });
+    this.emit({ type: 'agent_settled' });
+  }
+
+  private async runPlainAnswer(userText: string): Promise<string> {
     const messageId = `fake_msg_${randomUUID()}`;
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
 
@@ -81,15 +188,88 @@ export class FakeAgentSession implements AgentSessionLike {
       await sleep(5);
     }
 
-    const text = `Here is a fake deterministic answer to: "${userText}".`;
+    // Echo back any fold summaries delivered via `sendCustomMessage` since the last turn
+    // (FR-034), so a test can assert the parent's next answer reflects the folded content.
+    const noted = this.pendingCustomMessages.length > 0
+      ? `\n\n[Noted custom context: ${this.pendingCustomMessages.join(' | ')}]`
+      : '';
+    this.pendingCustomMessages.length = 0;
+
+    const text = `Here is a fake deterministic answer to: "${userText}".${noted}`;
     for (const delta of chunk(text, 6)) {
       this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
       await sleep(5);
     }
 
     this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning });
-    this.streaming = false;
-    this.emit({ type: 'agent_end', willRetry: false });
-    this.emit({ type: 'agent_settled' });
+    return text;
+  }
+
+  /** Actually invokes the real `propose_document_edit` tool object (document-tools.ts) — this is
+   * what makes US3 e2e scenarios exercise the genuine EditService/ConflictService pipeline instead
+   * of a canned response, deterministically, with no live model involved. */
+  private async runProposeEditDirective(directive: {
+    summary: string;
+    operations: { old_string: string; new_string: string }[];
+  }): Promise<string> {
+    const toolCallId = `fake_tool_${randomUUID()}`;
+    const tool = this.tools.find((t) => t.name === 'propose_document_edit');
+
+    if (!tool) {
+      const text = 'propose_document_edit is not available in this conversation.';
+      const messageId = `fake_msg_${randomUUID()}`;
+      this.emit({ type: 'message_start', messageId, role: 'assistant' });
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta: text } });
+      this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+      return text;
+    }
+
+    this.emit({ type: 'tool_execution_start', toolCallId, toolName: 'propose_document_edit' });
+    const result = (await tool.execute(toolCallId, directive, undefined, undefined, undefined)) as {
+      content?: { type: string; text?: string }[];
+    };
+    this.emit({ type: 'tool_execution_end', toolCallId, toolName: 'propose_document_edit', isError: false, result });
+
+    const text = result.content?.[0]?.text ?? 'Done.';
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    for (const delta of chunk(text, 12)) {
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
+      await sleep(5);
+    }
+    this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+    return text;
+  }
+
+  /** Actually invokes the real `read_document` tool object (document-tools.ts) and echoes its
+   * text result as the assistant's answer — see `READ_DOCUMENT_DIRECTIVE` above. */
+  private async runReadDocumentDirective(params: { from_line?: number; to_line?: number }): Promise<string> {
+    const toolCallId = `fake_tool_${randomUUID()}`;
+    const tool = this.tools.find((t) => t.name === 'read_document');
+
+    if (!tool) {
+      const text = 'read_document is not available in this conversation.';
+      const messageId = `fake_msg_${randomUUID()}`;
+      this.emit({ type: 'message_start', messageId, role: 'assistant' });
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta: text } });
+      this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+      return text;
+    }
+
+    this.emit({ type: 'tool_execution_start', toolCallId, toolName: 'read_document' });
+    const result = (await tool.execute(toolCallId, params, undefined, undefined, undefined)) as {
+      content?: { type: string; text?: string }[];
+    };
+    this.emit({ type: 'tool_execution_end', toolCallId, toolName: 'read_document', isError: false, result });
+
+    const text = result.content?.[0]?.text ?? 'No content.';
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    for (const delta of chunk(text, 12)) {
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
+      await sleep(5);
+    }
+    this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+    return text;
   }
 }

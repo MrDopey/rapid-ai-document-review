@@ -83,11 +83,31 @@ export class DocumentService {
     private readonly revisionService: RevisionService,
   ) {}
 
-  /** Loads Automerge state from storage at startup, if a document already exists (FR-039). */
+  /**
+   * Loads Automerge state from storage at startup, if a document already exists (FR-039).
+   * `documents.current_revision` is expected to always match its latest `revision` row — kept in
+   * sync by `RevisionService.createRevision`'s own write to that column — but a mismatch here
+   * would mean a prior crash left the two out of step. This is verified defensively (log-warn, not
+   * a thrown error): the application still starts and serves whatever state is actually on disk
+   * (Principle I) rather than refusing to boot over a consistency check.
+   */
   loadIfExists(): void {
     const doc = this.storage.getDocument();
-    if (doc) {
-      this.automerge.set(AutomergeStore.load(this.storage, doc.id));
+    if (!doc) return;
+
+    this.automerge.set(AutomergeStore.load(this.storage, doc.id));
+
+    const latestRevision = this.storage.getLatestRevision(doc.id);
+    const latestRevisionNumber = latestRevision?.revision ?? 0;
+    if (latestRevisionNumber !== doc.currentRevision) {
+      logger.warn(
+        {
+          documentId: doc.id,
+          currentRevision: doc.currentRevision,
+          latestRevisionRow: latestRevisionNumber,
+        },
+        'document.currentRevision does not match its latest revision row at startup',
+      );
     }
   }
 
@@ -169,6 +189,37 @@ export class DocumentService {
     this.storage.updateDocumentTitle(doc.id, title, new Date().toISOString());
   }
 
+  /**
+   * Called by `RevisionService` (via the late-bound `setDocumentService` wiring in server.ts —
+   * mirroring `PiService.setEditService`'s cycle-breaking pattern) after every revision is
+   * created, regardless of origin. Computes which non-closed conversations just became stale
+   * (FR-016) and emits `conversation_stale` for exactly those.
+   *
+   * "Just became stale" means this conversation's `context_revision` was exactly caught up
+   * immediately before this revision (`contextRevision === currentRevision - 1`) — a conversation
+   * already behind by more than one revision was already known stale from an earlier call and is
+   * not re-emitted (websocket-events.md: "convenience signal", not a per-revision recount). A
+   * conversation is never marked stale by a revision it caused itself: `EditService.applyClean`
+   * advances the authoring conversation's own `context_revision` to match before the revision is
+   * created, so it can never appear "one behind" its own edit (FR-016).
+   */
+  notifyRevisionCreated(documentId: string, currentRevision: number): void {
+    const conversations = this.storage.listAllConversations(documentId);
+    for (const conversation of conversations) {
+      if (conversation.status === 'closed') continue;
+      if (conversation.contextRevision !== currentRevision - 1) continue;
+
+      this.publish(documentId, {
+        type: 'conversation_stale',
+        sequence: null,
+        documentId,
+        conversationId: conversation.id,
+        at: new Date().toISOString(),
+        data: { contextRevision: conversation.contextRevision, currentRevision },
+      });
+    }
+  }
+
   applyChanges(
     baseRevision: number | undefined,
     changes: DocumentChangeSpec[] | undefined,
@@ -183,8 +234,10 @@ export class DocumentService {
 
     if (changes && changes.length > 0) {
       if (baseRevision !== undefined && doc.currentRevision - baseRevision > OUT_OF_SYNC_REVISION_THRESHOLD) {
+        // No `event` field: this is a diagnostic about the client's request, not one of the
+        // closed vocabulary's own domain events (FR-042).
         logger.warn(
-          { event: 'document_out_of_sync', documentId: doc.id, baseRevision, currentRevision: doc.currentRevision },
+          { documentId: doc.id, baseRevision, currentRevision: doc.currentRevision },
           'client applying changes from a badly out-of-sync base revision',
         );
       }

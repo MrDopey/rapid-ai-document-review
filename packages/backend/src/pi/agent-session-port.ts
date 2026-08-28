@@ -97,6 +97,13 @@ export type AgentSessionEventLike =
 
 export type AgentSessionEventListenerLike = (event: AgentSessionEventLike) => void;
 
+export interface CustomMessageLike {
+  customType: string;
+  content: string;
+  display: boolean;
+  details?: unknown;
+}
+
 export interface AgentSessionLike {
   readonly sessionFile: string | undefined;
   readonly sessionId: string;
@@ -105,6 +112,14 @@ export interface AgentSessionLike {
 
   subscribe(listener: AgentSessionEventListenerLike): () => void;
   prompt(text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<void>;
+  /** Injects a message into this session without necessarily triggering a new turn (research
+   * R1: `session.sendCustomMessage({ ... }, { deliverAs: 'nextTurn' })`) — the mechanism behind
+   * FR-034's parent-summary fold. `deliverAs: 'nextTurn'` appends the message for the session's
+   * next turn to pick up as context, without starting one itself. */
+  sendCustomMessage(
+    message: CustomMessageLike,
+    options?: { triggerTurn?: boolean; deliverAs?: 'steer' | 'followUp' | 'nextTurn' },
+  ): Promise<void>;
   getActiveToolNames(): string[];
   waitForIdle(): Promise<void>;
   dispose(): void;

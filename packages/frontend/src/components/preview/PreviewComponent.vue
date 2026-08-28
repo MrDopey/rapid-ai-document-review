@@ -36,7 +36,9 @@ watch(
 </script>
 
 <template>
-  <div ref="hostRef" class="preview-pane" aria-label="Rendered document preview" v-html="safeHtml"></div>
+  <!-- A plain <div>'s implicit "generic" role does not support an author-supplied name — role="region"
+       makes this a genuine labelled landmark so `aria-label` is actually exposed to assistive tech. -->
+  <div ref="hostRef" class="preview-pane" role="region" aria-label="Rendered document preview" v-html="safeHtml"></div>
 </template>
 
 <style scoped>

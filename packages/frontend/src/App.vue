@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useDocumentStore } from './stores/document.js';
 import { useConversationsStore } from './stores/conversations.js';
 import { useSettingsStore } from './stores/settings.js';
+import { useEditsStore } from './stores/edits.js';
 import { WsClient } from './transport/ws-client.js';
+import { mountLiveRegions } from './a11y/live-regions.js';
 import EditorComponent from './components/editor/EditorComponent.vue';
 import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
@@ -14,6 +16,7 @@ import ConversationView from './components/conversation/ConversationView.vue';
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
 const settingsStore = useSettingsStore();
+const editsStore = useEditsStore();
 
 const pasteText = ref('');
 const historyOpen = ref(false);
@@ -23,6 +26,9 @@ const selectedConversationId = ref<string | null>(null);
 const hasDocument = computed(() => store.document !== null);
 
 onMounted(async () => {
+  // FR-043b: one pair of visually-hidden ARIA live regions for the whole app — see
+  // a11y/live-regions.ts for why this is a plain DOM module rather than a composable.
+  mountLiveRegions();
   await store.load();
   if (store.document) {
     connectWs();
@@ -53,6 +59,7 @@ function connectWs(): void {
     void store.handleServerFrame(frame);
     conversationsStore.handleServerFrame(frame);
     settingsStore.handleServerFrame(frame);
+    editsStore.handleServerFrame(frame);
   });
   client.connect();
   wsClient.value = client;
@@ -68,6 +75,14 @@ async function onCreateDocument(): Promise<void> {
 function onEditorChange(changes: { from: number; to: number; insert: string }[]): void {
   if (!store.document) return;
   void store.patchContent(store.document.currentRevision, changes);
+}
+
+/** FR-011: branch a new conversation from the current selection, seeded off Main. */
+async function onBranchFromSelection(range: { from: number; to: number }): Promise<void> {
+  const main = conversationsStore.conversations.find((c) => c.kind === 'main');
+  if (!main) return;
+  const conversation = await conversationsStore.branch({ parentConversationId: main.id, selection: range });
+  selectedConversationId.value = conversation.id;
 }
 
 async function onToggleReasoning(event: Event): Promise<void> {
@@ -105,12 +120,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
       </button>
     </header>
     <div class="panes">
-      <EditorComponent :model-value="store.content" @change="onEditorChange" />
+      <EditorComponent :model-value="store.content" @change="onEditorChange" @branch-from-selection="onBranchFromSelection" />
       <PreviewComponent :content="store.content" />
       <HistoryPanel v-if="historyOpen" />
       <aside class="conversation-sidebar">
         <HudPanel :selected-id="selectedConversationId" @select="selectedConversationId = $event" />
-        <ConversationView v-if="selectedConversationId" :conversation-id="selectedConversationId" />
+        <ConversationView
+          v-if="selectedConversationId"
+          :conversation-id="selectedConversationId"
+          @select="selectedConversationId = $event"
+        />
       </aside>
     </div>
   </div>

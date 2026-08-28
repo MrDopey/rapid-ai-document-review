@@ -1,19 +1,96 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
+import { ApiError } from '../../transport/http-client.js';
+import type { PrimaryWhenBusy } from '@rapid-ai-document-review/shared/contracts/http';
+import { useFocusTrap } from '../../a11y/focus-manager.js';
 
 const props = defineProps<{ selectedId: string | null }>();
 const emit = defineEmits<{ (e: 'select', id: string): void }>();
 const store = useConversationsStore();
 
+/** FR-029: the target/current-Primary-busy warning, offering exactly the three `whenBusy`
+ *  choices — set only while a designation request is awaiting the user's decision. */
+const busyPrompt = ref<{ conversationId: string; currentPrimaryId: string | null; busyConversationId: string } | null>(
+  null,
+);
+const primaryError = ref<string | null>(null);
+const primaryBusyId = ref<string | null>(null);
+const busyDialogEl = ref<HTMLElement | null>(null);
+
+const hasPrimary = computed(() => store.conversations.some((c) => c.isPrimary));
+const busyDialogOpen = computed(() => busyPrompt.value !== null);
+
+// FR-043d: opening the busy-switch warning moves focus to its first choice; Escape (or Cancel)
+// returns focus to the "Make Primary" button that triggered it.
+useFocusTrap(busyDialogEl, busyDialogOpen, { onEscape: () => void resolveBusyPrompt('cancel') });
+
 onMounted(() => {
   if (!store.loaded) void store.load();
 });
+
+function conversationName(id: string | null): string {
+  if (!id) return 'none';
+  return store.conversations.find((c) => c.id === id)?.name ?? id;
+}
+
+/** Issues (or re-issues, with an explicit choice) a designation request. On `409
+ *  PRIMARY_TARGET_BUSY`, opens the three-choice warning instead of surfacing an error. */
+async function makePrimary(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<void> {
+  primaryError.value = null;
+  primaryBusyId.value = conversationId;
+  try {
+    const result = await store.designatePrimary(conversationId, whenBusy);
+    if (result.applied !== 'cancelled') busyPrompt.value = null;
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 'PRIMARY_TARGET_BUSY') {
+      const details = (err.details ?? {}) as { currentPrimaryId?: string | null; busyConversationId?: string };
+      busyPrompt.value = {
+        conversationId,
+        currentPrimaryId: details.currentPrimaryId ?? null,
+        busyConversationId: details.busyConversationId ?? conversationId,
+      };
+    } else {
+      primaryError.value = err instanceof Error ? err.message : 'Failed to designate Primary.';
+    }
+  } finally {
+    primaryBusyId.value = null;
+  }
+}
+
+async function resolveBusyPrompt(whenBusy: PrimaryWhenBusy): Promise<void> {
+  if (!busyPrompt.value) return;
+  const { conversationId } = busyPrompt.value;
+  if (whenBusy === 'cancel') {
+    busyPrompt.value = null;
+  }
+  await makePrimary(conversationId, whenBusy);
+}
+
+async function clearPrimary(): Promise<void> {
+  const current = store.conversations.find((c) => c.isPrimary);
+  if (!current) return;
+  primaryError.value = null;
+  try {
+    await store.clearPrimary(current.id);
+  } catch (err) {
+    primaryError.value = err instanceof Error ? err.message : 'Failed to clear Primary.';
+  }
+}
 </script>
 
 <template>
   <nav class="hud-panel" aria-label="Conversations">
     <h2>Conversations</h2>
+    <p class="primary-summary">
+      <span v-if="hasPrimary">
+        Primary: <strong>{{ conversationName(store.conversations.find((c) => c.isPrimary)?.id ?? null) }}</strong>
+        <button type="button" class="clear-primary-button" @click="clearPrimary">Clear Primary</button>
+      </span>
+      <span v-else class="badge no-primary-badge">No Primary — every conversation stages its edits</span>
+    </p>
+    <div v-if="primaryError" class="error-banner" role="alert">{{ primaryError }}</div>
+
     <ul>
       <li v-for="conv in store.conversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.75}rem` }">
         <button
@@ -25,6 +102,7 @@ onMounted(() => {
         >
           <span class="name">{{ conv.name }}</span>
           <span class="badge status-badge" :data-status="conv.status">{{ conv.status }}</span>
+          <span v-if="conv.status === 'closed'" class="badge readonly-badge">Read-only</span>
           <span v-if="conv.isPrimary" class="badge primary-badge">Primary</span>
           <span v-if="conv.isStale" class="badge stale-badge">Stale</span>
           <span v-if="conv.pendingEditCount > 0" class="badge pending-badge">{{ conv.pendingEditCount }}</span>
@@ -32,8 +110,38 @@ onMounted(() => {
             Queued #{{ store.queueInfo[conv.id]!.queuePosition }}
           </span>
         </button>
+        <button
+          v-if="!conv.isPrimary && conv.status !== 'closed'"
+          type="button"
+          class="make-primary-button"
+          :disabled="primaryBusyId === conv.id || conv.status === 'errored'"
+          :title="conv.status === 'errored' ? 'An errored conversation cannot be designated Primary' : undefined"
+          @click.stop="makePrimary(conv.id)"
+        >
+          Make Primary
+        </button>
       </li>
     </ul>
+
+    <div v-if="busyPrompt" class="primary-busy-dialog-overlay">
+      <div
+        ref="busyDialogEl"
+        class="primary-busy-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Primary conversation is busy"
+      >
+        <p>
+          {{ conversationName(busyPrompt.busyConversationId) }} is still working. What should happen to the Primary
+          designation?
+        </p>
+        <div class="primary-busy-choices">
+          <button type="button" @click="resolveBusyPrompt('switch_now')">Switch now</button>
+          <button type="button" @click="resolveBusyPrompt('switch_when_idle')">Switch when idle</button>
+          <button type="button" @click="resolveBusyPrompt('cancel')">Cancel</button>
+        </div>
+      </div>
+    </div>
   </nav>
 </template>
 
@@ -49,6 +157,15 @@ onMounted(() => {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.hud-panel li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+.make-primary-button {
+  align-self: flex-start;
 }
 .conversation-row {
   display: flex;
@@ -83,7 +200,56 @@ onMounted(() => {
 .pending-badge {
   color: #1d4ed8;
 }
+.readonly-badge {
+  color: #6b7280;
+}
 .queue-badge {
   color: #6b21a8;
+}
+.primary-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+}
+.no-primary-badge {
+  color: #6b7280;
+}
+.clear-primary-button,
+.make-primary-button {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.35rem;
+}
+.error-banner {
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.5rem;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.8rem;
+}
+.primary-busy-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.primary-busy-dialog {
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #111);
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 22rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.primary-busy-choices {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
 }
 </style>

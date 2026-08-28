@@ -1,8 +1,10 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import type { EventHub } from '../events/event-hub.js';
 import type { EventService } from '../events/event-service.js';
-import type { RevisionRow, StorageAdapter } from '../storage/storage-adapter.js';
+import type { ConflictDetail, RevisionRow, StorageAdapter } from '../storage/storage-adapter.js';
+import { reconcile } from './text-anchor.js';
 import type { AutomergeStoreHolder } from './automerge-store-holder.js';
+import type { DocumentService } from './document-service.js';
 
 export interface CreateRevisionOptions {
   source: RevisionRow['source'];
@@ -14,10 +16,21 @@ export interface CreateRevisionOptions {
   autoApplied?: boolean;
 }
 
+export interface PendingProposalReconciliationEntry {
+  stagedEditId: string;
+  reconcilable: boolean;
+  conflictDetail?: ConflictDetail;
+}
+
 export interface RestoreResult {
   currentRevision: number;
   restoredFrom: number;
   content: string;
+  /** Dry-run reconciliation of every `pending` staged_edit against the would-be-restored content
+   *  (http-api.md §POST /revisions/:revision/restore), computed *before* the restore is committed.
+   *  Read-only: never applies, supersedes, or otherwise changes any staged_edit's status — the
+   *  user decides per-proposal afterwards. Omitted when there are no pending proposals. */
+  pendingProposalReconciliation?: PendingProposalReconciliationEntry[];
 }
 
 /**
@@ -27,6 +40,12 @@ export interface RestoreResult {
  */
 export class RevisionService {
   private debounceTimer: NodeJS.Timeout | null = null;
+  /** Late-bound (server.ts, right after `DocumentService` is constructed): `DocumentService`
+   *  already depends on `RevisionService` to create revisions, so `RevisionService` depending on
+   *  `DocumentService` too would be a genuine construction cycle — broken the same way
+   *  `PiService.setEditService` breaks its own cycle with `EditService` (pi-service.ts). Only used
+   *  to notify, after every revision, which conversations just became stale (FR-016). */
+  private documentService: DocumentService | null = null;
 
   constructor(
     private readonly storage: StorageAdapter,
@@ -34,6 +53,10 @@ export class RevisionService {
     private readonly eventHub: EventHub,
     private readonly automerge: AutomergeStoreHolder,
   ) {}
+
+  setDocumentService(documentService: DocumentService): void {
+    this.documentService = documentService;
+  }
 
   /** Resets the per-document debounce timer; fires a manual_debounce revision after inactivity. */
   scheduleDebounce(documentId: string): void {
@@ -99,6 +122,8 @@ export class RevisionService {
       },
     });
 
+    this.documentService?.notifyRevisionCreated(documentId, row.revision);
+
     return row;
   }
 
@@ -110,6 +135,21 @@ export class RevisionService {
     const store = this.automerge.get();
     const heads = JSON.parse(target.heads) as string[];
     const restoredContent = store.view(heads);
+
+    // Dry-run reconciliation (T072a, http-api.md §POST /revisions/:revision/restore): computed
+    // against the would-be-restored content *before* anything below commits, and never mutates a
+    // staged_edit's status — a pure read used only to populate the response.
+    const pending = this.storage.listPendingStagedEdits(documentId);
+    const pendingProposalReconciliation: PendingProposalReconciliationEntry[] | undefined =
+      pending.length === 0
+        ? undefined
+        : pending.map((edit) => {
+            const result = reconcile(edit.operations, restoredContent);
+            return result.outcome === 'clean'
+              ? { stagedEditId: edit.id, reconcilable: true }
+              : { stagedEditId: edit.id, reconcilable: false, conflictDetail: result.detail };
+          });
+
     store.updateText(restoredContent);
 
     const revisionRow = this.createRevision(documentId, {
@@ -128,7 +168,12 @@ export class RevisionService {
       data: { revision: revisionRow.revision, restoredFrom: revisionNumber, content: restoredContent },
     });
 
-    return { currentRevision: revisionRow.revision, restoredFrom: revisionNumber, content: restoredContent };
+    return {
+      currentRevision: revisionRow.revision,
+      restoredFrom: revisionNumber,
+      content: restoredContent,
+      pendingProposalReconciliation,
+    };
   }
 
   export(documentId: string, revisionNumber?: number): string | null {

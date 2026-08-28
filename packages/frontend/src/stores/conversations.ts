@@ -1,7 +1,19 @@
 import { defineStore } from 'pinia';
-import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  ConversationDto,
+  CreateConversationRequest,
+  DesignatePrimaryResponse,
+  PrimaryWhenBusy,
+  ReviewConversationResponse,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame } from '../transport/ws-client.js';
+import {
+  announceAgentError,
+  announceAgentStarted,
+  announceConversationStale,
+  announceMessageCompleted,
+} from '../a11y/live-regions.js';
 
 export interface ConversationMessageState {
   id: string;
@@ -18,10 +30,20 @@ export interface QueueInfo {
   limit: number;
 }
 
+export interface FoldedSummaryInfo {
+  summary: string;
+  at: string;
+}
+
 export interface ConversationsState {
   conversations: ConversationDto[];
   messagesByConversation: Record<string, ConversationMessageState[]>;
   queueInfo: Record<string, QueueInfo>;
+  /** FR-034: the most recently delivered fold summary per parent conversation id, from the
+   *  `conversation_summary_folded` event — emitted only once the summary has actually been
+   *  generated and delivered (never at close time). Surfaced in ConversationView.vue so the user
+   *  (and e2e tests) can observe delivery without waiting on a subsequent agent turn. */
+  foldedSummaries: Record<string, FoldedSummaryInfo>;
   loaded: boolean;
 }
 
@@ -36,6 +58,7 @@ export const useConversationsStore = defineStore('conversations', {
     conversations: [],
     messagesByConversation: {},
     queueInfo: {},
+    foldedSummaries: {},
     loaded: false,
   }),
 
@@ -59,12 +82,65 @@ export const useConversationsStore = defineStore('conversations', {
       }));
     },
 
+    /** Refreshes only the conversation-level DTO (status, pendingEditCount, isPrimary, …) without
+     *  touching `messagesByConversation` — unlike `loadDetail`, safe to call while a turn is still
+     *  streaming (a `staged_edit_*` event can arrive mid-turn, e.g. from `propose_document_edit`). */
+    async refreshConversationMeta(conversationId: string): Promise<void> {
+      const detail = await httpClient.getConversation(conversationId);
+      this.upsertConversation(detail.conversation);
+    },
+
     async send(conversationId: string, message: string): Promise<void> {
       await httpClient.sendMessage(conversationId, message);
     },
 
+    /** FR-018: refresh this conversation's context to the current document revision, then send —
+     *  `contextRevision`/`isStale` update here from the `conversation_context_refreshed` WS event
+     *  (handleServerFrame below), same as every other server-computed field in this store. */
+    async refreshAndSend(conversationId: string, message: string): Promise<void> {
+      await httpClient.refreshAndSend(conversationId, message);
+    },
+
     async retry(conversationId: string): Promise<void> {
       await httpClient.retryConversation(conversationId);
+    },
+
+    /** FR-011: branch a new conversation from a document selection, or plainly from a parent. */
+    async branch(request: CreateConversationRequest): Promise<ConversationDto> {
+      const conversation = await httpClient.branchConversation(request);
+      this.upsertConversation(conversation);
+      return conversation;
+    },
+
+    /** FR-027/FR-028/FR-029: the caller (HudPanel) catches a `PRIMARY_TARGET_BUSY` `ApiError` and
+     *  re-calls with an explicit `whenBusy` choice — this action itself just forwards to the HTTP
+     *  client and lets the eventual `primary_changed` WS frame (handleServerFrame below) update
+     *  `isPrimary` across the list, exactly as it already does for the close-clears-Primary case. */
+    async designatePrimary(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<DesignatePrimaryResponse> {
+      return httpClient.designatePrimary(conversationId, whenBusy);
+    },
+
+    /** FR-027a: clears the Primary designation without nominating a replacement. */
+    async clearPrimary(conversationId: string): Promise<void> {
+      await httpClient.clearPrimary(conversationId);
+    },
+
+    async close(conversationId: string, foldSummaryIntoParent = false): Promise<void> {
+      await httpClient.closeConversation(conversationId, foldSummaryIntoParent);
+      const conv = this.conversations.find((c) => c.id === conversationId);
+      if (conv) {
+        conv.status = 'closed';
+        conv.closedAt = conv.closedAt ?? new Date().toISOString();
+        conv.isPrimary = false;
+      }
+    },
+
+    /** FR-036: request an independent review of a closed conversation and its branches. Returns
+     *  the newly created `kind: 'review'` conversation so the caller can navigate to it. */
+    async review(conversationId: string): Promise<ReviewConversationResponse> {
+      const result = await httpClient.reviewConversation(conversationId);
+      this.upsertConversation(result.conversation);
+      return result;
     },
 
     messagesFor(conversationId: string): ConversationMessageState[] {
@@ -84,6 +160,93 @@ export const useConversationsStore = defineStore('conversations', {
         case 'conversation_status_changed': {
           const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
           if (conv) conv.status = event.data.status;
+          break;
+        }
+
+        case 'conversation_closed': {
+          const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
+          if (conv) {
+            conv.status = 'closed';
+            conv.closedAt = event.data.closedAt;
+            conv.isPrimary = false;
+          }
+          break;
+        }
+
+        // FR-016: a convenience signal — `isStale` is also recomputed server-side any time this
+        // conversation's DTO is refetched (`toConversationDto`), but reacting to the event
+        // directly means the HUD's stale badge updates without a round trip.
+        case 'conversation_stale': {
+          const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
+          if (conv) conv.isStale = true;
+          announceConversationStale(conv ? conv.name : 'Conversation');
+          break;
+        }
+
+        // FR-043b: announced (assertive) purely alongside the existing `conversation_status_changed`
+        // handler above, which already performs the actual state update (`status: 'errored'`) —
+        // this case adds nothing but the announcement.
+        case 'agent_error': {
+          const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
+          announceAgentError(conv ? conv.name : 'Conversation', event.data.message);
+          break;
+        }
+
+        // FR-043b: a response beginning — announced without touching any state (`agent_started`
+        // carries no data this store tracks).
+        case 'agent_started': {
+          const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
+          announceAgentStarted(conv ? conv.name : 'Conversation');
+          break;
+        }
+
+        // FR-018: the refreshed context revision, reflected immediately so the stale badge
+        // clears without waiting for a separate refetch.
+        case 'conversation_context_refreshed': {
+          const conv = conversationId && this.conversations.find((c) => c.id === conversationId);
+          if (conv) {
+            conv.contextRevision = event.data.contextRevision;
+            conv.isStale = false;
+          }
+          break;
+        }
+
+        // FR-034: delivered (not merely requested) once this arrives — `close()` may return long
+        // before this fires, since generating the synopsis is a genuine, unawaited Pi call.
+        case 'conversation_summary_folded': {
+          if (conversationId) {
+            this.foldedSummaries[conversationId] = { summary: event.data.summary, at: event.at };
+          }
+          break;
+        }
+
+        case 'primary_changed': {
+          for (const conv of this.conversations) {
+            conv.isPrimary = conv.id === event.data.primaryConversationId;
+          }
+          break;
+        }
+
+        // Refetching the freshly-branched conversation's DTO (rather than trusting the event's
+        // smaller payload) keeps this store's shape identical to what GET /conversations already
+        // returns, with no second definition of a ConversationDto assembled from event fields.
+        case 'conversation_started': {
+          if (conversationId && !this.conversations.some((c) => c.id === conversationId)) {
+            void this.refreshConversationMeta(conversationId);
+          }
+          break;
+        }
+
+        // Server-computed `pendingEditCount` (FR-032c excludes superseded) is refreshed from the
+        // server rather than incremented/decremented locally, so this store never risks drifting
+        // from the same computation `toConversationDto` performs. Uses `refreshConversationMeta`
+        // (not `loadDetail`) since these can arrive mid-turn and must not clobber a message still
+        // streaming in via text_delta.
+        case 'staged_edit_created':
+        case 'staged_edit_applied':
+        case 'staged_edit_dropped':
+        case 'staged_edit_superseded': {
+          if (conversationId) void this.refreshConversationMeta(conversationId);
           break;
         }
 
@@ -164,6 +327,12 @@ export const useConversationsStore = defineStore('conversations', {
               streaming: false,
               createdAt: event.at,
             });
+          }
+          // FR-043b: "a response... completing" — the user's own message also settles through
+          // this event type, but only the assistant's completion is the announcement-worthy one.
+          if (event.data.role === 'assistant') {
+            const conv = this.conversations.find((c) => c.id === conversationId);
+            announceMessageCompleted(conv ? conv.name : 'Conversation');
           }
           break;
         }
