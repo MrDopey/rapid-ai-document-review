@@ -2,21 +2,21 @@ import { createHash } from 'node:crypto';
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import type { ApplyEditResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import type { EditOperation as SharedEditOperation } from '@rapid-ai-document-review/shared/contracts/agent-tools';
-import { newId } from '../ids.js';
-import { logger } from '../logging.js';
-import type { AutomergeStoreHolder } from '../document/automerge-store-holder.js';
-import { reconcile } from '../document/text-anchor.js';
-import type { RevisionService } from '../document/revision-service.js';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { RunBuffer } from '../events/run-buffer.js';
-import type { ConcurrencyLimiter } from '../conversation/concurrency-limiter.js';
-import { EventBridge } from '../pi/event-bridge.js';
-import type { PiService } from '../pi/pi-service.js';
-import type { ConversationRow, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.js';
-import { toStagedEditDto } from './edit-mapper.js';
-import { previewStagedEdit } from './preview.js';
-import type { ConflictService } from './conflict-service.js';
+import { newId } from '../ids.ts';
+import { logger } from '../logging.ts';
+import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
+import { reconcile } from '../document/text-anchor.ts';
+import type { RevisionService } from '../document/revision-service.ts';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { RunBuffer } from '../events/run-buffer.ts';
+import type { ConcurrencyLimiter } from '../conversation/concurrency-limiter.ts';
+import { EventBridge } from '../pi/event-bridge.ts';
+import type { PiService } from '../pi/pi-service.ts';
+import type { ConversationRow, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import { toStagedEditDto } from './edit-mapper.ts';
+import { previewStagedEdit } from './preview.ts';
+import type { ConflictService } from './conflict-service.ts';
 
 export class EditNotFoundError extends Error {}
 export class EditNotPendingError extends Error {}
@@ -37,17 +37,37 @@ export interface ApplyOutcomeInternal {
  * paths merely try to honor separately.
  */
 export class EditService {
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly automerge: AutomergeStoreHolder;
+  private readonly revisionService: RevisionService;
+  private readonly conflictService: ConflictService;
+  private readonly piService: PiService;
+  private readonly concurrencyLimiter: ConcurrencyLimiter;
+  private readonly runBuffer: RunBuffer;
+
   constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly automerge: AutomergeStoreHolder,
-    private readonly revisionService: RevisionService,
-    private readonly conflictService: ConflictService,
-    private readonly piService: PiService,
-    private readonly concurrencyLimiter: ConcurrencyLimiter,
-    private readonly runBuffer: RunBuffer,
-  ) {}
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    automerge: AutomergeStoreHolder,
+    revisionService: RevisionService,
+    conflictService: ConflictService,
+    piService: PiService,
+    concurrencyLimiter: ConcurrencyLimiter,
+    runBuffer: RunBuffer,
+  ) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.automerge = automerge;
+    this.revisionService = revisionService;
+    this.conflictService = conflictService;
+    this.piService = piService;
+    this.concurrencyLimiter = concurrencyLimiter;
+    this.runBuffer = runBuffer;
+  }
 
   /** Non-Primary path (FR-021): always creates a `pending` row. Idempotent on `(conversationId,
    *  piToolCallId)` (FR-040). Links to a superseded predecessor via the conflict-service marker

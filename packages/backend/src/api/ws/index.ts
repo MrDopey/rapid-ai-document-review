@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { ClientFrame } from '@rapid-ai-document-review/shared/contracts/events';
-import type { EventHub } from '../../events/event-hub.js';
-import type { StorageAdapter } from '../../storage/storage-adapter.js';
-import { logger } from '../../logging.js';
+import type { EventHub } from '../../events/event-hub.ts';
+import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { logger } from '../../logging.ts';
 
 /**
  * `GET /events` — the sole WebSocket channel (contracts/websocket-events.md). The backend is the

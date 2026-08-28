@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { config } from '../../config.js';
-import { SqliteStorageAdapter } from './index.js';
+import { config } from '../../config.ts';
+import { SqliteStorageAdapter } from './index.ts';
 
 mkdirSync(dirname(config.databasePath), { recursive: true });
 const adapter = new SqliteStorageAdapter(config.databasePath);

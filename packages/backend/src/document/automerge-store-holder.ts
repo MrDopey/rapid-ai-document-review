@@ -1,4 +1,4 @@
-import type { AutomergeStore } from './automerge-store.js';
+import type { AutomergeStore } from './automerge-store.ts';
 
 /** Shared mutable slot so DocumentService and RevisionService can both reach the one Automerge store. */
 export class AutomergeStoreHolder {

@@ -4,9 +4,9 @@ import {
   ExportDocumentQuery,
   PatchDocumentRequest,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import { DocumentAlreadyExistsError, DocumentNotFoundError, type DocumentService } from '../../document/document-service.js';
-import type { RevisionService } from '../../document/revision-service.js';
-import { sendError } from './errors.js';
+import { DocumentAlreadyExistsError, DocumentNotFoundError, type DocumentService } from '../../document/document-service.ts';
+import type { RevisionService } from '../../document/revision-service.ts';
+import { sendError } from './errors.ts';
 
 export function registerDocumentRoutes(
   app: FastifyInstance,

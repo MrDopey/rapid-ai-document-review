@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ListEditsResponse } from '@rapid-ai-document-review/shared/contracts/http';
-import { EditNotFoundError, EditNotPendingError, type EditService } from '../../edit/edit-service.js';
-import { sendError } from './errors.js';
+import { EditNotFoundError, EditNotPendingError, type EditService } from '../../edit/edit-service.ts';
+import { sendError } from './errors.ts';
 
 export function registerEditRoutes(app: FastifyInstance, deps: { editService: EditService }): void {
   const { editService } = deps;

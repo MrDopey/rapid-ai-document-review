@@ -16,16 +16,16 @@ import {
   MaxEditingDepthExceededError,
   PendingEditsBlockCloseError,
   type ConversationService,
-} from '../../conversation/conversation-service.js';
+} from '../../conversation/conversation-service.ts';
 import {
   PrimaryConversationClosedError,
   PrimaryConversationErroredError,
   PrimaryConversationNotFoundError,
   PrimaryTargetBusyError,
   type PrimaryService,
-} from '../../conversation/primary-service.js';
-import type { StorageAdapter } from '../../storage/storage-adapter.js';
-import { sendError } from './errors.js';
+} from '../../conversation/primary-service.ts';
+import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { sendError } from './errors.ts';
 
 export function registerConversationRoutes(
   app: FastifyInstance,

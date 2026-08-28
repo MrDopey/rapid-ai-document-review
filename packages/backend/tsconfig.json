@@ -4,7 +4,9 @@
     "outDir": "dist",
     "rootDir": "src",
     "composite": true,
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "references": [{ "path": "../shared" }],
   "include": ["src"]

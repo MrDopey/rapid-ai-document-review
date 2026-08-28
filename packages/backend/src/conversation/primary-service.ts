@@ -4,22 +4,25 @@ import type {
   DesignatePrimaryResponse,
   PrimaryWhenBusy,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import { logger } from '../logging.js';
-import type { EventHub, InternalEventListener } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { PrimaryMutex } from '../pi/primary-mutex.js';
-import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.js';
+import { logger } from '../logging.ts';
+import type { EventHub, InternalEventListener } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { PrimaryMutex } from '../pi/primary-mutex.ts';
+import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 
 export class PrimaryConversationNotFoundError extends Error {}
 export class PrimaryConversationClosedError extends Error {}
 export class PrimaryConversationErroredError extends Error {}
 
 export class PrimaryTargetBusyError extends Error {
+  readonly details: { currentPrimaryId: string | null; targetId: string; busyConversationId: string };
+
   constructor(
     message: string,
-    readonly details: { currentPrimaryId: string | null; targetId: string; busyConversationId: string },
+    details: { currentPrimaryId: string | null; targetId: string; busyConversationId: string },
   ) {
     super(message);
+    this.details = details;
   }
 }
 
@@ -43,12 +46,17 @@ export class PrimaryService {
    *  `documentId`. A new designation request for the same document replaces it. */
   private readonly pending = new Map<string, PendingDeferredSwitch>();
 
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly primaryMutex: PrimaryMutex,
-  ) {}
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly primaryMutex: PrimaryMutex;
+
+  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, primaryMutex: PrimaryMutex) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.primaryMutex = primaryMutex;
+  }
 
   /**
    * FR-027/FR-028/FR-029/FR-029a/FR-030/FR-038a. `whenBusy` is required only when the current

@@ -1,6 +1,6 @@
 import type { EditHunk, PreviewEditResponse } from '@rapid-ai-document-review/shared/contracts/http';
-import { reconcile } from '../document/text-anchor.js';
-import type { EditOperation, StagedEditRow } from '../storage/storage-adapter.js';
+import { reconcile } from '../document/text-anchor.ts';
+import type { EditOperation, StagedEditRow } from '../storage/storage-adapter.ts';
 
 const HUNK_CONTEXT_CHARS = 80;
 

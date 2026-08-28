@@ -1,10 +1,10 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import { proposeDocumentEditParams, readDocumentParams } from '@rapid-ai-document-review/shared/contracts/agent-tools';
-import type { AutomergeStoreHolder } from '../document/automerge-store-holder.js';
-import type { EditService } from '../edit/edit-service.js';
-import type { PrimaryMutex } from './primary-mutex.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
+import type { EditService } from '../edit/edit-service.ts';
+import type { PrimaryMutex } from './primary-mutex.ts';
+import type { StorageAdapter } from '../storage/storage-adapter.ts';
 
 /**
  * `defineTool`'s `parameters` field is a TypeBox `TSchema` (the Pi SDK's tool parameter format),

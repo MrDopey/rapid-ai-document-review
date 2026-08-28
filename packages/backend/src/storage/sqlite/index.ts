@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from './migrations.js';
+import { migrate } from './migrations.ts';
 import type {
   ConversationEventRow,
   ConversationListOptions,
@@ -14,7 +14,7 @@ import type {
   StagedEditRow,
   StorageAdapter,
   UserSettingsRow,
-} from '../storage-adapter.js';
+} from '../storage-adapter.ts';
 
 function encodeCursor(payload: unknown): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');

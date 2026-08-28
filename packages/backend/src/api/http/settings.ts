@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { UserSettingsDto, UserSettingsPatch } from '@rapid-ai-document-review/shared/contracts/http';
-import type { EventHub } from '../../events/event-hub.js';
-import type { EventService } from '../../events/event-service.js';
-import type { StorageAdapter, UserSettingsRow } from '../../storage/storage-adapter.js';
-import { sendError } from './errors.js';
+import type { EventHub } from '../../events/event-hub.ts';
+import type { EventService } from '../../events/event-service.ts';
+import type { StorageAdapter, UserSettingsRow } from '../../storage/storage-adapter.ts';
+import { sendError } from './errors.ts';
 
 function toDto(row: UserSettingsRow): UserSettingsDto {
   return {

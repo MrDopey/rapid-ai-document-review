@@ -1,7 +1,7 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { StorageAdapter } from '../storage/storage-adapter.ts';
 
 interface QueueEntry {
   conversationId: string;
@@ -34,11 +34,15 @@ export class ConcurrencyLimiter {
   private readonly running = new Map<string, Set<string>>(); // documentId -> running conversationIds
   private readonly queues = new Map<string, QueueEntry[]>(); // documentId -> FIFO queue
 
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-  ) {}
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+
+  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+  }
 
   /**
    * Starts `run` immediately if under the limit, else FIFO-queues it and emits `agent_queued`.

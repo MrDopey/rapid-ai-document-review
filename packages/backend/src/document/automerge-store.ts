@@ -1,5 +1,5 @@
 import * as Automerge from '@automerge/automerge';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { StorageAdapter } from '../storage/storage-adapter.ts';
 
 interface DocShape {
   content: string;
@@ -16,12 +16,12 @@ export class AutomergeStore {
   private doc: Automerge.Doc<DocShape>;
   private changesSinceSnapshot = 0;
   private lastSavedHeads: Automerge.Heads;
+  private readonly storage: StorageAdapter;
+  private readonly documentId: string;
 
-  private constructor(
-    private readonly storage: StorageAdapter,
-    private readonly documentId: string,
-    doc: Automerge.Doc<DocShape>,
-  ) {
+  private constructor(storage: StorageAdapter, documentId: string, doc: Automerge.Doc<DocShape>) {
+    this.storage = storage;
+    this.documentId = documentId;
     this.doc = doc;
     this.lastSavedHeads = Automerge.getHeads(doc);
   }

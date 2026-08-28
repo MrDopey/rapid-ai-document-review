@@ -4,8 +4,8 @@ import type {
   AgentSessionEventListenerLike,
   AgentSessionLike,
   CustomMessageLike,
-} from './agent-session-port.js';
-import type { RegisteredToolLike } from './pi-service.js';
+} from './agent-session-port.ts';
+import type { RegisteredToolLike } from './pi-service.ts';
 
 function chunk(text: string, size: number): string[] {
   const parts: string[] = [];

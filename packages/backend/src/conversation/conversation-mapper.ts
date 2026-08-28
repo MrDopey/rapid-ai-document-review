@@ -1,5 +1,5 @@
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
-import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.js';
+import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 
 /** Server-computed fields (Principle V: enforcement lives here, never inferred by the UI). */
 export function toConversationDto(

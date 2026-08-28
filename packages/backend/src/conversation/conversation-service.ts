@@ -10,21 +10,21 @@ import type {
   ReviewConversationResponse,
   SendMessageResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import type { AutomergeStoreHolder } from '../document/automerge-store-holder.js';
-import { DocumentNotFoundError } from '../document/document-service.js';
-import { logger } from '../logging.js';
-import { newId } from '../ids.js';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { RunBuffer } from '../events/run-buffer.js';
-import { EventBridge } from '../pi/event-bridge.js';
-import type { PiService } from '../pi/pi-service.js';
-import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.js';
-import { toConversationDto } from './conversation-mapper.js';
-import { toStagedEditDto } from '../edit/edit-mapper.js';
-import { deriveBranchName, extractSeedExcerpt } from './seed-excerpt.js';
-import type { ConcurrencyLimiter } from './concurrency-limiter.js';
-import type { PrimaryService } from './primary-service.js';
+import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
+import { DocumentNotFoundError } from '../document/document-service.ts';
+import { logger } from '../logging.ts';
+import { newId } from '../ids.ts';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { RunBuffer } from '../events/run-buffer.ts';
+import { EventBridge } from '../pi/event-bridge.ts';
+import type { PiService } from '../pi/pi-service.ts';
+import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
+import { toConversationDto } from './conversation-mapper.ts';
+import { toStagedEditDto } from '../edit/edit-mapper.ts';
+import { deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
+import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
+import type { PrimaryService } from './primary-service.ts';
 
 export class ConversationNotFoundError extends Error {}
 export class ConversationClosedError extends Error {}
@@ -32,29 +32,31 @@ export class ConversationNotErroredError extends Error {}
 export class ConversationNotClosedError extends Error {}
 export class AgentUnavailableError extends Error {}
 export class MaxConversationDepthExceededError extends Error {
-  constructor(
-    message: string,
-    readonly limit: number,
-    readonly attemptedDepth: number,
-  ) {
+  readonly limit: number;
+  readonly attemptedDepth: number;
+
+  constructor(message: string, limit: number, attemptedDepth: number) {
     super(message);
+    this.limit = limit;
+    this.attemptedDepth = attemptedDepth;
   }
 }
 export class MaxEditingDepthExceededError extends Error {
-  constructor(
-    message: string,
-    readonly limit: number,
-    readonly attemptedDepth: number,
-  ) {
+  readonly limit: number;
+  readonly attemptedDepth: number;
+
+  constructor(message: string, limit: number, attemptedDepth: number) {
     super(message);
+    this.limit = limit;
+    this.attemptedDepth = attemptedDepth;
   }
 }
 export class PendingEditsBlockCloseError extends Error {
-  constructor(
-    message: string,
-    readonly pendingEditIds: string[],
-  ) {
+  readonly pendingEditIds: string[];
+
+  constructor(message: string, pendingEditIds: string[]) {
     super(message);
+    this.pendingEditIds = pendingEditIds;
   }
 }
 
@@ -78,16 +80,34 @@ interface UserMessageEventData {
  * `toConversationDto`, which US3+ deepens rather than replaces.
  */
 export class ConversationService {
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly runBuffer: RunBuffer;
+  private readonly piService: PiService;
+  private readonly concurrencyLimiter: ConcurrencyLimiter;
+  private readonly automerge: AutomergeStoreHolder;
+  private readonly primaryService: PrimaryService;
+
   constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly runBuffer: RunBuffer,
-    private readonly piService: PiService,
-    private readonly concurrencyLimiter: ConcurrencyLimiter,
-    private readonly automerge: AutomergeStoreHolder,
-    private readonly primaryService: PrimaryService,
-  ) {}
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    runBuffer: RunBuffer,
+    piService: PiService,
+    concurrencyLimiter: ConcurrencyLimiter,
+    automerge: AutomergeStoreHolder,
+    primaryService: PrimaryService,
+  ) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.runBuffer = runBuffer;
+    this.piService = piService;
+    this.concurrencyLimiter = concurrencyLimiter;
+    this.automerge = automerge;
+    this.primaryService = primaryService;
+  }
 
   /** Idempotent: creates the Main conversation for `documentId` only if one doesn't exist yet. */
   ensureMain(documentId: string): ConversationRow {

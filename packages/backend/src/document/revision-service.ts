@@ -1,10 +1,10 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { ConflictDetail, RevisionRow, StorageAdapter } from '../storage/storage-adapter.js';
-import { reconcile } from './text-anchor.js';
-import type { AutomergeStoreHolder } from './automerge-store-holder.js';
-import type { DocumentService } from './document-service.js';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { ConflictDetail, RevisionRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import { reconcile } from './text-anchor.ts';
+import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
+import type { DocumentService } from './document-service.ts';
 
 export interface CreateRevisionOptions {
   source: RevisionRow['source'];
@@ -47,12 +47,17 @@ export class RevisionService {
    *  to notify, after every revision, which conversations just became stale (FR-016). */
   private documentService: DocumentService | null = null;
 
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly automerge: AutomergeStoreHolder,
-  ) {}
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly automerge: AutomergeStoreHolder;
+
+  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, automerge: AutomergeStoreHolder) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.automerge = automerge;
+  }
 
   setDocumentService(documentService: DocumentService): void {
     this.documentService = documentService;

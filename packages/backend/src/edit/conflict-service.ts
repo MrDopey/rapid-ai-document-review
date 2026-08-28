@@ -1,8 +1,8 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { ConflictDetail, EditOperation, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.js';
-import type { AutomergeStoreHolder } from '../document/automerge-store-holder.js';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { ConflictDetail, EditOperation, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
 
 export interface ConflictOutcome {
   outcome: 'conflict' | 'conflict_exhausted';
@@ -77,12 +77,17 @@ export class ConflictService {
    *  `supersedes_id` (agent-tools.md §Conflict recovery — the agent never supplies it itself). */
   private readonly awaitingReplacement = new Map<string, string>();
 
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly automerge: AutomergeStoreHolder,
-  ) {}
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly automerge: AutomergeStoreHolder;
+
+  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, automerge: AutomergeStoreHolder) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.automerge = automerge;
+  }
 
   /** Consumed by `EditService.stage` when creating a new proposal for `conversationId`. */
   consumeAwaitingReplacement(conversationId: string): string | null {

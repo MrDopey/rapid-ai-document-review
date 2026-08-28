@@ -2,16 +2,16 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { DocumentDto, ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
-import { config } from '../config.js';
-import { logger } from '../logging.js';
-import { newId } from '../ids.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import { toConversationDto } from '../conversation/conversation-mapper.js';
-import { AutomergeStore } from './automerge-store.js';
-import type { AutomergeStoreHolder } from './automerge-store-holder.js';
-import type { RevisionService } from './revision-service.js';
+import { config } from '../config.ts';
+import { logger } from '../logging.ts';
+import { newId } from '../ids.ts';
+import type { StorageAdapter } from '../storage/storage-adapter.ts';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import { toConversationDto } from '../conversation/conversation-mapper.ts';
+import { AutomergeStore } from './automerge-store.ts';
+import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
+import type { RevisionService } from './revision-service.ts';
 
 const OUT_OF_SYNC_REVISION_THRESHOLD = 50;
 
@@ -75,13 +75,25 @@ function deriveTitle(content: string, explicit: string | undefined): string {
  * which shares the same AutomergeStoreHolder.
  */
 export class DocumentService {
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly automerge: AutomergeStoreHolder;
+  private readonly revisionService: RevisionService;
+
   constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly automerge: AutomergeStoreHolder,
-    private readonly revisionService: RevisionService,
-  ) {}
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    automerge: AutomergeStoreHolder,
+    revisionService: RevisionService,
+  ) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.automerge = automerge;
+    this.revisionService = revisionService;
+  }
 
   /**
    * Loads Automerge state from storage at startup, if a document already exists (FR-039).

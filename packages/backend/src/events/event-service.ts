@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ConversationEventRow, StorageAdapter } from '../storage/storage-adapter.js';
-import { logger } from '../logging.js';
+import type { ConversationEventRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import { logger } from '../logging.ts';
 
 /**
  * Appends and replays the application event stream (conversation_event table). `sequence` is
@@ -11,7 +11,11 @@ import { logger } from '../logging.js';
  * passed to `append` — they are broadcast live only by EventHub, never persisted.
  */
 export class EventService {
-  constructor(private readonly storage: StorageAdapter) {}
+  private readonly storage: StorageAdapter;
+
+  constructor(storage: StorageAdapter) {
+    this.storage = storage;
+  }
 
   append(
     documentId: string,

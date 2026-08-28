@@ -1,8 +1,8 @@
 import { EPHEMERAL_EVENT_TYPES, type ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import type { ConversationDto, DocumentDto } from '@rapid-ai-document-review/shared/contracts/http';
-import { EventService } from './event-service.js';
-import type { RunBuffer } from './run-buffer.js';
-import { logger } from '../logging.js';
+import { EventService } from './event-service.ts';
+import type { RunBuffer } from './run-buffer.ts';
+import { logger } from '../logging.ts';
 
 const BACKPRESSURE_THRESHOLD_BYTES = 1_000_000; // 1MB, per websocket-events.md ordering guarantee 6
 
@@ -59,11 +59,13 @@ export class EventHub {
   /** conversationId -> its one currently-streaming assistant message, if any (FR-037a). Cleared on
    *  `message_end` or run settle (see `EventBridge`). */
   private readonly activeMessages = new Map<string, ActiveMessage>();
+  private readonly eventService: EventService;
+  private readonly getSnapshot: SnapshotProvider;
 
-  constructor(
-    private readonly eventService: EventService,
-    private readonly getSnapshot: SnapshotProvider,
-  ) {}
+  constructor(eventService: EventService, getSnapshot: SnapshotProvider) {
+    this.eventService = eventService;
+    this.getSnapshot = getSnapshot;
+  }
 
   addListener(listener: InternalEventListener): void {
     this.internalListeners.add(listener);

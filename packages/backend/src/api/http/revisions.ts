@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { PaginationQuery } from '@rapid-ai-document-review/shared/contracts/http';
-import type { RevisionService } from '../../document/revision-service.js';
-import type { RevisionRow, StorageAdapter } from '../../storage/storage-adapter.js';
-import { sendError } from './errors.js';
+import type { RevisionService } from '../../document/revision-service.ts';
+import type { RevisionRow, StorageAdapter } from '../../storage/storage-adapter.ts';
+import { sendError } from './errors.ts';
 
 function toRevisionDto(storage: StorageAdapter, row: RevisionRow) {
   const conversationName = row.conversationId

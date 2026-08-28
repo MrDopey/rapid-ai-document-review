@@ -1,5 +1,5 @@
 import type { StagedEditDto } from '@rapid-ai-document-review/shared/contracts/http';
-import type { StagedEditRow } from '../storage/storage-adapter.js';
+import type { StagedEditRow } from '../storage/storage-adapter.ts';
 
 /** Shared row -> DTO mapping so `GET /conversations/:id`, `GET /conversations/:id/edits` and the
  * conversation detail response never drift into two independently-maintained shapes. */

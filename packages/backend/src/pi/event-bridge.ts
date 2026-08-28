@@ -1,10 +1,10 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
-import { logger } from '../logging.js';
-import type { EventHub } from '../events/event-hub.js';
-import type { EventService } from '../events/event-service.js';
-import type { RunBuffer } from '../events/run-buffer.js';
-import type { ConversationStatus, StorageAdapter } from '../storage/storage-adapter.js';
-import type { AgentSessionEventLike } from './agent-session-port.js';
+import { logger } from '../logging.ts';
+import type { EventHub } from '../events/event-hub.ts';
+import type { EventService } from '../events/event-service.ts';
+import type { RunBuffer } from '../events/run-buffer.ts';
+import type { ConversationStatus, StorageAdapter } from '../storage/storage-adapter.ts';
+import type { AgentSessionEventLike } from './agent-session-port.ts';
 
 export interface EventBridgeContext {
   documentId: string;
@@ -46,15 +46,27 @@ function extractStagedEditId(result: unknown): string | null {
 export class EventBridge {
   private settled = false;
   private readonly cleanupFns: Array<() => void> = [];
+  private readonly storage: StorageAdapter;
+  private readonly eventService: EventService;
+  private readonly eventHub: EventHub;
+  private readonly runBuffer: RunBuffer;
+  private readonly ctx: EventBridgeContext;
+  private readonly onSettle?: () => void;
 
   constructor(
-    private readonly storage: StorageAdapter,
-    private readonly eventService: EventService,
-    private readonly eventHub: EventHub,
-    private readonly runBuffer: RunBuffer,
-    private readonly ctx: EventBridgeContext,
-    private readonly onSettle?: () => void,
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    runBuffer: RunBuffer,
+    ctx: EventBridgeContext,
+    onSettle?: () => void,
   ) {
+    this.storage = storage;
+    this.eventService = eventService;
+    this.eventHub = eventHub;
+    this.runBuffer = runBuffer;
+    this.ctx = ctx;
+    this.onSettle = onSettle;
     // There is exactly one `RunBuffer` for the app's lifetime, so re-registering it on every turn
     // is idempotent — see `EventHub.setRunBuffer` (FR-037a).
     this.eventHub.setRunBuffer(this.runBuffer);

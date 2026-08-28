@@ -7,17 +7,17 @@ import {
   SessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import { config } from '../config.js';
-import { logger } from '../logging.js';
-import type { AutomergeStoreHolder } from '../document/automerge-store-holder.js';
-import type { EditService } from '../edit/edit-service.js';
-import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.js';
-import type { AgentSessionLike } from './agent-session-port.js';
-import { createProposeDocumentEditTool, createReadDocumentTool } from './document-tools.js';
-import type { EventBridge } from './event-bridge.js';
-import { FakeAgentSession } from './fake-agent-session.js';
-import type { PrimaryMutex } from './primary-mutex.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import { config } from '../config.ts';
+import { logger } from '../logging.ts';
+import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
+import type { EditService } from '../edit/edit-service.ts';
+import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import type { AgentSessionLike } from './agent-session-port.ts';
+import { createProposeDocumentEditTool, createReadDocumentTool } from './document-tools.ts';
+import type { EventBridge } from './event-bridge.ts';
+import { FakeAgentSession } from './fake-agent-session.ts';
+import type { PrimaryMutex } from './primary-mutex.ts';
+import { buildSystemPrompt } from './system-prompt.ts';
 
 /**
  * Best-effort extraction of readable text from a raw Pi `AgentMessage` entry (`session-manager.ts`
@@ -73,11 +73,15 @@ export class PiService {
    * which never runs before server.ts finishes wiring (it fires on a session's first message). */
   private editService: EditService | null = null;
 
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly automerge: AutomergeStoreHolder,
-    private readonly primaryMutex: PrimaryMutex,
-  ) {}
+  private readonly storage: StorageAdapter;
+  private readonly automerge: AutomergeStoreHolder;
+  private readonly primaryMutex: PrimaryMutex;
+
+  constructor(storage: StorageAdapter, automerge: AutomergeStoreHolder, primaryMutex: PrimaryMutex) {
+    this.storage = storage;
+    this.automerge = automerge;
+    this.primaryMutex = primaryMutex;
+  }
 
   setEditService(editService: EditService): void {
     this.editService = editService;

@@ -1,2 +1,2 @@
-export * from './storage-adapter.js';
-export { SqliteStorageAdapter } from './sqlite/index.js';
+export * from './storage-adapter.ts';
+export { SqliteStorageAdapter } from './sqlite/index.ts';
