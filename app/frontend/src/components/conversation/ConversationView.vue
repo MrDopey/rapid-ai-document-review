@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useConversationsStore, type ConversationMessageState } from '../../stores/conversations.js';
+import { useEditsStore } from '../../stores/edits.js';
 import { ApiError } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
+import { clamp, useResizeHandle } from '../../composables/useResizeHandle.js';
+import { loadPaneSizes, persistPaneSizes } from '../../composables/panePersistence.js';
 import MessageBubble from './MessageBubble.vue';
 import EditsList from '../edits/EditsList.vue';
 
 const props = defineProps<{ conversationId: string }>();
 const emit = defineEmits<{ (e: 'select', id: string): void }>();
 const store = useConversationsStore();
+const editsStore = useEditsStore();
 
 const draft = ref('');
 const sending = ref(false);
@@ -41,6 +45,57 @@ function dismissDirectEditHint(): void {
 
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+
+// ---------------------------------------------------------------------------------------------
+// New: a vertical, draggable/keyboard-operable split between the message transcript and the
+// proposed-edits list below it, reusing the same `useResizeHandle`/`panePersistence` composables
+// as App.vue's splits (see App.vue for the shared drag/keyboard/localStorage logic). This split
+// has to fill whatever height ConversationView is actually given by its parent (App.vue's
+// sidebar) rather than assume a fixed viewport height — `.transcript-edits` is a flex child of
+// `.conversation-view` (flex: 1; min-height: 0) so it always sizes to that available space, and
+// the `fr` math below is computed against its own `getBoundingClientRect()`, not the viewport's.
+// ---------------------------------------------------------------------------------------------
+const DEFAULT_TRANSCRIPT_FR = 3;
+const DEFAULT_EDITS_FR = 2;
+const MIN_TRANSCRIPT_PX = 120;
+const MIN_EDITS_PX = 100;
+const EDITS_HANDLE_SPACE_PX = 6;
+
+const initialSplit = loadPaneSizes({ transcriptFr: DEFAULT_TRANSCRIPT_FR, editsFr: DEFAULT_EDITS_FR });
+const transcriptFr = ref(initialSplit.transcriptFr);
+const editsFr = ref(initialSplit.editsFr);
+const transcriptEditsEl = ref<HTMLDivElement | null>(null);
+
+/** Hides (and makes unreachable) the drag handle when there is nothing to resize — a conversation
+ *  with zero proposed edits ever (see EditsList.vue's own "No proposed edits yet." empty state) —
+ *  rather than let it split the transcript against dead space. */
+const hasEdits = computed(() => editsStore.editsFor(props.conversationId).length > 0);
+
+const transcriptEditsStyle = computed(() => {
+  if (!hasEdits.value) return undefined;
+  return { gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr` };
+});
+
+const editsResize = useResizeHandle({
+  axis: 'vertical',
+  containerEl: transcriptEditsEl,
+  beginGesture: (containerRect) => {
+    const startTranscriptFr = transcriptFr.value;
+    const totalFr = startTranscriptFr + editsFr.value;
+    const remainingPx = containerRect.height - EDITS_HANDLE_SPACE_PX;
+    const startTranscriptPx = remainingPx * (startTranscriptFr / totalFr);
+    return (deltaPx) => {
+      const nextTranscriptPx = clamp(
+        startTranscriptPx + deltaPx,
+        MIN_TRANSCRIPT_PX,
+        Math.max(MIN_TRANSCRIPT_PX, remainingPx - MIN_EDITS_PX),
+      );
+      transcriptFr.value = (nextTranscriptPx / remainingPx) * totalFr;
+      editsFr.value = totalFr - transcriptFr.value;
+    };
+  },
+  onSettle: () => persistPaneSizes({ transcriptFr: transcriptFr.value, editsFr: editsFr.value }),
+});
 
 // FR-007c: the auto-generated branch-seed message (ConversationService's `branch()`) is sent
 // through the ordinary user-message path — its role is genuinely 'user' (relied on by
@@ -233,21 +288,32 @@ async function onRequestReview(): Promise<void> {
       <pre>{{ foldedSummary.summary }}</pre>
     </div>
 
-    <div ref="listRef" class="message-list" role="log" aria-live="polite" aria-relevant="additions">
-      <MessageBubble
-        v-for="(msg, index) in messages"
-        :key="msg.id"
-        :message="msg"
-        :seed="isSeedMessage(msg, index)"
-      />
+    <div ref="transcriptEditsEl" class="transcript-edits" :style="transcriptEditsStyle">
+      <div ref="listRef" class="message-list" role="log" aria-live="polite" aria-relevant="additions">
+        <MessageBubble
+          v-for="(msg, index) in messages"
+          :key="msg.id"
+          :message="msg"
+          :seed="isSeedMessage(msg, index)"
+        />
+      </div>
+      <div
+        v-if="hasEdits"
+        class="resize-handle resize-handle--vertical"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize transcript and proposed edits"
+        tabindex="0"
+        @pointerdown="editsResize.startDrag($event)"
+        @keydown="editsResize.onKeydown($event)"
+      ></div>
+      <EditsList :conversation-id="conversationId" />
     </div>
 
     <div v-if="conversation?.status === 'errored'" class="error-banner" role="alert">
       <span>{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
       <button type="button" @click="onRetry">Retry</button>
     </div>
-
-    <EditsList :conversation-id="conversationId" />
 
     <div v-if="!directEditHintDismissed" class="composer-hint">
       <span>
@@ -347,8 +413,20 @@ async function onRequestReview(): Promise<void> {
 .status-badge[data-status='closed'] {
   color: var(--status-closed-color, #374151);
 }
-.message-list {
+/* New: `.transcript-edits` is a flex child of `.conversation-view` (flex: 1; min-height: 0) so it
+   always fills whatever height this component is actually given, never a fixed viewport amount.
+   It's a grid with a default `1fr auto` row template — transcript takes all remaining space,
+   EditsList sizes to its own (small) empty-state content — for when there's nothing to resize
+   (no proposed edits yet, see `hasEdits`); `transcriptEditsStyle` overrides that with an explicit
+   `fr` split, once there's a proposed-edits list worth splitting against. */
+.transcript-edits {
   flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+.message-list {
+  min-height: 0;
   overflow-y: auto;
   padding: 0.75rem;
 }
@@ -387,6 +465,36 @@ async function onRequestReview(): Promise<void> {
   flex: 0 0 auto;
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;
+}
+/* New: draggable, keyboard-operable resize handle between the transcript and proposed-edits list
+   — same look/behaviour as App.vue's `.resize-handle--vertical` (a separate, identically-named
+   rule here since each `<style scoped>` block is its own component). */
+.resize-handle {
+  position: relative;
+  touch-action: none;
+  background: transparent;
+}
+.resize-handle--vertical {
+  cursor: row-resize;
+}
+.resize-handle--vertical::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--border-color, #ccc);
+}
+.resize-handle--vertical:hover::after,
+.resize-handle--vertical:focus-visible::after {
+  background: var(--accent-color, #2563eb);
+  height: 4px;
+}
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent-color, #2563eb);
+  outline-offset: -2px;
 }
 /* Contrast fix: relying on the browser's native (color-scheme-driven) button-face background for
    text-color contrast math is fragile — dark mode's native button face isn't reliably dark enough

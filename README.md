@@ -47,13 +47,13 @@ The application, not Pi, is authoritative for document content, revisions, and e
 npm install
 ```
 
-This installs and links the three workspaces: `packages/shared`, `packages/backend`, and `packages/frontend`.
+This installs and links the three workspaces: `app/shared`, `app/backend`, and `app/frontend`.
 
 ---
 
 ## Configuration
 
-The backend reads the following environment variables (`packages/backend/src/config.ts`). All have working defaults for local development; only set what you need to change.
+The backend reads the following environment variables (`app/backend/src/config.ts`). All have working defaults for local development; only set what you need to change.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -131,7 +131,7 @@ npm run test:e2e -- --grep "US3"
 
 ```
 rapid-ai-document-review/
-├── packages/
+├── app/
 │   ├── shared/     # Zod contracts (HTTP, WebSocket events, agent tools) and domain types shared by backend and frontend
 │   ├── backend/     # Fastify + WebSocket server: document/CRDT store, SQLite storage, conversation and edit services, Pi integration
 │   └── frontend/     # Vue 3 + Vite app: Markdown editor, live preview, conversation HUD, diff review

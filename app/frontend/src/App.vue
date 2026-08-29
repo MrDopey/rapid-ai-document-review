@@ -12,6 +12,8 @@ import HistoryPanel from './components/history/HistoryPanel.vue';
 import ReconnectingIndicator from './components/hud/ReconnectingIndicator.vue';
 import HudPanel from './components/hud/HudPanel.vue';
 import ConversationView from './components/conversation/ConversationView.vue';
+import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
+import { loadPaneSizes, persistPaneSizes } from './composables/panePersistence.js';
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
@@ -30,49 +32,46 @@ const hasDocument = computed(() => store.document !== null);
 // per-viewer in localStorage. Only active at the desktop breakpoint — below it, the existing
 // responsive @media rules in <style> (unchanged) fully control `.panes`' layout, exactly as
 // before this fix.
+//
+// Extended: a second, vertical split inside the sidebar (Conversations list | conversation
+// detail) — see `useResizeHandle`/`panePersistence` for the shared drag/keyboard and
+// localStorage logic every split in this file (and ConversationView.vue's transcript|edits
+// split) now shares.
 // ---------------------------------------------------------------------------------------------
-const PANE_SIZES_KEY = 'raidr:paneSizes';
 const DEFAULT_EDITOR_FR = 1;
 const DEFAULT_PREVIEW_FR = 1;
 const DEFAULT_SIDEBAR_WIDTH = 380;
+const DEFAULT_HUD_FR = 2;
+const DEFAULT_CONVERSATION_FR = 3;
 const MIN_PANE_PX = 200;
 const MIN_SIDEBAR_PX = 260;
 const MAX_SIDEBAR_PX = 640;
+const MIN_HUD_PX = 120;
+const MIN_CONVERSATION_PX = 200;
 const HANDLE_SPACE_PX = 12; // two 6px handles between the three panes
+const SIDEBAR_HANDLE_SPACE_PX = 6; // one 6px handle between HudPanel and ConversationView
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function loadPaneSizes(): { editorFr: number; previewFr: number; sidebarWidth: number } {
-  try {
-    const raw = localStorage.getItem(PANE_SIZES_KEY);
-    if (!raw) throw new Error('no stored pane sizes');
-    const parsed = JSON.parse(raw) as { editorFr?: unknown; previewFr?: unknown; sidebarWidth?: unknown };
-    return {
-      editorFr: typeof parsed.editorFr === 'number' ? parsed.editorFr : DEFAULT_EDITOR_FR,
-      previewFr: typeof parsed.previewFr === 'number' ? parsed.previewFr : DEFAULT_PREVIEW_FR,
-      sidebarWidth: typeof parsed.sidebarWidth === 'number' ? parsed.sidebarWidth : DEFAULT_SIDEBAR_WIDTH,
-    };
-  } catch {
-    return { editorFr: DEFAULT_EDITOR_FR, previewFr: DEFAULT_PREVIEW_FR, sidebarWidth: DEFAULT_SIDEBAR_WIDTH };
-  }
-}
-
-const initialPaneSizes = loadPaneSizes();
+const initialPaneSizes = loadPaneSizes({
+  editorFr: DEFAULT_EDITOR_FR,
+  previewFr: DEFAULT_PREVIEW_FR,
+  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+  hudFr: DEFAULT_HUD_FR,
+  conversationFr: DEFAULT_CONVERSATION_FR,
+});
 const editorFr = ref(initialPaneSizes.editorFr);
 const previewFr = ref(initialPaneSizes.previewFr);
 const sidebarWidth = ref(initialPaneSizes.sidebarWidth);
+const hudFr = ref(initialPaneSizes.hudFr);
+const conversationFr = ref(initialPaneSizes.conversationFr);
 
-function persistPaneSizes(): void {
-  try {
-    localStorage.setItem(
-      PANE_SIZES_KEY,
-      JSON.stringify({ editorFr: editorFr.value, previewFr: previewFr.value, sidebarWidth: sidebarWidth.value }),
-    );
-  } catch {
-    // Best-effort persistence — a quota/private-browsing error here must not break resizing.
-  }
+function persistCurrentPaneSizes(): void {
+  persistPaneSizes({
+    editorFr: editorFr.value,
+    previewFr: previewFr.value,
+    sidebarWidth: sidebarWidth.value,
+    hudFr: hudFr.value,
+    conversationFr: conversationFr.value,
+  });
 }
 
 const DESKTOP_QUERY = '(min-width: 961px)';
@@ -95,67 +94,67 @@ const panesStyle = computed(() => {
   return { gridTemplateColumns: historyOpen.value ? `${base} ${HISTORY_PANEL_WIDTH_PX}px` : base };
 });
 
-type DragKind = 'editor-preview' | 'content-sidebar';
-
-/** Pointer-driven resize (Fix 3): converts a horizontal drag delta into either an editor/preview
- *  `fr` split or a sidebar pixel width, clamped to a sane minimum on each side so a pane can never
- *  be dragged down to nothing. */
-function startPaneDrag(kind: DragKind, startEvent: PointerEvent): void {
-  startEvent.preventDefault();
-  const containerRect = panesEl.value?.getBoundingClientRect();
-  if (!containerRect) return;
-  const startX = startEvent.clientX;
-  const startEditorFr = editorFr.value;
-  const startSidebarWidth = sidebarWidth.value;
-  const totalFr = startEditorFr + previewFr.value;
-  const remainingPx = containerRect.width - HANDLE_SPACE_PX - startSidebarWidth;
-
-  function onMove(moveEvent: PointerEvent): void {
-    const deltaX = moveEvent.clientX - startX;
-    if (kind === 'editor-preview') {
-      const startEditorPx = remainingPx * (startEditorFr / totalFr);
-      const nextEditorPx = clamp(startEditorPx + deltaX, MIN_PANE_PX, Math.max(MIN_PANE_PX, remainingPx - MIN_PANE_PX));
+/** Pointer-driven + keyboard-operable resize (Fix 3) for the horizontal Editor|Preview split:
+ *  converts a horizontal drag/step delta into an editor/preview `fr` split, clamped to a sane
+ *  minimum on each side so a pane can never be dragged down to nothing. */
+const editorPreviewResize = useResizeHandle({
+  axis: 'horizontal',
+  containerEl: panesEl,
+  beginGesture: (containerRect) => {
+    const startEditorFr = editorFr.value;
+    const totalFr = startEditorFr + previewFr.value;
+    const remainingPx = containerRect.width - HANDLE_SPACE_PX - sidebarWidth.value;
+    const startEditorPx = remainingPx * (startEditorFr / totalFr);
+    return (deltaPx) => {
+      const nextEditorPx = clamp(startEditorPx + deltaPx, MIN_PANE_PX, Math.max(MIN_PANE_PX, remainingPx - MIN_PANE_PX));
       editorFr.value = (nextEditorPx / remainingPx) * totalFr;
       previewFr.value = totalFr - editorFr.value;
-    } else {
-      sidebarWidth.value = clamp(startSidebarWidth - deltaX, MIN_SIDEBAR_PX, MAX_SIDEBAR_PX);
-    }
-  }
-  function onUp(): void {
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    persistPaneSizes();
-  }
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-}
+    };
+  },
+  onSettle: persistCurrentPaneSizes,
+});
 
-const KEYBOARD_RESIZE_STEP_PX = 24;
+/** Same, for the horizontal content|sidebar split: a single pixel width rather than an `fr`
+ *  pair. Dragging the handle right (positive delta) shrinks the sidebar. */
+const contentSidebarResize = useResizeHandle({
+  axis: 'horizontal',
+  containerEl: panesEl,
+  beginGesture: () => {
+    const startSidebarWidth = sidebarWidth.value;
+    return (deltaPx) => {
+      sidebarWidth.value = clamp(startSidebarWidth - deltaPx, MIN_SIDEBAR_PX, MAX_SIDEBAR_PX);
+    };
+  },
+  onSettle: persistCurrentPaneSizes,
+});
 
-/** Keyboard-operable equivalent of the drag above (WCAG 2.2 AA, FR-043): ArrowLeft/ArrowRight
- *  while a handle is focused nudges the same split by a fixed step. */
-function onPaneHandleKeydown(kind: DragKind, event: KeyboardEvent): void {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-  event.preventDefault();
-  const containerRect = panesEl.value?.getBoundingClientRect();
-  if (!containerRect) return;
-  const direction = event.key === 'ArrowRight' ? 1 : -1;
-  if (kind === 'editor-preview') {
-    const totalFr = editorFr.value + previewFr.value;
-    const remainingPx = containerRect.width - HANDLE_SPACE_PX - sidebarWidth.value;
-    const currentEditorPx = remainingPx * (editorFr.value / totalFr);
-    const nextEditorPx = clamp(
-      currentEditorPx + direction * KEYBOARD_RESIZE_STEP_PX,
-      MIN_PANE_PX,
-      Math.max(MIN_PANE_PX, remainingPx - MIN_PANE_PX),
-    );
-    editorFr.value = (nextEditorPx / remainingPx) * totalFr;
-    previewFr.value = totalFr - editorFr.value;
-  } else {
-    sidebarWidth.value = clamp(sidebarWidth.value - direction * KEYBOARD_RESIZE_STEP_PX, MIN_SIDEBAR_PX, MAX_SIDEBAR_PX);
-  }
-  persistPaneSizes();
-}
+const asideEl = ref<HTMLElement | null>(null);
+
+/** New: the vertical split between the Conversations list (HudPanel) and the conversation
+ *  detail area (ConversationView) inside the sidebar. Only meaningful once a conversation is
+ *  selected and ConversationView actually renders — see `sidebarStyle`'s single-row fallback and
+ *  the handle's `v-if` below, both keyed off the same condition. */
+const sidebarStyle = computed(() => {
+  if (!selectedConversationId.value) return undefined;
+  return { gridTemplateRows: `${hudFr.value}fr ${SIDEBAR_HANDLE_SPACE_PX}px ${conversationFr.value}fr` };
+});
+
+const hudConversationResize = useResizeHandle({
+  axis: 'vertical',
+  containerEl: asideEl,
+  beginGesture: (containerRect) => {
+    const startHudFr = hudFr.value;
+    const totalFr = startHudFr + conversationFr.value;
+    const remainingPx = containerRect.height - SIDEBAR_HANDLE_SPACE_PX;
+    const startHudPx = remainingPx * (startHudFr / totalFr);
+    return (deltaPx) => {
+      const nextHudPx = clamp(startHudPx + deltaPx, MIN_HUD_PX, Math.max(MIN_HUD_PX, remainingPx - MIN_CONVERSATION_PX));
+      hudFr.value = (nextHudPx / remainingPx) * totalFr;
+      conversationFr.value = totalFr - hudFr.value;
+    };
+  },
+  onSettle: persistCurrentPaneSizes,
+});
 
 onMounted(async () => {
   // FR-043b: one pair of visually-hidden ARIA live regions for the whole app — see
@@ -257,27 +256,37 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <EditorComponent :model-value="store.content" @change="onEditorChange" @branch-from-selection="onBranchFromSelection" />
       <div
         v-if="isDesktop"
-        class="resize-handle"
+        class="resize-handle resize-handle--horizontal"
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize Editor and Preview panes"
         tabindex="0"
-        @pointerdown="startPaneDrag('editor-preview', $event)"
-        @keydown="onPaneHandleKeydown('editor-preview', $event)"
+        @pointerdown="editorPreviewResize.startDrag($event)"
+        @keydown="editorPreviewResize.onKeydown($event)"
       ></div>
       <PreviewComponent :content="store.content" />
       <div
         v-if="isDesktop"
-        class="resize-handle"
+        class="resize-handle resize-handle--horizontal"
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize conversation sidebar"
         tabindex="0"
-        @pointerdown="startPaneDrag('content-sidebar', $event)"
-        @keydown="onPaneHandleKeydown('content-sidebar', $event)"
+        @pointerdown="contentSidebarResize.startDrag($event)"
+        @keydown="contentSidebarResize.onKeydown($event)"
       ></div>
-      <aside class="conversation-sidebar">
+      <aside ref="asideEl" class="conversation-sidebar" :style="sidebarStyle">
         <HudPanel :selected-id="selectedConversationId" @select="selectedConversationId = $event" />
+        <div
+          v-if="selectedConversationId"
+          class="resize-handle resize-handle--vertical"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize Conversations list and conversation detail"
+          tabindex="0"
+          @pointerdown="hudConversationResize.startDrag($event)"
+          @keydown="hudConversationResize.onKeydown($event)"
+        ></div>
         <ConversationView
           v-if="selectedConversationId"
           :conversation-id="selectedConversationId"
@@ -337,29 +346,36 @@ async function onToggleReasoning(event: Event): Promise<void> {
   grid-template-columns: 1fr 1fr minmax(300px, 380px);
   min-height: 0;
 }
+/* Extended: a grid rather than a flex column, so the HudPanel|ConversationView split (Fix 3)
+   can size both regions from `sidebarStyle`'s `fr` row template (falls back to a single row —
+   HudPanel filling the whole sidebar — when no conversation is selected and ConversationView
+   isn't rendered at all). `min-height: 0` on each `:deep()` child lets its own internal
+   `overflow-y: auto` (unchanged, see HudPanel.vue/ConversationView.vue) do the scrolling instead
+   of the grid row growing past its track. */
 .conversation-sidebar {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 1fr;
   min-height: 0;
   border-left: 1px solid var(--border-color, #ddd);
 }
-.conversation-sidebar :deep(.hud-panel) {
-  flex: 0 0 auto;
-  max-height: 40%;
-}
+.conversation-sidebar :deep(.hud-panel),
 .conversation-sidebar :deep(.conversation-view) {
-  flex: 1;
   min-height: 0;
 }
 
-/* Fix 3: draggable, keyboard-operable resize handles between the major layout regions. */
+/* Fix 3: draggable, keyboard-operable resize handles between the major layout regions.
+   `--horizontal` handles are vertical dividing lines dragged left/right (Editor|Preview,
+   content|sidebar); `--vertical` handles are horizontal dividing lines dragged up/down
+   (Conversations list|conversation detail, and ConversationView.vue's transcript|edits). */
 .resize-handle {
   position: relative;
-  cursor: col-resize;
   touch-action: none;
   background: transparent;
 }
-.resize-handle::after {
+.resize-handle--horizontal {
+  cursor: col-resize;
+}
+.resize-handle--horizontal::after {
   content: '';
   position: absolute;
   top: 0;
@@ -369,10 +385,28 @@ async function onToggleReasoning(event: Event): Promise<void> {
   transform: translateX(-50%);
   background: var(--border-color, #ccc);
 }
-.resize-handle:hover::after,
-.resize-handle:focus-visible::after {
+.resize-handle--horizontal:hover::after,
+.resize-handle--horizontal:focus-visible::after {
   background: var(--accent-color, #2563eb);
   width: 4px;
+}
+.resize-handle--vertical {
+  cursor: row-resize;
+}
+.resize-handle--vertical::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--border-color, #ccc);
+}
+.resize-handle--vertical:hover::after,
+.resize-handle--vertical:focus-visible::after {
+  background: var(--accent-color, #2563eb);
+  height: 4px;
 }
 .resize-handle:focus-visible {
   outline: 2px solid var(--accent-color, #2563eb);

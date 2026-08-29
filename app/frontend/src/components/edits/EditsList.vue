@@ -108,6 +108,12 @@ function closePreview(): void {
   border-top: 2px solid var(--border-color, #ddd);
   /* Fix 2: a surface distinct from the transcript above it. */
   background: var(--panel-bg, #f7f7f8);
+  /* New: when ConversationView.vue's transcript|edits split is active, this is a grid row sized
+     by `fr` rather than by content — min-height: 0 lets it actually shrink to that row instead of
+     forcing the row (and the page) to grow, and overflow-y: auto scrolls its own list instead.
+     Inert (no visible scrollbar) when the split isn't active and this sizes to its own content. */
+  min-height: 0;
+  overflow-y: auto;
 }
 /* Base text styling for `.pane-eyebrow` now lives in style.css; this file just adds its own
    block/spacing layout on top of the shared rule. */
