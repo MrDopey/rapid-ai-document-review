@@ -1,25 +1,13 @@
 <!--
 Sync Impact Report
-Version change: [none, template placeholders only] → 1.0.0
-Rationale: Initial ratification. No prior filled-in constitution existed (file contained only
-template placeholder tokens), so this is treated as a first adoption, not an amendment.
-Modified principles: n/a (none previously defined)
-Added sections:
-  - Core Principles I–VII (Application Owns the Document, Pi Owns Agent Conversations,
-    Proposals Not Direct Writes, CRDT-Mediated Merging, Enforced Configurable Limits,
-    Sanitize Before Render, No Pi Extension Without Necessity)
-  - Technology & Platform Constraints
-  - Quality & Review Gates
-  - Governance
+Version change: 1.0.0 → 1.1.0
+Rationale: MINOR — materially expanded guidance added to an existing section (a new, testable
+naming-convention rule for environment variables), no principle redefined or removed.
+Modified principles: n/a (no Core Principle changed)
+Added sections: n/a (new bullet added within the existing "Technology & Platform Constraints"
+  section, not a new top-level section)
 Removed sections: none
-Templates requiring alignment check:
-  - .specify/templates/plan-template.md — ⚠ pending manual review (not modified by this command)
-  - .specify/templates/spec-template.md — ⚠ pending manual review (not modified by this command)
-  - .specify/templates/tasks-template.md — ⚠ pending manual review (not modified by this command)
-  - .specify/templates/checklist-template.md — ⚠ pending manual review (not modified by this command)
-Deferred items: RATIFICATION_DATE set to the date of this command's execution since no earlier
-ratification date is recorded anywhere in the repository; correct manually if an earlier date
-should be used.
+Deferred items: none
 -->
 
 # AI Document Review Application Constitution
@@ -106,6 +94,14 @@ possible until a concrete need proves otherwise (YAGNI applied to the Pi integra
   additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
   integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi export viewing, and
   importable contextual reference material.
+* Environment variable naming: every application-defined environment variable (backend or frontend)
+  MUST be prefixed with `RADR_` (the project's acronym, AI Document Review). Exempt: variables that
+  are not application-defined, namely third-party SDK/provider credential variables (e.g.
+  `ANTHROPIC_API_KEY`) and platform-standard variables (e.g. `NODE_ENV`), which keep their standard,
+  unprefixed names.
+  **Rationale**: A consistent prefix makes it unambiguous, at a glance, which configuration surface
+  belongs to this project versus a third-party credential or a platform convention — see
+  `specs/003-radr-env-var-prefix/` for the rename this rule formalizes.
 
 ## Quality & Review Gates
 
@@ -140,4 +136,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-25
+**Version**: 1.1.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-28
