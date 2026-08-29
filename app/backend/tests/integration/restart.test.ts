@@ -21,7 +21,7 @@ import { waitFor } from '../contract/test-app.js';
  * (`documentService.loadIfExists()` + `conversationService.recoverInterruptedRuns()`).
  *
  * Unlike `tests/contract/test-app.ts`'s `createTestApp()` (`:memory:` SQLite, a brand-new database
- * per call), this suite needs state to survive a literal "restart": it points `DATABASE_PATH` at a
+ * per call), this suite needs state to survive a literal "restart": it points `RADR_BE_DATABASE_PATH` at a
  * real file in a temp directory and calls the exported `buildApp()` twice against that same file —
  * once to create state, once (after closing the first instance's connection) to simulate the
  * fresh-process boot that re-runs the recovery logic above. `config.ts` reads its env vars exactly
@@ -29,16 +29,17 @@ import { waitFor } from '../contract/test-app.js';
  */
 
 async function bootApp(databasePath: string): Promise<{ app: FastifyInstance; storage: StorageAdapter }> {
-  process.env.DATABASE_PATH = databasePath;
-  process.env.PI_FAKE_SESSIONS = '1';
-  process.env.HOST ??= '127.0.0.1';
-  process.env.LOG_LEVEL ??= 'silent';
-  process.env.PI_SESSION_STORAGE_PATH ??= './data/restart-test-pi-sessions';
-  process.env.PI_CODING_AGENT_DIR ??= './data/restart-test-pi-agent';
+  process.env.RADR_BE_DATABASE_PATH = databasePath;
+  process.env.RADR_BE_PI_FAKE_SESSIONS = '1';
+  process.env.RADR_BE_HOST ??= '127.0.0.1';
+  process.env.RADR_BE_LOG_LEVEL ??= 'silent';
+  process.env.RADR_BE_PI_SESSION_STORAGE_PATH ??= './data/restart-test-pi-sessions';
+  process.env.RADR_BE_PI_CODING_AGENT_DIR ??= './data/restart-test-pi-agent';
+  process.env.RADR_BE_PI_AGENT_MODEL ??= 'anthropic/claude-opus-4-5';
   // Same test-only seam `test-app.ts`'s harness leaves for e2e specs: makes the manual-edit
   // debounce (default 300000ms, migrations.ts) observably fast so this test doesn't need to wait
   // minutes for the second revision to land.
-  process.env.E2E_SEED_REVISION_DEBOUNCE_MS ??= '20';
+  process.env.RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS ??= '20';
   const { buildApp } = await import('../../src/server.js');
   return buildApp();
 }

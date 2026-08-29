@@ -37,7 +37,7 @@ The application, not Pi, is authoritative for document content, revisions, and e
 | Docker | Latest stable | Only required for the containerised deployment path. |
 | Playwright Chromium | Installed via `npx playwright install chromium` | Only required to run the end-to-end test suite. |
 
-> A model provider credential (for example `ANTHROPIC_API_KEY`, consumed by the Pi Coding Agent SDK) is required for live agent conversations. Without one, document creation, editing, and history still work, but agent scenarios fail with `AGENT_UNAVAILABLE`. Setting `PI_FAKE_SESSIONS=1` runs agent conversations against a deterministic, credential-free fake session instead — this is what `npm test` and the e2e suite use by default.
+> A model provider credential (for example `ANTHROPIC_API_KEY`, consumed by the Pi Coding Agent SDK) is required for live agent conversations. Without one, document creation, editing, and history still work, but agent scenarios fail with `AGENT_UNAVAILABLE`. Setting `RADR_BE_PI_FAKE_SESSIONS=1` runs agent conversations against a deterministic, credential-free fake session instead — this is what `npm test` and the e2e suite use by default.
 
 ---
 
@@ -53,18 +53,28 @@ This installs and links the three workspaces: `app/shared`, `app/backend`, and `
 
 ## Configuration
 
-The backend reads the following environment variables (`app/backend/src/config.ts`). All have working defaults for local development; only set what you need to change.
+The backend reads the following environment variables (`app/backend/src/config.ts`), all prefixed `RADR_BE_` (backend) or `RADR_FE_` (frontend, `app/frontend/vite.config.ts`):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PORT` | No | `3000` | HTTP and WebSocket port. |
-| `HOST` | No | `127.0.0.1` | Must remain `127.0.0.1`. The application is loopback-only by design; any other value fails to start. |
-| `DATABASE_PATH` | No | `./data/document-review.sqlite` | SQLite file location. |
-| `PI_SESSION_STORAGE_PATH` | No | `./data/pi-sessions` | Directory for Pi's JSONL session files. |
-| `PI_CODING_AGENT_DIR` | No | `./data/pi-agent` | Pi's config/credential directory. |
-| `LOG_LEVEL` | No | `info` | Pino log level. |
-| `PI_FAKE_SESSIONS` | No | unset (disabled) | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite. |
+| `RADR_BE_PORT` | No | `3000` | HTTP and WebSocket port. |
+| `RADR_BE_HOST` | No | `127.0.0.1` | Must remain `127.0.0.1`. The application is loopback-only by design; any other value fails to start. |
+| `RADR_BE_DATABASE_PATH` | No | `./data/document-review.sqlite` | SQLite file location. |
+| `RADR_BE_PI_SESSION_STORAGE_PATH` | No | `./data/pi-sessions` | Directory for Pi's JSONL session files. |
+| `RADR_BE_PI_CODING_AGENT_DIR` | No | `./data/pi-agent` | Pi's config/credential directory. |
+| `RADR_BE_PI_AGENT_MODEL` | **Yes** | none | Pins every new agent conversation to a specific model, in `provider/model` or `provider/model:thinkingLevel` format (e.g. `anthropic/claude-opus-4-5` or `anthropic/claude-opus-4-5:high`). The backend fails fast at startup if this is unset or blank. See precedence note below. |
+| `RADR_BE_LOG_LEVEL` | No | `info` | Pino log level. |
+| `RADR_BE_PI_FAKE_SESSIONS` | No | unset (disabled) | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite. |
+| `RADR_FE_BACKEND_PORT` | No | `3000` | Vite dev-server proxy target — must match `RADR_BE_PORT`. |
+| `RADR_FE_HOST` | No | `127.0.0.1` | Vite dev-server bind host. |
 | `ANTHROPIC_API_KEY` | Only for live agent use | none | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable. |
+
+### Model configuration precedence
+
+`RADR_BE_PI_AGENT_MODEL` is required — the backend fails fast at startup with an error identifying the problem if it is unset, blank, or set to a value that cannot be parsed or resolved. Once resolved, it is applied alongside the per-agent-directory `models.json` (in `RADR_BE_PI_CODING_AGENT_DIR`) as follows:
+
+1. `RADR_BE_PI_AGENT_MODEL` wins for every newly created agent session in the process.
+2. `models.json` custom model definitions (in `RADR_BE_PI_CODING_AGENT_DIR`) are the lookup table that `RADR_BE_PI_AGENT_MODEL`'s `provider/model` value resolves against.
 
 Secrets and credentials must never be committed to version control.
 
@@ -100,7 +110,7 @@ Open `http://127.0.0.1:3001`. The Vite dev server proxies `/api` and `/events` t
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-This builds the frontend and backend, serves the built frontend from the backend at `http://127.0.0.1:3000`, and persists `DATABASE_PATH` and `PI_SESSION_STORAGE_PATH` to the `app-data` volume so the document, revisions, and conversations survive a container restart. The published port is bound to `127.0.0.1` only.
+This builds the frontend and backend, serves the built frontend from the backend at `http://127.0.0.1:3000`, and persists `RADR_BE_DATABASE_PATH` and `RADR_BE_PI_SESSION_STORAGE_PATH` to the `app-data` volume so the document, revisions, and conversations survive a container restart. The published port is bound to `127.0.0.1` only. `RADR_BE_PI_AGENT_MODEL` must be supplied (e.g. via a `.env` file next to `docker-compose.yml`) since it is required.
 
 ---
 
@@ -123,7 +133,7 @@ npm run test:e2e
 npm run test:e2e -- --grep "US3"
 ```
 
-`npm test` and `npm run test:e2e` run entirely against `PI_FAKE_SESSIONS`-backed agent sessions and pass without any model provider credential. See `specs/001-ai-document-review/quickstart.md` for the full set of manual validation scenarios, one per user story.
+`npm test` and `npm run test:e2e` run entirely against `RADR_BE_PI_FAKE_SESSIONS`-backed agent sessions and pass without any model provider credential. See `specs/001-ai-document-review/quickstart.md` for the full set of manual validation scenarios, one per user story.
 
 ---
 
@@ -148,8 +158,12 @@ rapid-ai-document-review/
 
 **Agent conversations fail with `AGENT_UNAVAILABLE`**
 
-No model provider credential is configured. Set `ANTHROPIC_API_KEY` (or another provider credential supported by the Pi Coding Agent SDK) for live use, or set `PI_FAKE_SESSIONS=1` to develop against a fake agent session without one.
+No model provider credential is configured. Set `ANTHROPIC_API_KEY` (or another provider credential supported by the Pi Coding Agent SDK) for live use, or set `RADR_BE_PI_FAKE_SESSIONS=1` to develop against a fake agent session without one.
 
-**Backend refuses to start with an error about `HOST`**
+**Backend refuses to start with an error about `RADR_BE_HOST`**
 
-`HOST` must be `127.0.0.1`. The application is scoped to localhost-only access and does not support network exposure in this version.
+`RADR_BE_HOST` must be `127.0.0.1`. The application is scoped to localhost-only access and does not support network exposure in this version.
+
+**Backend refuses to start with an error about `RADR_BE_PI_AGENT_MODEL`**
+
+`RADR_BE_PI_AGENT_MODEL` is required and must be set to a resolvable `provider/model` value — see Configuration above.

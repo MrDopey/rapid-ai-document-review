@@ -20,7 +20,7 @@ export type Logger = typeof logger;
 
 /**
  * FR-044: called once at startup (server.ts#main). Loopback is the default and documented
- * access-control model; binding elsewhere is only ever reached via an explicit operator `HOST`
+ * access-control model; binding elsewhere is only ever reached via an explicit operator `RADR_BE_HOST`
  * override, never silently. No-op when `config.host` is still the default. No `event` field: a
  * startup binding warning is not one of the closed WebSocket-event-vocabulary values (FR-042) and
  * has no document/conversation context to attach.

@@ -33,9 +33,9 @@ export function buildApp() {
 
   // Test-only hook: e2e specs need an observably fast debounce. Applied in-process (not via a
   // separate seeding script) to avoid racing this process's own SQLite connection.
-  if (process.env.E2E_SEED_REVISION_DEBOUNCE_MS) {
+  if (process.env.RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS) {
     storage.updateSettings(
-      { revisionDebounceMs: Number(process.env.E2E_SEED_REVISION_DEBOUNCE_MS) },
+      { revisionDebounceMs: Number(process.env.RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS) },
       new Date().toISOString(),
     );
   }

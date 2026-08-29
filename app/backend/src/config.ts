@@ -7,6 +7,23 @@ export interface Config {
   logLevel: string;
   /** Test-only: use `FakeAgentSession` instead of the real Pi SDK (e2e, no model credential). */
   piFakeSessions: boolean;
+  /**
+   * Required `provider/model[:thinkingLevel]` override for every newly created agent session
+   * (specs/002-pi-agent-model-config). Read raw/unparsed here — actual `provider`/`model`/
+   * `thinkingLevel` splitting and `ModelRuntime` resolution happen in `pi/pi-service.ts`
+   * (research.md R3), the only module that constructs `ModelRuntime`.
+   */
+  piAgentModel: string;
+}
+
+/** Reads `name`, trims it, and throws if it is unset, empty, or whitespace-only — for a
+ *  mandatory variable with no default. */
+function readRequiredTrimmed(name: string): string {
+  const trimmed = process.env[name]?.trim();
+  if (!trimmed) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return trimmed;
 }
 
 function readEnv(name: string, fallback?: string): string {
@@ -19,20 +36,21 @@ function readEnv(name: string, fallback?: string): string {
 
 /**
  * FR-044: loopback is the default and documented access-control model. An operator MAY explicitly
- * set `HOST` to something else (e.g. a containerized dev environment reached via port-forwarding),
+ * set `RADR_BE_HOST` to something else (e.g. a containerized dev environment reached via port-forwarding),
  * but the default here MUST stay loopback so a plain `npm run dev`/`npm start` is never silently
  * wide-open; `logging.ts#warnIfHostOverridden` logs a visible warning whenever it is not.
  */
 export const DEFAULT_HOST = '127.0.0.1';
 
-const host = readEnv('HOST', DEFAULT_HOST);
+const host = readEnv('RADR_BE_HOST', DEFAULT_HOST);
 
 export const config: Config = {
-  port: Number(readEnv('PORT', '3000')),
+  port: Number(readEnv('RADR_BE_PORT', '3000')),
   host,
-  databasePath: readEnv('DATABASE_PATH', './data/document-review.sqlite'),
-  piSessionStoragePath: readEnv('PI_SESSION_STORAGE_PATH', './data/pi-sessions'),
-  piCodingAgentDir: readEnv('PI_CODING_AGENT_DIR', './data/pi-agent'),
-  logLevel: readEnv('LOG_LEVEL', 'info'),
-  piFakeSessions: process.env.PI_FAKE_SESSIONS === '1',
+  databasePath: readEnv('RADR_BE_DATABASE_PATH', './data/document-review.sqlite'),
+  piSessionStoragePath: readEnv('RADR_BE_PI_SESSION_STORAGE_PATH', './data/pi-sessions'),
+  piCodingAgentDir: readEnv('RADR_BE_PI_CODING_AGENT_DIR', './data/pi-agent'),
+  logLevel: readEnv('RADR_BE_LOG_LEVEL', 'info'),
+  piFakeSessions: process.env.RADR_BE_PI_FAKE_SESSIONS === '1',
+  piAgentModel: readRequiredTrimmed('RADR_BE_PI_AGENT_MODEL'),
 };

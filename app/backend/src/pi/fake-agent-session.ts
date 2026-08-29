@@ -115,7 +115,7 @@ function resolveTurnTimeoutMs(): number {
 
 /**
  * A deterministic, credential-free stand-in for a real Pi `AgentSession`, used only when
- * `PI_FAKE_SESSIONS=1` (config.ts). Exists so `npm run test:e2e -- --grep "US2"` can exercise the
+ * `RADR_BE_PI_FAKE_SESSIONS=1` (config.ts). Exists so `npm run test:e2e -- --grep "US2"` can exercise the
  * real send → ConcurrencyLimiter → PiService → EventBridge → EventHub → WS → UI path end to end
  * without a live model provider credential (quickstart.md: agent scenarios otherwise fail with
  * `AGENT_UNAVAILABLE` in an environment with no credential). Distinct from `tests/fakes/

@@ -12,7 +12,7 @@ import type { AgentSessionEventLike } from './agent-session-port.ts';
  * `message_end` carrying a nested `message: AgentMessage` (content as text/thinking/toolCall
  * blocks, no flat `id`) and `assistantMessageEvent` deltas instead of the flat `messageId`/
  * `role`/`text`/`update` shape `AgentSessionEventLike` describes. `FakeAgentSession` (used by
- * `PI_FAKE_SESSIONS=1`, which every automated test runs under) emits the flat shape directly, so
+ * `RADR_BE_PI_FAKE_SESSIONS=1`, which every automated test runs under) emits the flat shape directly, so
  * this mismatch never surfaces in tests — only against a live model. `normalizeRealEvent` adapts
  * the real shape down to the flat one the rest of this class (and the app's event contract)
  * expects; events already in the flat shape (from `FakeAgentSession`) pass through untouched.

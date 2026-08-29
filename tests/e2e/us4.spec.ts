@@ -126,7 +126,7 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
         data: { baseRevision: currentRevision, changes: [{ from, to: from, insert: `\n\n${MARKERS.advanced}` }] },
       });
 
-      // The manual-edit debounce (E2E_SEED_REVISION_DEBOUNCE_MS, playwright.config.ts) must fire
+      // The manual-edit debounce (RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS, playwright.config.ts) must fire
       // before document.currentRevision actually advances (FR-004).
       await expect
         .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })

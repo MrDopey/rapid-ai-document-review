@@ -11,7 +11,11 @@ description: "Task list template for feature implementation"
 
 **Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
 
+**Documentation**: Included by default (unlike tests) as concrete Polish-phase tasks updating root `README.md` and `docs/` - name the actual sections/files, not a placeholder. Omit only for zero-impact internal refactors. Docs must be current and durable, not a changelog; no migration/upgrade guides unless explicitly requested.
+
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
+
+**Execution**: When implementing this task list, run each phase (Setup, Foundational, each User Story, Polish) in its own subagent, in dependency order per the Dependencies section below. A phase's subagent must complete (and its tasks marked `[X]`) before the next dependent phase's subagent starts; phases with no dependency between them may run in parallel subagents.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -151,7 +155,8 @@ Examples of foundational tasks (adjust based on your project):
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX [P] Update root README.md for [specific section/behavior this feature adds or changes]
+- [ ] TXXX [P] Update or add docs/[specific doc file] for [specific behavior this feature adds or changes]
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/

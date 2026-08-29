@@ -99,10 +99,50 @@ export class PiService {
     this.editService = editService;
   }
 
+  /**
+   * Parses `config.piAgentModel` (`provider/model[:thinkingLevel]`, specs/002-pi-agent-model-config —
+   * `config.ts` guarantees this is a non-empty, trimmed string, since `RADR_BE_PI_AGENT_MODEL` is a
+   * required variable) and resolves it via `modelRuntime.getModel(provider, id)` — deliberately NOT
+   * the package-level `getModel` from `@earendil-works/pi-ai`, so `models.json`-defined custom models
+   * resolve too (research.md R1). Throws a fail-fast `Error` naming both the literal invalid value and
+   * `RADR_BE_PI_AGENT_MODEL` (FR-006) when the string doesn't parse as `provider/model[:thinkingLevel]`,
+   * names an unrecognized thinking level, or `modelRuntime.getModel(...)` resolves nothing.
+   */
+  private resolveConfiguredModel(modelRuntime: ModelRuntime): ReturnType<ModelRuntime['getModel']> {
+    const raw = config.piAgentModel;
+    if (!raw) return undefined;
+
+    const invalid = (): never => {
+      throw new Error(
+        `Invalid RADR_BE_PI_AGENT_MODEL value "${raw}": expected "provider/model[:thinkingLevel]" ` +
+          `naming a model resolvable via ModelRuntime.getModel() (source: RADR_BE_PI_AGENT_MODEL).`,
+      );
+    };
+
+    const slashIndex = raw.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === raw.length - 1) invalid();
+
+    const provider = raw.slice(0, slashIndex);
+    let id = raw.slice(slashIndex + 1);
+
+    const colonIndex = id.lastIndexOf(':');
+    if (colonIndex !== -1) {
+      const thinkingLevel = id.slice(colonIndex + 1);
+      const validThinkingLevels = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+      if (!validThinkingLevels.has(thinkingLevel)) invalid();
+      id = id.slice(0, colonIndex);
+    }
+    if (!id) invalid();
+
+    const model = modelRuntime.getModel(provider, id);
+    if (!model) invalid();
+    return model;
+  }
+
   private getModelRuntime(): Promise<ModelRuntime> {
     if (!this.modelRuntimePromise) {
       // Explicit authPath/modelsPath (rather than relying on Pi's own env-var-driven defaults)
-      // keeps this aligned with our own PI_CODING_AGENT_DIR resolution (config.ts) even when the
+      // keeps this aligned with our own RADR_BE_PI_CODING_AGENT_DIR resolution (config.ts) even when the
       // env var itself is unset and each side would otherwise fall back independently.
       this.modelRuntimePromise = ModelRuntime.create({
         authPath: join(config.piCodingAgentDir, 'auth.json'),
@@ -152,6 +192,10 @@ export class PiService {
     }
 
     const modelRuntime = await this.getModelRuntime();
+    // specs/002-pi-agent-model-config: only ever resolved on this real-session branch (after the
+    // fake-session early return above), so FR-004 holds by construction — fake sessions never
+    // touch RADR_BE_PI_AGENT_MODEL at all (research.md R5).
+    const model = this.resolveConfiguredModel(modelRuntime);
     const cwd = process.cwd();
     const sessionDir = dirname(conversation.piSessionPath);
 
@@ -185,6 +229,9 @@ export class PiService {
       customTools: tools as unknown as ToolDefinition[],
       resourceLoader,
       sessionManager,
+      // Omitted entirely (not `model: undefined`) when no override is configured, so today's SDK
+      // auto-resolution is unchanged (FR-003).
+      ...(model ? { model } : {}),
     });
 
     const agentSession = session as unknown as AgentSessionLike;
@@ -358,7 +405,7 @@ export class PiService {
    * (FR-036, research R1: `SessionManager.open(path)` → `getEntries()`). Strictly read-only —
    * never calls `prompt()` on the reopened session, so the reviewed conversation is left
    * byte-identical (quickstart.md US7 scenario 3). Returns `null` when no session file exists on
-   * disk (always true under `PI_FAKE_SESSIONS=1`, since `FakeAgentSession` never persists to
+   * disk (always true under `RADR_BE_PI_FAKE_SESSIONS=1`, since `FakeAgentSession` never persists to
    * disk, and also if the file is unreadable for any reason) so the caller can fall back to its
    * own stored event log instead.
    */

@@ -30,7 +30,7 @@ import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
 /**
  * Black-box HTTP contract tests (T085, contracts/http-api.md). Every request goes through a real
  * Fastify instance (`app.inject()` — no real TCP socket needed, unlike ws.test.ts) built by
- * `createTestApp()`: an in-memory SQLite database and `PI_FAKE_SESSIONS=1`, so agent turns run
+ * `createTestApp()`: an in-memory SQLite database and `RADR_BE_PI_FAKE_SESSIONS=1`, so agent turns run
  * through `FakeAgentSession` deterministically instead of a live model.
  *
  * `FakeAgentSession`'s scripted directives (`fake-agent-session.ts`) let a test drive the real

@@ -28,9 +28,9 @@ import type { AgentSessionEventLike } from '../../src/pi/agent-session-port.js';
 /**
  * T087 / agent-tools.md §Contract test expectations item 10 — the one contract test that talks to
  * the REAL `@earendil-works/pi-coding-agent` SDK instead of `FakePiSession`/`FakeAgentSession`.
- * This requires a real model credential (`PI_CODING_AGENT_DIR/auth.json`, or whatever
+ * This requires a real model credential (`RADR_BE_PI_CODING_AGENT_DIR/auth.json`, or whatever
  * `ModelRuntime.create` resolves) that is NOT available in the sandbox this was written in — it is
- * gated on `PI_LIVE_TEST=1` and skipped entirely otherwise, and is excluded from every default
+ * gated on `RADR_BE_PI_LIVE_TEST=1` and skipped entirely otherwise, and is excluded from every default
  * `npm run test:*` script (`package.json`'s `test:contract` runs `vitest run tests/contract
  * --exclude '**\/live-pi.test.ts'`; only `npm run test:contract:live` — `vitest run
  * tests/contract/live-pi.test.ts` — runs this file, and per agent-tools.md that job is advisory,
@@ -46,7 +46,7 @@ import type { AgentSessionEventLike } from '../../src/pi/agent-session-port.js';
  * requires: this test must fail on its own if the real SDK stops emitting an event type the bridge
  * table depends on, not merely if the bridge mishandles one it already knows about.
  */
-const LIVE = process.env.PI_LIVE_TEST === '1';
+const LIVE = process.env.RADR_BE_PI_LIVE_TEST === '1';
 
 interface LiveHarness {
   storage: SqliteStorageAdapter;
@@ -121,7 +121,15 @@ function createConversationRow(storage: SqliteStorageAdapter, documentId: string
  *  non-fake conversation — duplicated here (rather than reaching into `PiService`'s private
  *  method) so this test observes the SDK's own raw event stream directly, with nothing from
  *  `EventBridge` in between. */
-async function createRealSession(h: LiveHarness, conversation: ConversationRow) {
+async function createRealSession(
+  h: LiveHarness,
+  conversation: ConversationRow,
+  // T007 (specs/002-pi-agent-model-config): optional pre-resolved override model, mirroring the
+  // `model` option `pi-service.ts`'s eventual `RADR_BE_PI_AGENT_MODEL` resolution helper passes into
+  // this same `createAgentSession` call. Omitted by the two pre-existing tests below, so their
+  // behavior is unchanged.
+  model?: ReturnType<ModelRuntime['getModel']>,
+) {
   const modelRuntime = await ModelRuntime.create({
     authPath: `${config.piCodingAgentDir}/auth.json`,
     modelsPath: `${config.piCodingAgentDir}/models.json`,
@@ -158,6 +166,7 @@ async function createRealSession(h: LiveHarness, conversation: ConversationRow) 
     customTools: tools,
     resourceLoader,
     sessionManager,
+    ...(model ? { model } : {}),
   });
 
   return session;
@@ -240,6 +249,50 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
     },
     120_000,
   );
+
+  it(
+    // T007 (specs/002-pi-agent-model-config, quickstart.md Scenario 1): an operator-configured
+    // RADR_BE_PI_AGENT_MODEL, once resolved through ModelRuntime exactly as pi-service.ts's eventual
+    // override-resolution helper will, produces a session whose own reported model matches the
+    // override — not whatever SDK auto-resolution would otherwise have picked.
+    'RADR_BE_PI_AGENT_MODEL override: the resulting session reports the overridden model',
+    async () => {
+      const h = buildLiveHarness();
+      const doc = h.storage.getDocument()!;
+      const conversation = createConversationRow(h.storage, doc.id);
+
+      // Resolve an arbitrary real, available model from this environment's own ModelRuntime
+      // rather than hardcoding a specific provider/model id that may not exist in whatever
+      // auth.json/models.json this opt-in, credentialed run has configured.
+      const modelRuntime = await ModelRuntime.create({
+        authPath: `${config.piCodingAgentDir}/auth.json`,
+        modelsPath: `${config.piCodingAgentDir}/models.json`,
+      });
+      const [available] = modelRuntime.getModels();
+      expect(available, 'expected at least one model available to this live-test environment').toBeDefined();
+
+      const overrideValue = `${available!.provider}/${available!.id}`;
+      const previousOverride = process.env.RADR_BE_PI_AGENT_MODEL;
+      process.env.RADR_BE_PI_AGENT_MODEL = overrideValue;
+
+      try {
+        const resolved = modelRuntime.getModel(available!.provider, available!.id);
+        const session = await createRealSession(h, conversation, resolved);
+        try {
+          // contracts/environment-config.md #2: every newly created session uses exactly the
+          // resolved override model, regardless of what SDK auto-resolution would otherwise pick.
+          expect(session.model?.id).toBe(available!.id);
+          expect(session.model?.provider).toBe(available!.provider);
+        } finally {
+          session.dispose();
+        }
+      } finally {
+        if (previousOverride === undefined) delete process.env.RADR_BE_PI_AGENT_MODEL;
+        else process.env.RADR_BE_PI_AGENT_MODEL = previousOverride;
+      }
+    },
+    60_000,
+  );
 });
 
 if (!LIVE) {
@@ -247,8 +300,8 @@ if (!LIVE) {
   // a `describe.skipIf` block is skipped; this one is a plain, always-on sanity check that the
   // gating itself is wired correctly (never touches the network or the real SDK).
   describe('live-pi.test.ts gating', () => {
-    it('is skipped by default (PI_LIVE_TEST is not "1")', () => {
-      expect(process.env.PI_LIVE_TEST).not.toBe('1');
+    it('is skipped by default (RADR_BE_PI_LIVE_TEST is not "1")', () => {
+      expect(process.env.RADR_BE_PI_LIVE_TEST).not.toBe('1');
     });
   });
 }

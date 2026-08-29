@@ -46,16 +46,16 @@ Foundational.
 
 **⚠️ CRITICAL**: No user story task can be verified until this phase is complete.
 
-- [ ] T001 [P] Add `piAgentModel: string | undefined` to the `Config` interface and parse
+- [X] T001 [P] Add `piAgentModel: string | undefined` to the `Config` interface and parse
   `RADR_PI_AGENT_MODEL` in `app/backend/src/config.ts`, alongside the existing `PI_*` env vars: read the raw
   string via `process.env.RADR_PI_AGENT_MODEL`, and normalize a blank or whitespace-only value to
   `undefined` (FR-005) — do not split/validate the `provider/model[:thinkingLevel]` shape here (research.md
   R3; that happens in `pi-service.ts`).
-- [ ] T002 [P] Unit test `RADR_PI_AGENT_MODEL` parsing in `app/backend/tests/unit/config.test.ts` (new
+- [X] T002 [P] Unit test `RADR_PI_AGENT_MODEL` parsing in `app/backend/tests/unit/config.test.ts` (new
   `describe` block, following the existing `HOST` env-reload pattern in that file: `vi.resetModules()` +
   dynamic `import('../../src/config.js')` per case): unset → `undefined`; empty string → `undefined`;
   whitespace-only (`"   "`) → `undefined`; a non-blank string → passed through unchanged (raw, unparsed).
-- [ ] T003 In `app/backend/src/pi/pi-service.ts`, add a private helper that parses `provider/model` (with
+- [X] T003 In `app/backend/src/pi/pi-service.ts`, add a private helper that parses `provider/model` (with
   an optional `:thinkingLevel` suffix) out of `config.piAgentModel` and resolves it via
   `modelRuntime.getModel(provider, id)` (research.md R1 — NOT the package-level `getModel`, so
   `models.json`-defined custom models resolve too). When `config.piAgentModel` is unset, the helper returns
@@ -63,7 +63,7 @@ Foundational.
   `modelRuntime.getModel(...)` returns falsy, throw an `Error` whose message names the literal invalid
   value and identifies `RADR_PI_AGENT_MODEL` as the source (FR-006, data-model.md Validation rules).
   *(depends on T001)*
-- [ ] T004 In `getOrCreateSession()` in `app/backend/src/pi/pi-service.ts`, call the T003 helper only on the
+- [X] T004 In `getOrCreateSession()` in `app/backend/src/pi/pi-service.ts`, call the T003 helper only on the
   real-session branch (after the existing `config.piFakeSessions` early return, so FR-004 holds by
   construction — research.md R5) and pass its result as the `model` option into the existing
   `createAgentSession({ ... })` call when defined; when `undefined`, omit `model` entirely so today's SDK
@@ -84,18 +84,18 @@ mocked or live session inspection) the specified model was used.
 
 ### Tests for User Story 1
 
-- [ ] T005 [US1] Contract test in new file `app/backend/tests/contract/pi-model-config.test.ts`: with
+- [X] T005 [US1] Contract test in new file `app/backend/tests/contract/pi-model-config.test.ts`: with
   `vi.mock('@earendil-works/pi-coding-agent', ...)` stubbing `ModelRuntime.create`/`.getModel`,
   `createAgentSession`, `SessionManager`, and `DefaultResourceLoader`, set `RADR_PI_AGENT_MODEL` to a value
   the stubbed `modelRuntime.getModel` resolves, drive `PiService.send(...)` on a fresh conversation, and
   assert the stubbed `createAgentSession` was called with a `model` option equal to the value
   `modelRuntime.getModel` returned (Acceptance Scenario 1). *(depends on T004)*
-- [ ] T006 [US1] In the same file, a contract test: set `RADR_PI_AGENT_MODEL` to a value that either fails
+- [X] T006 [US1] In the same file, a contract test: set `RADR_PI_AGENT_MODEL` to a value that either fails
   to parse as `provider/model[:thinkingLevel]` or that the stubbed `modelRuntime.getModel` resolves to a
   falsy value, drive `PiService.send(...)`, and assert it rejects with an error whose message contains both
   the literal invalid value and `RADR_PI_AGENT_MODEL`, and that the stubbed `createAgentSession` is never
   called (FR-006, Edge Case: unauthenticatable/unresolvable override). *(depends on T005 — same file)*
-- [ ] T007 [P] [US1] Optional live-SDK confirmation: extend
+- [X] T007 [P] [US1] Optional live-SDK confirmation: extend
   `app/backend/tests/contract/live-pi.test.ts`'s existing `PI_LIVE_TEST`-gated `describe.skipIf(!LIVE)`
   block with a scenario that sets `RADR_PI_AGENT_MODEL` to a real, resolvable model before constructing the
   session (mirroring that file's existing `createRealSession` helper) and asserts the resulting session's
@@ -117,15 +117,15 @@ identical to before this feature (and that fake-session mode is untouched by the
 
 ### Tests for User Story 2
 
-- [ ] T008 [US2] In `app/backend/tests/contract/pi-model-config.test.ts`, a contract test: with
+- [X] T008 [US2] In `app/backend/tests/contract/pi-model-config.test.ts`, a contract test: with
   `RADR_PI_AGENT_MODEL` unset, drive `PiService.send(...)`, and assert the stubbed `createAgentSession` was
   called with no `model` property (or `model: undefined`) — i.e. today's auto-resolution path is untouched
   (FR-003, SC-002). *(depends on T004; same file as T005/T006/T007, so sequential with those)*
-- [ ] T009 [US2] In the same file, a contract test: set `process.env.PI_FAKE_SESSIONS = '1'` together with a
+- [X] T009 [US2] In the same file, a contract test: set `process.env.PI_FAKE_SESSIONS = '1'` together with a
   `RADR_PI_AGENT_MODEL` value, drive `PiService.send(...)`, and assert the stubbed `ModelRuntime.create` /
   `createAgentSession` are never called at all (the `FakeAgentSession` path is taken), regardless of the
   override (FR-004, quickstart.md Scenario 3).
-- [ ] T010 [US2] In the same file, a contract test: set `RADR_PI_AGENT_MODEL` to an empty string, then to a
+- [X] T010 [US2] In the same file, a contract test: set `RADR_PI_AGENT_MODEL` to an empty string, then to a
   whitespace-only string, and confirm both behave identically to "unset" from T008 — no error, no `model`
   passed (FR-005, quickstart.md Scenario 5).
 
@@ -145,7 +145,7 @@ which mechanism wins if both are set.
 
 ### Implementation for User Story 3
 
-- [ ] T011 [US3] Update `README.md`: add a `RADR_PI_AGENT_MODEL` row to the environment variable table
+- [x] T011 [US3] Update `README.md`: add a `RADR_PI_AGENT_MODEL` row to the environment variable table
   (after the `PI_CODING_AGENT_DIR` row, ~line 64) with format `provider/model[:thinkingLevel]` and default
   "unset (SDK auto-resolution)", and add a short paragraph immediately after the table stating the
   documented precedence order (contracts/environment-config.md): `RADR_PI_AGENT_MODEL` env override >
@@ -160,9 +160,13 @@ which mechanism wins if both are set.
 
 - [ ] T012 [P] Manually run `specs/002-pi-agent-model-config/quickstart.md` Scenarios 1–6 end-to-end (a
   real provider credential is needed for Scenarios 1, 4, and 6) to confirm the automated tests above match
-  real backend behavior.
-- [ ] T013 Run the full backend suite (`npm run -w app/backend test` and the default `test:contract`
+  real backend behavior. **Not run**: this sandbox has no model provider credential configured; Scenarios
+  1, 4, and 6 need a real `ANTHROPIC_API_KEY` (or equivalent) and cannot be exercised here. Scenarios 2, 3,
+  and 5 are already covered by the automated contract tests (T008–T010).
+- [X] T013 Run the full backend suite (`npm run -w app/backend test` and the default `test:contract`
   script, which excludes `live-pi.test.ts`) to confirm zero regressions for the no-override path (SC-002).
+  Confirmed green: `test:unit` 28/28, `test:integration` 24/24, `test:contract` 90/90, plus a clean
+  `tsc -b --force` in `app/backend`.
 
 ---
 

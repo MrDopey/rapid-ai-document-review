@@ -1,7 +1,7 @@
 /**
  * The subset of the real Pi SDK's `AgentSession` surface that `PiService` depends on.
  * `FakeAgentSession` (pi/fake-agent-session.ts) implements this shape directly, so integration
- * tests (which all run under `PI_FAKE_SESSIONS=1`) can drive deterministic agent behaviour
+ * tests (which all run under `RADR_BE_PI_FAKE_SESSIONS=1`) can drive deterministic agent behaviour
  * without a live model.
  *
  * The real `AgentSession` (from `@earendil-works/pi-coding-agent`) does NOT satisfy this

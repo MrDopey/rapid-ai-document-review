@@ -13,7 +13,7 @@ import type { DocumentSnapshot, SocketLike } from '../../src/events/event-hub.js
 /**
  * Black-box WebSocket contract tests (T086, contracts/websocket-events.md). Most tests connect a
  * real `WebSocket` (Node's global client) to a real, listening Fastify instance built by
- * `createTestApp()`/`listenForWs()` — the same `PI_FAKE_SESSIONS=1` in-memory-SQLite harness as
+ * `createTestApp()`/`listenForWs()` — the same `RADR_BE_PI_FAKE_SESSIONS=1` in-memory-SQLite harness as
  * http.test.ts. The one exception is the backpressure test (ordering guarantee 6's "only ephemeral
  * frames are dropped" half): simulating genuine TCP backpressure over a real loopback socket is
  * inherently flaky in a test environment, so that one exercises `EventHub`'s drop logic directly
@@ -550,7 +550,7 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
       // Dynamically imported (rather than statically at the top of the file, alongside
       // `createTestApp`) deliberately: `EventHub` pulls in `logging.js` -> `config.js`, and a
       // *static* import evaluates before any test body runs — including before `createTestApp()`
-      // ever gets a chance to set `DATABASE_PATH`/`PI_FAKE_SESSIONS` — which would permanently
+      // ever gets a chance to set `RADR_BE_DATABASE_PATH`/`RADR_BE_PI_FAKE_SESSIONS` — which would permanently
       // poison the cached `config` singleton for every other test in this file with the wrong
       // (default, real-path / non-fake) values. This test doesn't touch `config` at all (it builds
       // its own `SqliteStorageAdapter(':memory:')` directly), so a dynamic import costs nothing.

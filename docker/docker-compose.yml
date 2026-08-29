@@ -6,12 +6,13 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      PORT: "3000"
-      HOST: "127.0.0.1"
-      DATABASE_PATH: "/data/document-review.sqlite"
-      PI_SESSION_STORAGE_PATH: "/data/pi-sessions"
-      PI_CODING_AGENT_DIR: "/data/pi-agent"
-      LOG_LEVEL: "info"
+      RADR_BE_PORT: "3000"
+      RADR_BE_HOST: "127.0.0.1"
+      RADR_BE_DATABASE_PATH: "/data/document-review.sqlite"
+      RADR_BE_PI_SESSION_STORAGE_PATH: "/data/pi-sessions"
+      RADR_BE_PI_CODING_AGENT_DIR: "/data/pi-agent"
+      RADR_BE_PI_AGENT_MODEL: "${RADR_BE_PI_AGENT_MODEL:?RADR_BE_PI_AGENT_MODEL is required}"
+      RADR_BE_LOG_LEVEL: "info"
     volumes:
       - app-data:/data
     restart: unless-stopped

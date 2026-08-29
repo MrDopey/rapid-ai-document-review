@@ -185,9 +185,11 @@ test.describe('US7 — Review closed conversations', () => {
 
       await expect(page.locator('.readonly-banner')).toBeVisible();
       await expect(page.locator('.conversation-header .close-button')).toHaveCount(0);
-      await expect(page.getByLabel(`Message ${branchName}`)).toBeDisabled();
-      await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
-      await expect(page.getByRole('button', { name: 'Refresh + Send' })).toBeDisabled();
+      // No send/refresh-send at all on a closed conversation — the composer is hidden entirely
+      // rather than shown disabled, since none of it is available once closed (FR-035).
+      await expect(page.getByLabel(`Message ${branchName}`)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Refresh + Send' })).toHaveCount(0);
 
       // No "Make Primary" control on a closed conversation's HUD row (FR-027/FR-035).
       const hudRow = page.locator('.hud-panel li', { hasText: branchName });

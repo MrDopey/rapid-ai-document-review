@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// The backend runs with PI_FAKE_SESSIONS=1 (playwright.config.ts) since no live model provider
+// The backend runs with RADR_BE_PI_FAKE_SESSIONS=1 (playwright.config.ts) since no live model provider
 // credential is available in this environment (quickstart.md: agent scenarios otherwise fail
 // with AGENT_UNAVAILABLE). FakeAgentSession (app/backend/src/pi/fake-agent-session.ts) is a
 // deterministic stand-in exercised through the real send -> ConcurrencyLimiter -> PiService ->

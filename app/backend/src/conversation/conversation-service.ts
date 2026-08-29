@@ -562,7 +562,7 @@ export class ConversationService {
   }
 
   /** Fallback transcript source when no real Pi session file exists on disk yet — always true
-   *  under `PI_FAKE_SESSIONS=1` (`FakeAgentSession` never persists to disk), in which case the
+   *  under `RADR_BE_PI_FAKE_SESSIONS=1` (`FakeAgentSession` never persists to disk), in which case the
    *  application's own stored event log is the only record of what was said. */
   private buildFallbackTranscript(conversationIds: string[]): string[] {
     const lines: string[] = [];

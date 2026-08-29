@@ -30,24 +30,25 @@ export default defineConfig({
       url: `http://127.0.0.1:${E2E_BACKEND_PORT}/healthz`,
       reuseExistingServer: false,
       env: {
-        PORT: String(E2E_BACKEND_PORT),
-        HOST: '127.0.0.1',
-        DATABASE_PATH: E2E_DATABASE_PATH,
-        PI_SESSION_STORAGE_PATH: E2E_PI_SESSION_PATH,
-        PI_CODING_AGENT_DIR: E2E_PI_AGENT_DIR,
-        LOG_LEVEL: 'warn',
-        E2E_SEED_REVISION_DEBOUNCE_MS: '2000',
+        RADR_BE_PORT: String(E2E_BACKEND_PORT),
+        RADR_BE_HOST: '127.0.0.1',
+        RADR_BE_DATABASE_PATH: E2E_DATABASE_PATH,
+        RADR_BE_PI_SESSION_STORAGE_PATH: E2E_PI_SESSION_PATH,
+        RADR_BE_PI_CODING_AGENT_DIR: E2E_PI_AGENT_DIR,
+        RADR_BE_PI_AGENT_MODEL: 'anthropic/claude-opus-4-5',
+        RADR_BE_LOG_LEVEL: 'warn',
+        RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS: '2000',
         // No model provider credential is available in this environment (quickstart.md); US2+
         // specs exercise the real send -> PiService -> EventBridge -> WS path against a
         // deterministic, credential-free FakeAgentSession instead of a live Pi session.
-        PI_FAKE_SESSIONS: '1',
+        RADR_BE_PI_FAKE_SESSIONS: '1',
       },
     },
     {
       command: 'npm run dev --workspace=app/frontend',
       url: 'http://127.0.0.1:3001',
       reuseExistingServer: false,
-      env: { BACKEND_PORT: String(E2E_BACKEND_PORT) },
+      env: { RADR_FE_BACKEND_PORT: String(E2E_BACKEND_PORT) },
     },
   ],
 });
