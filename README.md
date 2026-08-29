@@ -147,6 +147,12 @@ npm run test:e2e -- --grep "US3"
 
 ---
 
+## Resetting the application
+
+1. Stop the backend.
+2. Delete `rm app/backend/data/document-review.sqlite*`, plus optionally `app/backend/data/pi-sessions/<docId>/`
+3. Restart the backend (`npm run dev`) — with no document present, the frontend shows the paste screen again.
+
 ## Project Structure
 
 ```
