@@ -1,11 +1,12 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 → 1.1.0
-Rationale: MINOR — materially expanded guidance added to an existing section (a new, testable
-naming-convention rule for environment variables), no principle redefined or removed.
+Version change: 1.2.0 → 1.3.0
+Rationale: MINOR — a new subsection added under "UI Conventions" documenting the keyboard-shortcut
+conventions established over recent implementation passes (single-source-of-truth registry,
+description-writing style, and the Alt+<letter> guardrail), no principle redefined or removed.
 Modified principles: n/a (no Core Principle changed)
-Added sections: n/a (new bullet added within the existing "Technology & Platform Constraints"
-  section, not a new top-level section)
+Added sections: "UI Conventions" → "Keyboard Shortcuts" (new subsection, appended after the existing
+  title | primary action | status bullets, following the same pattern as that prior addition)
 Removed sections: none
 Deferred items: none
 -->
@@ -116,6 +117,45 @@ possible until a concrete need proves otherwise (YAGNI applied to the Pi integra
 * A conversation MUST NOT be closable while it has staged edits without a verdict (applied or
   dropped).
 
+## UI Conventions
+
+* Conversation rows and headers throughout the application follow a consistent 3-section layout:
+  title | primary action | status. The left section identifies the conversation; the middle
+  section is a single slot holding whichever one action currently applies to that conversation in
+  that context (never more than one); the right section groups the status badge together with
+  every other applicable badge for that conversation.
+* In the HUD conversation list (`HudPanel.vue`), each row's middle slot shows "Make Primary" when
+  the conversation is not already Primary and is not closed (shown disabled, rather than hidden,
+  while errored); otherwise the slot is empty.
+* In the conversation detail header (`ConversationView.vue`), the middle slot shows "Request
+  review" once the conversation is closed, or "Close" while the conversation is still open and its
+  kind is not `main`; otherwise the slot is empty. Neither action is duplicated elsewhere in the
+  view.
+* A future action that applies to "the one thing you can currently do to this conversation" MUST
+  be surfaced in this same middle slot rather than as a separate control elsewhere in the same
+  row or view.
+  **Rationale**: A single, predictable location for the current primary action keeps
+  conversation-list rows and the conversation detail header legible as the same kind of object at
+  two different levels of detail, and avoids the same action (e.g. Close, Request review)
+  reappearing in more than one place as the surrounding layout evolves.
+
+### Keyboard Shortcuts
+
+* `app/frontend/src/a11y/keymap-registry.ts`'s `KEYBOARD_SHORTCUTS` array is the single source of
+  truth for every keyboard shortcut in the application. The registry is documentation only — it
+  does not rebind or implement any shortcut itself; each entry documents a binding actually
+  implemented in its own component. Entries are grouped by a `scope` field and rendered in a
+  "Keyboard shortcuts" help dialog (`KeyboardShortcutsDialog.vue` / `ShortcutGroup.vue`), reachable
+  via an icon button in the main toolbar.
+* Each entry's `description` MUST be short, direct, present-tense, user-facing text describing what
+  the shortcut does now. It MUST NOT use hedging language, and MUST NOT carry historical or
+  narrative framing — no explanation of why the shortcut was added, what it used to do, or
+  references to internal FR-ID/spec ticket numbers. That context belongs in commit messages and
+  PRs, not in-app documentation.
+* New global shortcuts SHOULD avoid bare `Alt+<letter>` combinations where an alternative exists,
+  since these are commonly intercepted by window managers or browser extensions before they reach
+  the page; prefer a combination such as `Ctrl+Alt+<letter>` instead.
+
 ## Governance
 
 This constitution supersedes conflicting statements in other project documents (including
@@ -136,4 +176,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-28
+**Version**: 1.3.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-29
