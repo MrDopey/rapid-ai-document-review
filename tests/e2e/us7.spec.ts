@@ -191,10 +191,12 @@ test.describe('US7 — Review closed conversations', () => {
       await expect(page.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Refresh + Send' })).toHaveCount(0);
 
-      // No "Make Primary" control on a closed conversation's HUD row (FR-027/FR-035).
+      // No "Make Primary" control on a closed conversation's HUD row (FR-027/FR-035). The row's
+      // own status badge is the sole "closed" indicator now (a separate "Read-only" badge next to
+      // it used to say the same thing twice — removed).
       const hudRow = page.locator('.hud-panel li', { hasText: branchName });
       await expect(hudRow.getByRole('button', { name: 'Make Primary' })).toHaveCount(0);
-      await expect(hudRow.locator('.readonly-badge')).toBeVisible();
+      await expect(hudRow.locator('.status-badge')).toHaveAttribute('data-status', 'closed');
 
       // History and proposals remain intact and visible (SC-009) — the conversation view still
       // renders its prior messages rather than going blank.

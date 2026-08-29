@@ -12,6 +12,8 @@ import HistoryPanel from './components/history/HistoryPanel.vue';
 import ReconnectingIndicator from './components/hud/ReconnectingIndicator.vue';
 import HudPanel from './components/hud/HudPanel.vue';
 import ConversationView from './components/conversation/ConversationView.vue';
+import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
+import HelpDialog from './components/toolbar/HelpDialog.vue';
 import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
 import { loadPaneSizes, persistPaneSizes } from './composables/panePersistence.js';
 
@@ -22,6 +24,8 @@ const editsStore = useEditsStore();
 
 const pasteText = ref('');
 const historyOpen = ref(false);
+const shortcutsOpen = ref(false);
+const helpOpen = ref(false);
 const wsClient = ref<WsClient | null>(null);
 const selectedConversationId = ref<string | null>(null);
 
@@ -251,7 +255,51 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <button type="button" @click="historyOpen = !historyOpen">
         {{ historyOpen ? 'Hide history' : 'History' }}
       </button>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts"
+        @click="shortcutsOpen = true"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+          <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <path
+            d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Help"
+        title="Help"
+        @click="helpOpen = true"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <path
+            d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
     </header>
+
+    <div v-if="shortcutsOpen" class="modal-overlay shortcuts-overlay">
+      <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
+    </div>
+    <div v-if="helpOpen" class="modal-overlay help-overlay">
+      <HelpDialog @close="helpOpen = false" />
+    </div>
     <div ref="panesEl" class="panes" :style="panesStyle">
       <EditorComponent :model-value="store.content" @change="onEditorChange" @branch-from-selection="onBranchFromSelection" />
       <div
@@ -339,6 +387,22 @@ async function onToggleReasoning(event: Event): Promise<void> {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.85rem;
+}
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  line-height: 0;
+  color: inherit;
+}
+.shortcuts-overlay {
+  z-index: 50;
+}
+.help-overlay {
+  z-index: 50;
 }
 .panes {
   flex: 1;

@@ -79,14 +79,25 @@ const DOC_WITH_HEADING = [
   'Trailing unique tail xyz123.',
 ].join('\n');
 
+/**
+ * Document creation now also fires a fire-and-forget seed message on Main (the same "inject the
+ * document as Main's first message" feature covered by seed-excerpt's `buildMainSeedMessage` and
+ * exercised directly further down), on its own brand-new `FakeAgentSession` — same convention as
+ * `branchAndSettle` below for a branch's own seed turn. Waiting for it to settle here, once, keeps
+ * every other test's interactions with `mainConversation.id` deterministic without each of them
+ * needing their own wait.
+ */
 async function createDoc(
   app: FastifyInstance,
+  storage: StorageAdapter,
   content: string = DOC_WITH_HEADING,
   title?: string,
 ): Promise<CreateDocumentResponse> {
   const res = await call(app, 'POST', '/api/document', title ? { title, content } : { content });
   expect(res.status).toBe(201);
-  return CreateDocumentResponse.parse(res.json);
+  const parsed = CreateDocumentResponse.parse(res.json);
+  await waitFor(() => storage.getConversation(parsed.mainConversation.id)?.status === 'idle');
+  return parsed;
 }
 
 async function branch(
@@ -170,7 +181,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('409 DOCUMENT_ALREADY_EXISTS on a second creation attempt', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', '/api/document', { content: 'Second doc' });
       expect(res.status).toBe(409);
       const err = ErrorEnvelope.parse(res.json);
@@ -186,7 +197,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('200 with content and eventSequence once created', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/document');
       expect(res.status).toBe(200);
       const parsed = GetDocumentResponse.parse(res.json);
@@ -197,7 +208,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('PATCH /api/document', () => {
     it('applies a splice and reports currentRevision/revisionCreated', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'PATCH', '/api/document', {
         baseRevision: 1,
         changes: [{ from: 0, to: 0, insert: '#' }],
@@ -215,7 +226,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('proceeds (with only a warn-level log, not an error) when baseRevision is badly out of sync', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'PATCH', '/api/document', {
         baseRevision: -1000,
         changes: [{ from: 0, to: 0, insert: 'x' }],
@@ -232,7 +243,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('GET /api/document/export', () => {
     it('exports current content as text/markdown', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/document/export');
       expect(res.status).toBe(200);
       expect(String(res.headers['content-type'])).toContain('text/markdown');
@@ -240,14 +251,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('exports a specific revision by number', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', `/api/document/export?revision=${created.document.currentRevision}`);
       expect(res.status).toBe(200);
       expect(res.text).toBe(DOC_WITH_HEADING);
     });
 
     it('adds Content-Disposition when download=1', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/document/export?download=1');
       expect(res.status).toBe(200);
       expect(String(res.headers['content-disposition'])).toContain('attachment');
@@ -260,7 +271,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('404 DOCUMENT_NOT_FOUND for a nonexistent revision', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/document/export?revision=999');
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
@@ -277,7 +288,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('lists the creation revision with attribution, newest first', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/revisions');
       expect(res.status).toBe(200);
       const parsed = ListRevisionsResponse.parse(res.json);
@@ -288,7 +299,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('paginates with a stable cursor chain across many revisions (no dup/gap)', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const totalRestores = 55;
       for (let i = 0; i < totalRestores; i += 1) {
         const res = await call(ctx.app, 'POST', `/api/revisions/${created.document.currentRevision}/restore`, {});
@@ -320,14 +331,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('400 VALIDATION_FAILED for an out-of-range limit', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/revisions?limit=0');
       expect(res.status).toBe(400);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
     });
 
     it('resolves conversation names for many agent-attributed revisions via one batch lookup, not one per row (N+1 fix)', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const mainId = created.mainConversation.id;
 
       // Main is Primary by default, so each proposal here auto-applies immediately, producing an
@@ -375,7 +386,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/revisions/:revision/restore', () => {
     it('restores as a new forward revision and validates the response shape', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 1, insert: '##' }] });
       const restoreRes = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
       expect(restoreRes.status).toBe(200);
@@ -387,7 +398,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('includes a dry-run reconciliation for pending proposals, without altering their status', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const main = created.mainConversation;
       const b = await branchAndSettle(ctx.app, ctx.storage, main.id);
       expect(b.status).toBe(201);
@@ -415,7 +426,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('404 DOCUMENT_NOT_FOUND for a nonexistent revision', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', '/api/revisions/999/restore', {});
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
@@ -431,7 +442,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('server-computes isStale, canEdit, canBranch, pendingEditCount and they vary correctly', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const main = created.mainConversation;
       const bRes = await branchAndSettle(ctx.app, ctx.storage, main.id);
       const branchConv = (bRes.json as { id: string; branchDepth: number });
@@ -492,7 +503,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('canBranch is false once at max_conversation_depth, and MAX_CONVERSATION_DEPTH_EXCEEDED fires beyond it', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       let lastId = created.mainConversation.id; // depth 0
       // default maxConversationDepth = 3
       for (let depth = 1; depth <= 3; depth += 1) {
@@ -513,7 +524,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('paginates with a stable cursor chain across many conversations (no dup/gap)', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const total = 55;
       for (let i = 0; i < total; i += 1) {
         const res = await branch(ctx.app, created.mainConversation.id, { name: `Branch ${i}` });
@@ -545,14 +556,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations', () => {
     it('404 CONVERSATION_NOT_FOUND for an unknown parent', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await branchAndSettle(ctx.app, ctx.storage, 'conv_does_not_exist');
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
     });
 
     it('409 CONVERSATION_CLOSED when branching from a closed conversation', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       const closeRes = await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
@@ -564,7 +575,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('seeds a selection-based branch with a server-generated name when none is given', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', '/api/conversations', {
         parentConversationId: created.mainConversation.id,
         selection: { from: 0, to: DOC_WITH_HEADING.indexOf('\n') },
@@ -578,14 +589,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('GET /api/conversations/:id', () => {
     it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', '/api/conversations/conv_nope');
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
     });
 
     it('returns full detail, and readOnly:true for a closed conversation', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'GET', `/api/conversations/${created.mainConversation.id}`);
       expect(res.status).toBe(200);
       const parsed = GetConversationResponse.parse(res.json);
@@ -603,7 +614,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/send', () => {
     it('202 accepted, not queued, with contextRevision', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
         message: 'Hello there',
       });
@@ -614,13 +625,13 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', '/api/conversations/conv_nope/send', { message: 'hi' });
       expect(res.status).toBe(404);
     });
 
     it('409 CONVERSATION_CLOSED on a closed conversation', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
@@ -630,7 +641,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('400 VALIDATION_FAILED for an empty message', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, { message: '' });
       expect(res.status).toBe(400);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
@@ -639,7 +650,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/refresh-send', () => {
     it('advances contextRevision and reports includedStagedEditIds', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
 
@@ -654,7 +665,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('409 MAX_EDITING_DEPTH_EXCEEDED beyond the configured editing depth', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       let lastId = created.mainConversation.id;
       // default maxEditingDepth = 2; branch to depth 3, which exceeds it while still being within
       // the default maxConversationDepth (3).
@@ -672,14 +683,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/retry', () => {
     it('409 CONVERSATION_NOT_ERRORED on a conversation that is not currently errored', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/retry`, {});
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_ERRORED');
     });
 
     it('202 accepted:true, status:"working" after an errored conversation retries', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
 
@@ -698,7 +709,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/close', () => {
     it('closes cleanly and validates the response shape', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
@@ -709,7 +720,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('409 PENDING_EDITS_BLOCK_CLOSE with pendingEditIds while a proposal is pending', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
@@ -730,14 +741,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/review', () => {
     it('409 CONVERSATION_NOT_CLOSED when the target is not closed', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/review`, {});
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_CLOSED');
     });
 
     it('201 with a new review conversation and reviewedConversationIds once closed', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
@@ -754,7 +765,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/conversations/:id/primary', () => {
     it('applied:"already_primary" as a no-op on the conversation already Primary', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/primary`, {});
       expect(res.status).toBe(200);
       const parsed = DesignatePrimaryResponse.parse(res.json);
@@ -763,7 +774,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('applied:"immediately" when nothing is busy', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
@@ -777,7 +788,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('409 PRIMARY_TARGET_BUSY when the current Primary is working and whenBusy is omitted', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await waitFor(() => ctx.storage.getConversation(branchId)?.status === 'idle');
@@ -800,7 +811,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('409 CONVERSATION_CLOSED for a closed target', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
@@ -812,7 +823,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('DELETE /api/conversations/:id/primary', () => {
     it('clears the designation and no conversation is implicitly reassigned Primary (FR-027a)', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'DELETE', `/api/conversations/${created.mainConversation.id}/primary`, undefined);
       expect(res.status).toBe(200);
       const parsed = ClearPrimaryResponse.parse(res.json);
@@ -828,7 +839,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/edits/:id/apply — five outcomes', () => {
     async function setupBranchWithProposal(oldStr: string, newStr: string, summary = 'change') {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
@@ -906,7 +917,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
     it('outcome: conflict_exhausted after the replacement budget is spent (maxReplacementAttempts: 1)', async () => {
       await call(ctx.app, 'PATCH', '/api/settings', { maxReplacementAttempts: 1 });
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
 
@@ -968,7 +979,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('404 EDIT_NOT_FOUND for an unknown edit id', async () => {
-      await createDoc(ctx.app);
+      await createDoc(ctx.app, ctx.storage);
       const res = await call(ctx.app, 'POST', '/api/edits/edit_nope/apply', {});
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('EDIT_NOT_FOUND');
@@ -977,7 +988,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('POST /api/edits/:id/drop, preview, accept-remaining, drop-remaining', () => {
     it('drop: 200 outcome:"dropped", then EDIT_NOT_PENDING on a second drop', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
@@ -996,7 +1007,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('preview: reconcilable full preview and hunks for a pending proposal', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
@@ -1014,7 +1025,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('accept-remaining and drop-remaining report per-proposal outcomes', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
@@ -1044,7 +1055,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
   describe('GET /api/conversations/:id/edits', () => {
     it('lists proposals newest-first, matching the shared schema', async () => {
-      const created = await createDoc(ctx.app);
+      const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {

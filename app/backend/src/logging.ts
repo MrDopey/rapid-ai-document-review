@@ -5,6 +5,13 @@ import { config, DEFAULT_HOST } from './config.ts';
  * `event` must always be one of the closed vocabulary values from
  * contracts/websocket-events.md — the same names used for conversation_event.event_type.
  * Never log document content or agent message text at info level or below (FR-042).
+ *
+ * `config.logPretty` (default: `process.stdout.isTTY`, override via `RADR_BE_LOG_PRETTY=1`/`0`)
+ * switches between two destinations:
+ *  - pretty: `pino-pretty` colorizes each line by severity (red error, yellow warn, ... ) for an
+ *    interactive terminal.
+ *  - default (`transport: undefined`): raw NDJSON straight to stdout, unchanged from before —
+ *    what production/piped consumers (and log aggregators) expect.
  */
 export const logger = pino({
   level: config.logLevel,
@@ -14,6 +21,16 @@ export const logger = pino({
     },
   },
   timestamp: pino.stdTimeFunctions.isoTime,
+  transport: config.logPretty
+    ? {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+          ignore: 'pid,hostname',
+        },
+      }
+    : undefined,
 });
 
 export type Logger = typeof logger;

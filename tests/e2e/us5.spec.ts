@@ -114,7 +114,12 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       expect(main?.isPrimary).toBe(true);
       expect(conversations.filter((c) => c.isPrimary)).toHaveLength(1);
 
-      await expect(page.locator('.primary-summary')).toContainText('Primary: Main');
+      // The summary area's "Primary: {{ name }}" text was dropped as redundant with the row's own
+      // Primary styling (accent + tint via `.is-primary`) — assert via the row and the "Clear
+      // Primary" button's title/aria-label (the only place that now names the Primary conversation
+      // in this area) instead.
+      await expect(page.locator('.conversation-row', { hasText: 'Main' })).toHaveClass(/is-primary/);
+      await expect(page.locator('.primary-summary .clear-primary-button')).toHaveAttribute('aria-label', /Main/);
     });
 
     await test.step('2. Main auto-applies an edit immediately, with no pending proposal left behind (FR-027)', async () => {
@@ -168,8 +173,12 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'working');
 
+      // "Make Primary" is colocated with "Clear Primary" in the panel's summary area, contextual
+      // to whichever conversation is currently *selected* (it's no longer a per-row button) —
+      // select the branch first, then act via the summary area.
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
-      await branchRow.getByRole('button', { name: 'Make Primary' }).click();
+      await branchRow.locator('.conversation-row').click();
+      await page.locator('.primary-summary').getByRole('button', { name: 'Make primary' }).click();
 
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
@@ -186,13 +195,21 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     await test.step('4. "switch now" moves Primary immediately without interrupting Main\'s in-flight run (FR-030)', async () => {
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
-      await branchRow.getByRole('button', { name: 'Make Primary' }).click();
+      await page.locator('.primary-summary').getByRole('button', { name: 'Make primary' }).click();
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
       await dialog.getByRole('button', { name: 'Switch now' }).click();
       await expect(dialog).toHaveCount(0);
 
-      await expect(branchRow.locator('.badge', { hasText: 'Primary' })).toBeVisible({ timeout: 10_000 });
+      // The "Primary" text badge on the row was replaced by styling (a left accent + background
+      // tint via `.is-primary`); the summary area's own "Primary: {{ name }}" text was later
+      // dropped as redundant with that row styling too — assert via the row's class and the
+      // "Clear Primary" button's now-only place for the name, its title/aria-label, instead.
+      await expect(branchRow.locator('.conversation-row')).toHaveClass(/is-primary/, { timeout: 10_000 });
+      await expect(page.locator('.primary-summary .clear-primary-button')).toHaveAttribute(
+        'aria-label',
+        new RegExp(branchName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      );
       const afterSwitch = await findConversation(page.request, branchName);
       expect(afterSwitch.isPrimary).toBe(true);
       const main = await findConversation(page.request, 'Main');

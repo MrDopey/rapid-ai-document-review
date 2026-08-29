@@ -23,7 +23,7 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
-import { deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
+import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
 
@@ -109,7 +109,12 @@ export class ConversationService {
     this.publisher = new EventPublisher(eventService, eventHub);
   }
 
-  /** Idempotent: creates the Main conversation for `documentId` only if one doesn't exist yet. */
+  /**
+   * Idempotent: creates the Main conversation for `documentId` only if one doesn't exist yet.
+   * Only the newly-created branch seeds the document as Main's first message (`seedMain` below)
+   * — the early `return existing` above means an already-existing Main is never re-seeded, e.g.
+   * on the defensive startup call in server.ts.
+   */
   ensureMain(documentId: string): ConversationRow {
     const existing = this.storage.getMainConversation(documentId);
     if (existing) return existing;
@@ -119,7 +124,7 @@ export class ConversationService {
       throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     }
     const now = new Date().toISOString();
-    return this.storage.createConversation({
+    const row = this.storage.createConversation({
       id: newId('conv'),
       documentId,
       parentId: null,
@@ -135,6 +140,32 @@ export class ConversationService {
       createdAt: now,
       updatedAt: now,
       closedAt: null,
+    });
+
+    this.seedMain(row.id, document.title, document.currentRevision, this.automerge.get().getContent());
+
+    return row;
+  }
+
+  /**
+   * Delivers the document under review as a brand-new Main conversation's first message, so the
+   * agent has it in message history from the start rather than only reachable via the on-demand
+   * `read_document` tool (document-tools.ts). Fire-and-forget through the ordinary `send()` path,
+   * same convention as `branch()`/`review()`'s seed messages above: it appears in the transcript
+   * as a normal `role: 'user'` message and its own progress/failure surfaces over the event
+   * stream, never blocking the caller (a document-creation or startup-recovery call, neither of
+   * which should wait on a full agent turn). Called once, at Main-creation time, by both
+   * `ensureMain` above and `DocumentService.create` (which builds Main directly rather than
+   * through `ensureMain`, for construction-order reasons — see server.ts).
+   */
+  seedMain(conversationId: string, documentTitle: string, revision: number, content: string): void {
+    const seedMessage = buildMainSeedMessage(documentTitle, revision, content);
+    void this.send(conversationId, seedMessage).catch((err) => {
+      // `event: 'agent_error'` — same reasoning as branch()'s/review()'s seed-message catch above.
+      logger.warn(
+        { event: 'agent_error', conversationId, err: err instanceof Error ? err.message : String(err) },
+        'failed to deliver main seed message',
+      );
     });
   }
 

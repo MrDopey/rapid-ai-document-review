@@ -71,6 +71,17 @@ const transcriptEditsEl = ref<HTMLDivElement | null>(null);
  *  rather than let it split the transcript against dead space. */
 const hasEdits = computed(() => editsStore.editsFor(props.conversationId).length > 0);
 
+/** Whether the "Proposed edits" section (EditsList.vue) is worth showing at all. Closing only
+ *  requires zero *pending* proposals (conversation-service.ts's `close()` throws while any are
+ *  pending); it does not clear already-applied/dropped/superseded ones, and GET
+ *  /conversations/:id/edits (edit-service.ts's `listForConversation`) returns the full history
+ *  regardless of status. So a closed conversation can still have a non-empty edits list — this
+ *  hides the section only once it's actually empty, rather than unconditionally on
+ *  `status === 'closed'`. For an open conversation the section always shows (as before), including
+ *  its "No proposed edits yet." empty state — that placeholder still matters there since more
+ *  edits may yet arrive. */
+const showEditsSection = computed(() => conversation.value?.status !== 'closed' || hasEdits.value);
+
 const transcriptEditsStyle = computed(() => {
   if (!hasEdits.value) return undefined;
   return { gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr` };
@@ -257,10 +268,29 @@ async function onRequestReview(): Promise<void> {
     reviewing.value = false;
   }
 }
+
+// Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
+// being queued (`conversation.status === 'working'`, server-driven via the
+// `conversation_status_changed` WS event) and the first assistant token actually streaming in —
+// today that gap is silent (the composer's own `sending` only covers the HTTP round trip to queue
+// the turn, not the LLM's response time). Derived entirely from state already in the store: once
+// the newest message is an assistant message that has started streaming *text*, or the turn has
+// left `working`, this clears on its own — no new store state needed.
+const awaitingResponse = computed(() => {
+  if (conversation.value?.status !== 'working') return false;
+  const last = messages.value[messages.value.length - 1];
+  if (!last || last.role !== 'assistant') return true;
+  return last.streaming && !last.text;
+});
 </script>
 
 <template>
   <section class="conversation-view" aria-label="Conversation">
+    <!-- UI convention: title | status | action, in one header row (see
+         .specify/memory/constitution.md "UI Conventions") — the same 3-section pattern as
+         HudPanel.vue's conversation-list rows. The right-hand action slot shows whichever single
+         action currently applies: "Request review" once closed, or "Close" while still open
+         (subject to the same kind-based gating as before, `kind !== 'main'`). -->
     <header class="conversation-header">
       <div class="header-titles">
         <span class="pane-eyebrow">Conversation</span>
@@ -269,42 +299,41 @@ async function onRequestReview(): Promise<void> {
       <span v-if="conversation" class="badge status-badge" :data-status="conversation.status">{{
         conversation.status
       }}</span>
+      <div class="header-actions">
+        <button
+          v-if="conversation?.status === 'closed'"
+          type="button"
+          class="review-button"
+          :disabled="reviewing"
+          @click="onRequestReview"
+        >
+          Request review
+        </button>
+        <button
+          v-else-if="conversation && conversation.kind !== 'main'"
+          type="button"
+          class="close-button"
+          :disabled="closing"
+          @click="openCloseDialog"
+        >
+          Close
+        </button>
+      </div>
     </header>
 
     <!-- FR-035: closed conversations remain fully viewable but are read-only — no reopen, no
          branch, no Primary, no send/refresh-send (the composer is hidden below rather than shown
-         disabled, since none of that is available at all once closed). -->
+         disabled, since none of that is available at all once closed). The header's own
+         `status-badge` already says "closed" right above this, so the banner text is trimmed to
+         not repeat that — it earns its keep only for the specifics a status label can't carry
+         (exactly which actions are unavailable and why). -->
     <div v-if="conversation?.status === 'closed'" class="readonly-banner" role="status">
-      This conversation is closed and read-only. Its history and proposals remain visible, but it
-      cannot be reopened, branched from, or made Primary.
+      Read-only: history and proposals remain visible, but this conversation cannot be reopened,
+      branched from, or made Primary.
     </div>
 
     <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
     <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
-
-    <!-- Fix: Close/Request review used to sit in the header, away from every other control that
-         acts on this conversation (Retry, the composer) — moved down into the same actions area
-         so all of them read as one group. -->
-    <div v-if="conversation && (conversation.kind !== 'main' || conversation.status === 'closed')" class="conversation-actions">
-      <button
-        v-if="conversation.kind !== 'main' && conversation.status !== 'closed'"
-        type="button"
-        class="close-button"
-        :disabled="closing"
-        @click="openCloseDialog"
-      >
-        Close
-      </button>
-      <button
-        v-if="conversation.status === 'closed'"
-        type="button"
-        class="review-button"
-        :disabled="reviewing"
-        @click="onRequestReview"
-      >
-        Request review
-      </button>
-    </div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
@@ -330,7 +359,7 @@ async function onRequestReview(): Promise<void> {
         @pointerdown="editsResize.startDrag($event)"
         @keydown="editsResize.onKeydown($event)"
       ></div>
-      <EditsList :conversation-id="conversationId" />
+      <EditsList v-if="showEditsSection" :conversation-id="conversationId" />
     </div>
 
     <div v-if="conversation?.status === 'errored' && !errorDismissed" class="error-banner" role="alert">
@@ -341,7 +370,11 @@ async function onRequestReview(): Promise<void> {
       </span>
     </div>
 
-    <template v-if="conversation?.status !== 'closed'">
+    <!-- Composer footer: only rendered while the conversation is open — "Request review" now
+         lives in the header's middle action slot once the conversation is closed (see
+         `.conversation-header` / `.header-actions` above), so this footer has nothing left to
+         show at that point and collapses entirely. -->
+    <div v-if="conversation?.status !== 'closed'" class="input-area">
       <div v-if="!directEditHintDismissed" class="composer-hint">
         <span>
           Tip: highlight text in the document and click "Start conversation from selection" to get
@@ -350,6 +383,16 @@ async function onRequestReview(): Promise<void> {
         <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
           Got it
         </button>
+      </div>
+
+      <!-- Fix: visible "sent — awaiting response" indicator for the gap between the turn being
+           queued and the first assistant token actually streaming in (previously silent — only
+           the header's status badge and the Send button's own "Sending…" label reflected
+           `working`, neither of which is very noticeable). Clears itself once streaming text
+           arrives or the turn leaves `working` — see `awaitingResponse`. -->
+      <div v-if="awaitingResponse" class="awaiting-response" role="status">
+        <span class="awaiting-response-spinner" aria-hidden="true"></span>
+        Request sent — waiting for response…
       </div>
 
       <form class="composer" @submit.prevent="onSend">
@@ -379,7 +422,7 @@ async function onRequestReview(): Promise<void> {
           Refresh + Send
         </button>
       </form>
-    </template>
+    </div>
 
     <div v-if="closeDialogOpen" class="modal-overlay close-dialog-overlay">
       <div ref="closeDialogEl" class="close-dialog" role="alertdialog" aria-modal="true" aria-label="Close conversation">
@@ -409,7 +452,15 @@ async function onRequestReview(): Promise<void> {
   min-height: 0;
 }
 .conversation-header {
-  display: flex;
+  /* Fix: a true 3-column grid (title | status | action) rather than flex + `margin-right: auto` —
+     that flex approach only pushes the action+status group to the right as a cluster, it can't
+     center the action slot independently of how wide the title or status content is. The two
+     flanking tracks are equal-width `1fr` (each with a `minmax(0, …)` floor so a long conversation
+     name or status text can shrink/truncate instead of overflowing at narrow sidebar widths), so
+     the middle `auto` column stays genuinely centered regardless of column 1/3 content — including
+     when it's empty (`conversation.kind === 'main'`, which renders neither button). */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
@@ -420,13 +471,21 @@ async function onRequestReview(): Promise<void> {
 .header-titles {
   display: flex;
   flex-direction: column;
-  margin-right: auto;
+  justify-self: start;
   min-width: 0;
 }
-.conversation-actions {
+/* UI convention: the header's right-hand "action" slot (title | status | action) — see
+   .specify/memory/constitution.md "UI Conventions". Only one of Request review / Close ever
+   renders here at a time, so this is just a layout container, not a group. */
+.header-actions {
   display: flex;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  justify-self: end;
+}
+.conversation-header > .status-badge {
+  justify-self: center;
+  min-width: 0;
+  white-space: nowrap;
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 .conversation-header h2 {
@@ -450,7 +509,10 @@ async function onRequestReview(): Promise<void> {
    It's a grid with a default `1fr auto` row template — transcript takes all remaining space,
    EditsList sizes to its own (small) empty-state content — for when there's nothing to resize
    (no proposed edits yet, see `hasEdits`); `transcriptEditsStyle` overrides that with an explicit
-   `fr` split, once there's a proposed-edits list worth splitting against. */
+   `fr` split, once there's a proposed-edits list worth splitting against. When EditsList is
+   omitted entirely (`showEditsSection` false — a closed conversation with an empty edits list),
+   the now-empty `auto` row collapses to zero and the message-list's `1fr` row fills the freed
+   space on its own, with no extra CSS needed. */
 .transcript-edits {
   flex: 1;
   min-height: 0;
@@ -488,6 +550,37 @@ async function onRequestReview(): Promise<void> {
   display: flex;
   gap: 0.5rem;
   flex: 0 0 auto;
+}
+/* The composer footer — only rendered while the conversation is open (see the template comment
+   above `.input-area`); collapses entirely once closed, since Request review now lives in the
+   header instead. */
+.input-area {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+/* New: low-noise "sent — awaiting response" indicator (see `awaitingResponse`) — reuses the same
+   status color as the header's `working` badge (`--status-active-color`) for visual consistency. */
+.awaiting-response {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  color: var(--status-active-color, #1d4ed8);
+  font-size: 0.75rem;
+}
+.awaiting-response-spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: awaiting-response-spin 0.8s linear infinite;
+}
+@keyframes awaiting-response-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .composer {
   display: flex;

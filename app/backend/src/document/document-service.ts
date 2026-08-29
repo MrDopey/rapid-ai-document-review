@@ -10,6 +10,7 @@ import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
 import { toConversationDto } from '../conversation/conversation-mapper.ts';
+import type { ConversationService } from '../conversation/conversation-service.ts';
 import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 import { AutomergeStore } from './automerge-store.ts';
 import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
@@ -84,6 +85,12 @@ export class DocumentService {
   private readonly revisionService: RevisionService;
   private readonly primaryMutex: PrimaryMutex;
   private readonly publisher: EventPublisher;
+  // Late-bound (like `RevisionService.setDocumentService`/`PiService.setEditService` above it in
+  // server.ts's construction order): `ConversationService` is constructed after `DocumentService`
+  // and depends on nothing here, so this breaks what would otherwise be a construction cycle.
+  // Used only to seed a brand-new Main conversation's first message with the document (below) —
+  // `create()` is only ever called well after server.ts has finished wiring both services.
+  private conversationService: ConversationService | null = null;
 
   constructor(
     storage: StorageAdapter,
@@ -100,6 +107,10 @@ export class DocumentService {
     this.revisionService = revisionService;
     this.primaryMutex = primaryMutex;
     this.publisher = new EventPublisher(eventService, eventHub);
+  }
+
+  setConversationService(conversationService: ConversationService): void {
+    this.conversationService = conversationService;
   }
 
   /**
@@ -181,6 +192,13 @@ export class DocumentService {
       updatedAt: now,
       closedAt: null,
     });
+
+    // Feature: inject the document under review as Main's first message, so the agent has it in
+    // message history from the start rather than only reachable via `read_document`. Mirrors
+    // `ConversationService.ensureMain`'s own call to the same `seedMain` for its (rarer,
+    // defensive-only) creation path — see the comment on `conversationService` above for why this
+    // is a possibly-null late-bound reference rather than a constructor dependency.
+    this.conversationService?.seedMain(mainConversationRow.id, resolvedTitle, revisionRow.revision, content);
 
     return {
       document: toDocumentDto({ ...documentRow, currentRevision: revisionRow.revision }),

@@ -126,6 +126,13 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     // default.
     expect(created.mainConversation.isPrimary).toBe(true);
 
+    // Document creation fires a fire-and-forget seed message on Main (the document-injection
+    // feature — `DocumentService.create` -> `ConversationService.seedMain`), on its own
+    // `FakeAgentSession`. Wait for that turn to settle before this test closes `storage1` below —
+    // otherwise the still-running turn's later event-bridge writes hit an already-closed database
+    // (an unhandled rejection, not a real assertion failure, but one worth avoiding).
+    await waitFor(() => storage1.getConversation(mainConversationId)?.status === 'idle');
+
     // A manual edit, debounced into revision 2 — exercises the real Automerge persistence path
     // (splice + snapshot/changes), not just a directly-poked DB row.
     const patchRes = await call(app1, 'PATCH', '/api/document', {

@@ -125,6 +125,11 @@ export function buildApp() {
     primaryService,
   );
 
+  // Breaks the DocumentService <-> ConversationService construction cycle (see the comment on
+  // `DocumentService.conversationService`): DocumentService.create() seeds a brand-new Main
+  // conversation's first message with the document via `conversationService.seedMain`.
+  documentService.setConversationService(conversationService);
+
   // Defensive idempotency: Main is normally created as part of document creation
   // (DocumentService.create); this only fills a gap if that invariant were ever violated.
   const existingDocument = storage.getDocument();

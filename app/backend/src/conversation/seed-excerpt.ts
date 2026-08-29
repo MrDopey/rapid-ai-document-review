@@ -142,6 +142,17 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
   return combined;
 }
 
+/**
+ * Seeds a newly created Main conversation with the document under review (feature: "inject the
+ * document as the first message"), mirroring `extractSeedExcerpt`'s branch-seed convention of a
+ * short lead-in line followed by the content itself. Unlike a branch excerpt, this is never
+ * capped/trimmed — Main's seed is meant to give the agent the whole document up front, the same
+ * content `read_document` (document-tools.ts) would otherwise serve on demand.
+ */
+export function buildMainSeedMessage(title: string, revision: number, content: string): string {
+  return [`Here is the document under review, "${title}" (revision ${revision}):`, '', content].join('\n');
+}
+
 /** Generates a conversation name from the selection's first heading or leading words (FR-014). */
 export function deriveBranchName(seedExcerpt: string, selectionText: string): string {
   const headingLine = seedExcerpt.split('\n').find((l) => HEADING_RE.test(l.trim()));

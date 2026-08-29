@@ -5,6 +5,13 @@ export interface Config {
   piSessionStoragePath: string;
   piCodingAgentDir: string;
   logLevel: string;
+  /**
+   * Colorized human-readable (`pino-pretty`) log output vs. raw NDJSON. Defaults to whether
+   * stdout is an interactive TTY (see `logging.ts`), so piped/production output stays NDJSON
+   * without any operator action; `RADR_BE_LOG_PRETTY=1`/`0` forces it either way (e.g. for a
+   * dev container whose stdout isn't reported as a TTY).
+   */
+  logPretty: boolean;
   /** Test-only: use `FakeAgentSession` instead of the real Pi SDK (e2e, no model credential). */
   piFakeSessions: boolean;
   /**
@@ -51,6 +58,10 @@ export const config: Config = {
   piSessionStoragePath: readEnv('RADR_BE_PI_SESSION_STORAGE_PATH', './data/pi-sessions'),
   piCodingAgentDir: readEnv('RADR_BE_PI_CODING_AGENT_DIR', './data/pi-agent'),
   logLevel: readEnv('RADR_BE_LOG_LEVEL', 'info'),
+  logPretty:
+    process.env.RADR_BE_LOG_PRETTY === undefined
+      ? Boolean(process.stdout.isTTY)
+      : process.env.RADR_BE_LOG_PRETTY === '1',
   piFakeSessions: process.env.RADR_BE_PI_FAKE_SESSIONS === '1',
   piAgentModel: readRequiredTrimmed('RADR_BE_PI_AGENT_MODEL'),
 };

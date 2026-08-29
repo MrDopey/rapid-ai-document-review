@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveBranchName, extractSeedExcerpt } from '../../src/conversation/seed-excerpt.js';
+import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from '../../src/conversation/seed-excerpt.js';
 
 /** Builds `count` blank-line-separated paragraphs, each `wordsPerParagraph` words long. */
 function buildParagraphs(count: number, wordsPerParagraph: number): string[] {
@@ -109,5 +109,16 @@ describe('deriveBranchName', () => {
   it('falls back to leading selection words when there is no heading', () => {
     const name = deriveBranchName('Just prose, no heading here.', 'Just prose, no heading here.');
     expect(name).toBe('Just prose, no heading here.');
+  });
+});
+
+describe('buildMainSeedMessage', () => {
+  it('leads with the title/revision and includes the full document content, uncapped', () => {
+    const content = 'A'.repeat(3000); // well beyond extractSeedExcerpt's 2,000-word cap
+    const message = buildMainSeedMessage('Quarterly Strategy', 3, content);
+
+    expect(message).toContain('Quarterly Strategy');
+    expect(message).toContain('revision 3');
+    expect(message).toContain(content);
   });
 });
