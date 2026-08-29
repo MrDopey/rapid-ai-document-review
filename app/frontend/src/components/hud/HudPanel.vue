@@ -201,6 +201,15 @@ async function clearPrimary(): Promise<void> {
   flex-direction: column;
   align-items: stretch;
   gap: 0.15rem;
+  /* Fix: with no gap between <li> items, a row's own "Make Primary" button sat flush against the
+     *next* row's top edge — visually ambiguous about which row it belonged to. The border groups
+     the button with its own row; the margin gives the next row clear separation. */
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border-color, #ddd);
+}
+.hud-panel li:last-child {
+  border-bottom: none;
 }
 .make-primary-button {
   align-self: flex-start;

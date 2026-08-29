@@ -1,10 +1,53 @@
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import { logger } from '../logging.ts';
+import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
 import type { ConversationStatus, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionEventLike } from './agent-session-port.ts';
+
+/**
+ * The real `@earendil-works/pi-coding-agent` `AgentSession` emits `message_start`/`message_update`/
+ * `message_end` carrying a nested `message: AgentMessage` (content as text/thinking/toolCall
+ * blocks, no flat `id`) and `assistantMessageEvent` deltas instead of the flat `messageId`/
+ * `role`/`text`/`update` shape `AgentSessionEventLike` describes. `FakeAgentSession` (used by
+ * `PI_FAKE_SESSIONS=1`, which every automated test runs under) emits the flat shape directly, so
+ * this mismatch never surfaces in tests — only against a live model. `normalizeRealEvent` adapts
+ * the real shape down to the flat one the rest of this class (and the app's event contract)
+ * expects; events already in the flat shape (from `FakeAgentSession`) pass through untouched.
+ */
+interface RealAgentContentBlock {
+  type: 'text' | 'thinking' | 'toolCall';
+  text?: string;
+  thinking?: string;
+}
+interface RealAgentMessage {
+  role: 'user' | 'assistant' | 'toolResult';
+  content?: RealAgentContentBlock[];
+  stopReason?: string;
+  errorMessage?: string;
+}
+interface RealAgentSessionEvent {
+  type: string;
+  message?: RealAgentMessage;
+  assistantMessageEvent?: { type: string; delta?: string };
+  [key: string]: unknown;
+}
+
+function extractAssistantText(content: RealAgentContentBlock[] | undefined): string {
+  if (!content) return '';
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('');
+}
+
+function extractAssistantReasoning(content: RealAgentContentBlock[] | undefined): string | null {
+  if (!content) return null;
+  const parts = content.filter((block) => block.type === 'thinking').map((block) => block.thinking ?? '');
+  return parts.length > 0 ? parts.join('') : null;
+}
 
 export interface EventBridgeContext {
   documentId: string;
@@ -45,6 +88,8 @@ function extractStagedEditId(result: unknown): string | null {
  */
 export class EventBridge {
   private settled = false;
+  private errored = false;
+  private realAssistantMessageId: string | null = null;
   private readonly cleanupFns: Array<() => void> = [];
   private readonly storage: StorageAdapter;
   private readonly eventService: EventService;
@@ -76,6 +121,14 @@ export class EventBridge {
     return this.settled;
   }
 
+  /** True once an `agent_error` (thrown, watchdog, or a normalized SDK failure) has been handled —
+   * distinct from `isSettled`, which is also true after a normal `agent_settled`. `PiService` uses
+   * this to decide whether to evict the turn's cached session, since a raw event's own `type` is
+   * never `'agent_error'` for a normalized real-SDK failure (see `normalizeRealEvent`). */
+  get hasErrored(): boolean {
+    return this.errored;
+  }
+
   /** Registered by PiService right after subscribing to the session; run once, on settle. */
   addCleanup(fn: () => void): void {
     if (this.settled) {
@@ -85,7 +138,10 @@ export class EventBridge {
     this.cleanupFns.push(fn);
   }
 
-  handle(event: AgentSessionEventLike): void {
+  handle(rawEvent: AgentSessionEventLike): void {
+    const event = this.normalizeRealEvent(rawEvent);
+    if (!event) return;
+
     if (this.settled) {
       // No `event` field: this fires precisely because no application event will be published
       // for it — the raw Pi SDK event type has no place in the closed vocabulary (FR-042).
@@ -229,6 +285,7 @@ export class EventBridge {
         break;
 
       case 'agent_error':
+        this.errored = true;
         this.setStatus('errored', event.message);
         this.publish({
           type: 'agent_error',
@@ -255,6 +312,66 @@ export class EventBridge {
       default:
         break;
     }
+  }
+
+  /**
+   * Adapts a real `AgentSession` event (nested `message`/`assistantMessageEvent`) into the flat
+   * `AgentSessionEventLike` shape the switch below expects; a `FakeAgentSession` event (already
+   * flat) passes through unchanged. Returns `null` for an event that should be dropped entirely —
+   * the SDK's own `message_start`/`message_end` for the *user*'s message (already recorded via
+   * `ConversationService.publishUserMessage` before the turn starts, so re-publishing it here would
+   * duplicate it) or a mid-stream delta with no assistant message currently tracked.
+   */
+  private normalizeRealEvent(rawEvent: AgentSessionEventLike): AgentSessionEventLike | null {
+    const event = rawEvent as unknown as RealAgentSessionEvent;
+
+    if (event.type === 'message_start') {
+      if (!event.message) return rawEvent;
+      if (event.message.role !== 'assistant') return null;
+      this.realAssistantMessageId = newId('msg');
+      return { type: 'message_start', messageId: this.realAssistantMessageId, role: 'assistant' };
+    }
+
+    if (event.type === 'message_update') {
+      if (!event.assistantMessageEvent) return rawEvent;
+      if (!this.realAssistantMessageId) return null;
+      const messageId = this.realAssistantMessageId;
+      const ame = event.assistantMessageEvent;
+      if (ame.type === 'text_delta') {
+        return { type: 'message_update', messageId, update: { type: 'text_delta', delta: ame.delta ?? '' } };
+      }
+      if (ame.type === 'thinking_delta') {
+        return { type: 'message_update', messageId, update: { type: 'thinking_delta', delta: ame.delta ?? '' } };
+      }
+      return null;
+    }
+
+    if (event.type === 'message_end') {
+      if (!event.message) return rawEvent;
+      if (event.message.role !== 'assistant') return null;
+      const messageId = this.realAssistantMessageId ?? newId('msg');
+      this.realAssistantMessageId = null;
+      // A model/provider failure (e.g. an API key without access to the selected model) surfaces
+      // here as a normal-looking `message_end` with empty content and `stopReason: "error"` rather
+      // than a distinct SDK event (the real SDK has no `agent_error` event type at all) — routed
+      // through the same `agent_error` path a thrown `session.prompt()` rejection takes, so it
+      // reaches the user as a visible, retryable error instead of silently rendering nothing.
+      if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
+        return {
+          type: 'agent_error',
+          message: event.message.errorMessage ?? `The agent's turn ended without a response (${event.message.stopReason}).`,
+        };
+      }
+      return {
+        type: 'message_end',
+        messageId,
+        role: 'assistant',
+        text: extractAssistantText(event.message.content),
+        reasoning: extractAssistantReasoning(event.message.content) ?? undefined,
+      };
+    }
+
+    return rawEvent;
   }
 
   private thinkingVisible(): boolean {

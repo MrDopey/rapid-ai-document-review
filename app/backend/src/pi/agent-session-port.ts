@@ -1,11 +1,16 @@
 /**
  * The subset of the real Pi SDK's `AgentSession` surface that `PiService` depends on.
- * `AgentSession` (from `@earendil-works/pi-coding-agent`) satisfies this structurally — nothing
- * here re-declares its implementation. `FakePiSession` (tests/fakes/) implements the same shape
- * so integration tests can drive deterministic agent behaviour without a live model.
+ * `FakeAgentSession` (pi/fake-agent-session.ts) implements this shape directly, so integration
+ * tests (which all run under `PI_FAKE_SESSIONS=1`) can drive deterministic agent behaviour
+ * without a live model.
  *
- * Event shapes mirror the subset of `AgentSessionEvent` the event-bridge contract
- * (contracts/agent-tools.md §Event bridge contract) depends on.
+ * The real `AgentSession` (from `@earendil-works/pi-coding-agent`) does NOT satisfy this
+ * structurally — its `message_start`/`message_update`/`message_end` events carry a nested
+ * `message`/`assistantMessageEvent` (content as text/thinking/toolCall blocks, no flat `id`),
+ * not these flat fields. `PiService.getOrCreateSession` casts the real session to
+ * `AgentSessionLike` anyway (`as unknown as`) purely so TypeScript accepts a single type through
+ * `PiService`/`EventBridge`; `EventBridge.normalizeRealEvent` is what actually adapts each real
+ * event down to this flat shape at runtime before anything here sees it.
  */
 
 export interface PiAgentStartEvent {

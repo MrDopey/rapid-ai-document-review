@@ -718,7 +718,14 @@ export class ConversationService {
           toolCalls: [],
           createdAt: row.createdAt,
         };
-      });
+      })
+      // Defensive: a persisted event predating a bridge/adapter fix (or any other future bug in
+      // whatever recorded it) can be missing `messageId`/`role`/`text` entirely. `MessageDto`
+      // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse`
+      // on the client and blank out this conversation's *entire* history rather than just the one
+      // row — dropping it here is strictly better than surfacing a response the client can't
+      // parse at all.
+      .filter((message) => Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string');
   }
 
   private getLastUserMessageText(conversationId: string): string {

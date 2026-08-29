@@ -218,7 +218,10 @@ export class PiService {
     const session = await this.getOrCreateSession(conversation);
     const unsubscribe = session.subscribe((event) => {
       bridge.handle(event);
-      if (event.type === 'agent_error') {
+      // `bridge.hasErrored` (not `event.type === 'agent_error'`): the real Pi SDK has no such
+      // event type at all — a model/provider failure surfaces as an ordinary `message_end` that
+      // `EventBridge.normalizeRealEvent` recognizes and translates into the bridge's error state.
+      if (bridge.hasErrored) {
         this.evictSession(conversation.id);
       }
     });

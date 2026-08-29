@@ -346,6 +346,15 @@ async function onToggleReasoning(event: Event): Promise<void> {
   grid-template-columns: 1fr 1fr minmax(300px, 380px);
   min-height: 0;
 }
+/* Fix: a grid item's default min-width is `auto`, which respects its content's intrinsic minimum
+   width — so once the Preview pane renders something wide (an unwrapped table or code block), its
+   column refuses to shrink below that no matter what `fr` share the Editor|Preview divider assigns
+   it, making the divider look broken. `min-width: 0` lets each pane's own `overflow: auto` (already
+   present in EditorComponent.vue/PreviewComponent.vue) do the shrinking/scrolling instead — same
+   fix as `.conversation-sidebar`'s children below. */
+.panes > * {
+  min-width: 0;
+}
 /* Extended: a grid rather than a flex column, so the HudPanel|ConversationView split (Fix 3)
    can size both regions from `sidebarStyle`'s `fr` row template (falls back to a single row —
    HudPanel filling the whole sidebar — when no conversation is selected and ConversationView
@@ -361,6 +370,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
 .conversation-sidebar :deep(.hud-panel),
 .conversation-sidebar :deep(.conversation-view) {
   min-height: 0;
+  /* Same grid-blowout fix as `.panes > *` above: a conversation row's own content (a long name
+     plus several badges) has a content-based automatic minimum width, which — with no explicit
+     min-width here — could force this whole sidebar column wider than its 380px track, and with
+     it every pane to its left, whenever a document had wide-enough conversation names/badges. */
+  min-width: 0;
 }
 
 /* Fix 3: draggable, keyboard-operable resize handles between the major layout regions.

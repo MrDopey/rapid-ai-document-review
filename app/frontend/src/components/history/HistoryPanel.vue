@@ -16,6 +16,12 @@ const editsStore = useEditsStore();
  *  already committed by the time this is shown, and nothing here changes any proposal's status. */
 const restoreReconciliation = ref<PendingProposalReconciliationEntry[] | null>(null);
 
+/** Revision timestamps are stored and transmitted as UTC ISO 8601; displayed in the viewer's own
+ *  timezone (the `datetime` attribute keeps the raw UTC value for assistive tech/tooling). */
+function formatLocal(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
 onMounted(() => {
   if (store.revisions.length === 0) {
     void store.loadRevisions();
@@ -100,7 +106,7 @@ async function onCopy(revision: number): Promise<void> {
         </div>
         <div v-if="rev.conversationName" class="conversation-name">{{ rev.conversationName }}</div>
         <div v-if="rev.note" class="note">{{ rev.note }}</div>
-        <time :datetime="rev.createdAt">{{ rev.createdAt }}</time>
+        <time :datetime="rev.createdAt">{{ formatLocal(rev.createdAt) }}</time>
         <div class="actions">
           <button type="button" @click="onRestore(rev.revision)">Restore</button>
           <a :href="exportUrl(rev.revision)" download>Download</a>

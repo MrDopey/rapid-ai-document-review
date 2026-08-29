@@ -10,7 +10,7 @@ const settings = useSettingsStore();
 
 // All agent-produced (and, defensively, user-authored) content passes the sanitizer before
 // touching the DOM (FR-008a, Constitution Principle VI) — same pipeline as document Markdown.
-const safeText = computed(() => domPurifySanitizer.sanitize(render(props.message.text)));
+const safeText = computed(() => domPurifySanitizer.sanitize(render(props.message.text ?? '')));
 const safeReasoning = computed(() =>
   props.message.reasoning ? domPurifySanitizer.sanitize(render(props.message.reasoning)) : '',
 );

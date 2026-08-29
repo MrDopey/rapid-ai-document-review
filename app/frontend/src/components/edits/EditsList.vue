@@ -114,6 +114,9 @@ function closePreview(): void {
      Inert (no visible scrollbar) when the split isn't active and this sizes to its own content. */
   min-height: 0;
   overflow-y: auto;
+  /* Same fix as ConversationView.vue's .message-list: reserve the scrollbar's width so switching
+     to a conversation with a different pending-edit count doesn't shift this pane's content. */
+  scrollbar-gutter: stable;
 }
 /* Base text styling for `.pane-eyebrow` now lives in style.css; this file just adds its own
    block/spacing layout on top of the shared rule. */

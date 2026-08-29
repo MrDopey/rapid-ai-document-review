@@ -125,12 +125,28 @@ function pendingProposalPhrase(count: number): string {
  *  `conversation_summary_folded` handler. */
 const foldedSummary = computed(() => store.foldedSummaries[props.conversationId] ?? null);
 
+// Dismissing the error banner is purely a local UI affordance — `conversation.status` (and its
+// HUD badge) stay `errored` until a retry actually succeeds; this only lets the user clear the
+// message out of the way in the meantime. Reset whenever a *new* error arrives, or the user
+// switches conversations, so a previous dismissal doesn't hide a later, different failure.
+const errorDismissed = ref(false);
+function dismissError(): void {
+  errorDismissed.value = true;
+}
+
 function load(): void {
+  errorDismissed.value = false;
   void store.loadDetail(props.conversationId);
 }
 
 onMounted(load);
 watch(() => props.conversationId, load);
+watch(
+  () => conversation.value?.status,
+  (status, previousStatus) => {
+    if (status === 'errored' && previousStatus !== 'errored') errorDismissed.value = false;
+  },
+);
 
 watch(
   messages,
@@ -253,8 +269,25 @@ async function onRequestReview(): Promise<void> {
       <span v-if="conversation" class="badge status-badge" :data-status="conversation.status">{{
         conversation.status
       }}</span>
+    </header>
+
+    <!-- FR-035: closed conversations remain fully viewable but are read-only — no reopen, no
+         branch, no Primary, no send/refresh-send (the composer is hidden below rather than shown
+         disabled, since none of that is available at all once closed). -->
+    <div v-if="conversation?.status === 'closed'" class="readonly-banner" role="status">
+      This conversation is closed and read-only. Its history and proposals remain visible, but it
+      cannot be reopened, branched from, or made Primary.
+    </div>
+
+    <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
+    <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
+
+    <!-- Fix: Close/Request review used to sit in the header, away from every other control that
+         acts on this conversation (Retry, the composer) — moved down into the same actions area
+         so all of them read as one group. -->
+    <div v-if="conversation && (conversation.kind !== 'main' || conversation.status === 'closed')" class="conversation-actions">
       <button
-        v-if="conversation && conversation.kind !== 'main' && conversation.status !== 'closed'"
+        v-if="conversation.kind !== 'main' && conversation.status !== 'closed'"
         type="button"
         class="close-button"
         :disabled="closing"
@@ -263,7 +296,7 @@ async function onRequestReview(): Promise<void> {
         Close
       </button>
       <button
-        v-if="conversation?.status === 'closed'"
+        v-if="conversation.status === 'closed'"
         type="button"
         class="review-button"
         :disabled="reviewing"
@@ -271,17 +304,7 @@ async function onRequestReview(): Promise<void> {
       >
         Request review
       </button>
-    </header>
-
-    <!-- FR-035: closed conversations remain fully viewable but are read-only — no reopen, no
-         branch, no Primary, no send/refresh-send (all gated below by conversation.status). -->
-    <div v-if="conversation?.status === 'closed'" class="readonly-banner" role="status">
-      This conversation is closed and read-only. Its history and proposals remain visible, but it
-      cannot be reopened, branched from, or made Primary.
     </div>
-
-    <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
-    <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
@@ -292,7 +315,7 @@ async function onRequestReview(): Promise<void> {
       <div ref="listRef" class="message-list" role="log" aria-live="polite" aria-relevant="additions">
         <MessageBubble
           v-for="(msg, index) in messages"
-          :key="msg.id"
+          :key="msg.id ?? index"
           :message="msg"
           :seed="isSeedMessage(msg, index)"
         />
@@ -310,49 +333,53 @@ async function onRequestReview(): Promise<void> {
       <EditsList :conversation-id="conversationId" />
     </div>
 
-    <div v-if="conversation?.status === 'errored'" class="error-banner" role="alert">
-      <span>{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
-      <button type="button" @click="onRetry">Retry</button>
-    </div>
-
-    <div v-if="!directEditHintDismissed" class="composer-hint">
-      <span>
-        Tip: highlight text in the document and click "Start conversation from selection" to get a
-        reviewable edit proposal instead of a direct answer.
+    <div v-if="conversation?.status === 'errored' && !errorDismissed" class="error-banner" role="alert">
+      <span class="error-banner-message">{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
+      <span class="error-banner-actions">
+        <button type="button" @click="onRetry">Retry</button>
+        <button type="button" aria-label="Dismiss error" @click="dismissError">Dismiss</button>
       </span>
-      <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
-        Got it
-      </button>
     </div>
 
-    <form class="composer" @submit.prevent="onSend">
-      <label class="visually-hidden" :for="`composer-${conversationId}`">Message {{ conversation?.name }}</label>
-      <textarea
-        :id="`composer-${conversationId}`"
-        v-model="draft"
-        :disabled="conversation?.status === 'closed'"
-        placeholder="Ask about the document…"
-        @keydown="onComposerKeydown"
-      ></textarea>
-      <button
-        type="submit"
-        class="send-button"
-        title="Send this message as a direct question or instruction to the conversation."
-        :disabled="!draft.trim() || sending || conversation?.status === 'closed' || conversation?.status === 'working'"
-      >
-        {{ conversation?.status === 'working' ? 'Sending…' : 'Send' }}
-      </button>
-      <button
-        type="button"
-        class="refresh-send-button"
-        :class="{ emphasized: conversation?.isStale }"
-        title="Refresh this conversation's context to the latest document revision, then send — use this when the document has changed since this conversation last saw it (Ctrl+Enter)."
-        :disabled="!draft.trim() || sending || conversation?.status === 'closed' || conversation?.status === 'working'"
-        @click="onRefreshSend"
-      >
-        Refresh + Send
-      </button>
-    </form>
+    <template v-if="conversation?.status !== 'closed'">
+      <div v-if="!directEditHintDismissed" class="composer-hint">
+        <span>
+          Tip: highlight text in the document and click "Start conversation from selection" to get
+          a reviewable edit proposal instead of a direct answer.
+        </span>
+        <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
+          Got it
+        </button>
+      </div>
+
+      <form class="composer" @submit.prevent="onSend">
+        <label class="visually-hidden" :for="`composer-${conversationId}`">Message {{ conversation?.name }}</label>
+        <textarea
+          :id="`composer-${conversationId}`"
+          v-model="draft"
+          placeholder="Ask about the document…"
+          @keydown="onComposerKeydown"
+        ></textarea>
+        <button
+          type="submit"
+          class="send-button"
+          title="Send this message as a direct question or instruction to the conversation."
+          :disabled="!draft.trim() || sending || conversation?.status === 'working'"
+        >
+          {{ conversation?.status === 'working' ? 'Sending…' : 'Send' }}
+        </button>
+        <button
+          type="button"
+          class="refresh-send-button"
+          :class="{ emphasized: conversation?.isStale }"
+          title="Refresh this conversation's context to the latest document revision, then send — use this when the document has changed since this conversation last saw it (Ctrl+Enter)."
+          :disabled="!draft.trim() || sending || conversation?.status === 'working'"
+          @click="onRefreshSend"
+        >
+          Refresh + Send
+        </button>
+      </form>
+    </template>
 
     <div v-if="closeDialogOpen" class="modal-overlay close-dialog-overlay">
       <div ref="closeDialogEl" class="close-dialog" role="alertdialog" aria-modal="true" aria-label="Close conversation">
@@ -396,6 +423,11 @@ async function onRequestReview(): Promise<void> {
   margin-right: auto;
   min-width: 0;
 }
+.conversation-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 .conversation-header h2 {
   margin: 0;
@@ -428,6 +460,10 @@ async function onRequestReview(): Promise<void> {
 .message-list {
   min-height: 0;
   overflow-y: auto;
+  /* Fix: reserve the scrollbar's width whether or not it's actually showing — otherwise switching
+     from a long conversation (scrollbar present) to a short one (no scrollbar) visibly shifts
+     every bubble sideways by the scrollbar's width. */
+  scrollbar-gutter: stable;
   padding: 0.75rem;
 }
 .error-banner {
@@ -438,6 +474,20 @@ async function onRequestReview(): Promise<void> {
   padding: 0.5rem 0.75rem;
   background: var(--danger-bg, #fee2e2);
   color: var(--danger-color, #991b1b);
+}
+.error-banner-message {
+  /* Fix: an unbroken long error string (e.g. a raw provider error payload) has no natural break
+     points, so without this it forced the whole banner — and with it the page — wider than the
+     viewport instead of wrapping. */
+  min-width: 0;
+  overflow-wrap: break-word;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+.error-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex: 0 0 auto;
 }
 .composer {
   display: flex;
@@ -509,9 +559,13 @@ async function onRequestReview(): Promise<void> {
 }
 .send-button:disabled,
 .refresh-send-button:disabled {
-  background: var(--panel-bg-alt, #eef0f3);
+  /* Distinct from the enabled state's background (not just dimmer text) plus `not-allowed` —
+     otherwise a disabled button still looks fully clickable at a glance. */
+  background: var(--bg-color, #fff);
   color: var(--neutral-muted-color, #4b5563);
   border-color: var(--border-color, #ccc);
+  border-style: dashed;
+  cursor: not-allowed;
 }
 .refresh-send-button.emphasized {
   font-weight: 700;
