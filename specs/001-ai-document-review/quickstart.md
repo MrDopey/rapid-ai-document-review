@@ -23,7 +23,7 @@ belong in `tasks.md`, not here.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP + WebSocket port |
-| `HOST` | `127.0.0.1` | **Do not change.** Localhost-only is the designed and supported configuration (spec Assumptions). |
+| `HOST` | `127.0.0.1` | Loopback is the default and supported configuration (spec Assumptions). Setting it to anything else (e.g. `0.0.0.0` in a containerized dev environment reached via port-forwarding) is an explicit operator opt-in — the app still has no authentication, so it logs a `warn`-level line at startup naming the exposure; only change it if you understand and accept that. |
 | `DATABASE_PATH` | `./data/app.db` | SQLite file |
 | `PI_SESSION_STORAGE_PATH` | `./data/pi-sessions` | Pi JSONL session directory (design §34) |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config/credential directory |
@@ -176,7 +176,7 @@ Covers FR-031, FR-032. Test with `test:integration` as well — deterministic co
 force at the service level.
 
 ```bash
-npm run test:integration -- --grep "reconcile"
+npm run test:integration -- -t "reconcile"
 npm run test:e2e -- --grep "US6"
 ```
 
@@ -234,7 +234,7 @@ Gate).
 **Restart recovery (FR-039)**
 
 ```bash
-npm run test:integration -- --grep "restart"
+npm run test:integration -- -t "restart"
 ```
 With an open conversation and a pending proposal, restart the backend → document content, revision
 history, conversation list (including `pi_session_path` resolution), pending proposals, and Primary
@@ -243,7 +243,7 @@ designation are all restored, and connected clients resync.
 **Failure and retry (FR-038)**
 
 ```bash
-npm run test:integration -- --grep "agent error"
+npm run test:contract -- -t "errored"
 ```
 Force a model failure → the conversation shows `errored` with the message visible, and *Retry*
 recovers it to `idle`/`working`.
@@ -251,7 +251,7 @@ recovers it to `idle`/`working`.
 **Idempotency (FR-040)**
 
 ```bash
-npm run test:integration -- --grep "idempotent"
+npm run test:contract -- -t "idempotent"
 ```
 Deliver the same `propose_document_edit` tool-call id twice → one proposal, one application, one
 revision.
@@ -278,7 +278,7 @@ control are reachable and labelled. Run an automated contrast/roles audit over e
 **No document yet (edge case)**
 
 ```bash
-npm run test:contract -- --grep "no document"
+npm run test:contract -- -t "before creation"
 ```
 Before creation, `GET /api/document` returns `404` and conversation endpoints refuse — conversations
 cannot start without a document.
@@ -299,8 +299,11 @@ Then confirm:
    R7).
 4. `docker logs` shows one JSON object per line with a consistent field set, and the `event` values
    match the names in [contracts/websocket-events.md](./contracts/websocket-events.md) (FR-042).
-5. The published port binds to `127.0.0.1` only — confirm the service is unreachable from another
-   device on the network.
+5. With `HOST` unset (the default), the published port binds to `127.0.0.1` only — confirm the
+   service is unreachable from another device on the network, and that no host-binding warning
+   appears in the logs. If `HOST` was deliberately overridden for this deployment, confirm instead
+   that the startup logs contain the `warn`-level host-exposure line (FR-044) — its absence with a
+   non-default `HOST` would mean the warning regressed.
 
 ---
 

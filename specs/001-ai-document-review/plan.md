@@ -42,7 +42,7 @@ acceptance scenarios), plus a `FakePiSession` test double for deterministic agen
 thin contract-test suite against real Pi.
 
 **Target Platform**: Self-hosted Docker container on Linux, served to a modern desktop browser.
-Localhost-only by design — no authentication; network exposure is an unsupported configuration.
+Localhost-only by default — no authentication; an operator may explicitly opt into a wider bind host (logged, never silent), but unauthenticated network exposure remains unsupported without the operator's own access-control mechanism (FR-044).
 
 **Project Type**: Web application (Vue frontend + TypeScript backend + shared contract package)
 
@@ -144,7 +144,7 @@ docker/
 ├── Dockerfile                      # node:26.1.0-trixie runtime, builds frontend + backend
 └── docker-compose.yml              # single service, volumes for SQLite + Pi sessions
 
-packages/shared/
+app/shared/
 └── src/
     ├── contracts/                  # Zod schemas + inferred types shared by both sides
     │   ├── http.ts                 # request/response shapes for contracts/http-api.md
@@ -152,9 +152,9 @@ packages/shared/
     │   └── agent-tools.ts          # propose_document_edit / read_document schemas
     └── domain/                     # Document, Revision, Conversation, StagedEdit, UserSettings types
 
-packages/backend/
+app/backend/
 ├── src/
-│   ├── server.ts                   # Fastify bootstrap, loopback-only bind (FR-044), startup recovery (FR-039/FR-039a)
+│   ├── server.ts                   # Fastify bootstrap, loopback bind by default with logged override (FR-044), startup recovery (FR-039/FR-039a)
 │   ├── config.ts                   # env + user_settings resolution, defaults from FR-041
 │   ├── logging.ts                  # pino instance, shared event vocabulary (FR-042)
 │   ├── storage/
@@ -191,7 +191,7 @@ packages/backend/
     ├── contract/                   # HTTP/WS shape tests; live-Pi contract tests (tagged, opt-in)
     └── fakes/                      # FakePiSession and fixtures
 
-packages/frontend/
+app/frontend/
 ├── src/
 │   ├── main.ts
 │   ├── App.vue
@@ -218,9 +218,9 @@ tests/e2e/                          # Playwright specs, one file per user story 
 ```
 
 **Structure Decision**: Web application layout with three npm workspaces —
-`packages/backend`, `packages/frontend`, and `packages/shared`. The split is driven directly by the
+`app/backend`, `app/frontend`, and `app/shared`. The split is driven directly by the
 constitution: Principle I requires the document authority to live wholly in the backend, so the
-frontend gets no CRDT write path; `packages/shared` exists so the HTTP/WebSocket/tool contracts are
+frontend gets no CRDT write path; `app/shared` exists so the HTTP/WebSocket/tool contracts are
 defined once as Zod schemas and consumed by both sides, preventing the frontend from drifting into a
 second definition of application state. Within the backend, directories mirror the service
 boundaries named in `design.md` §3 (document, conversation, edit, pi, events, storage), with

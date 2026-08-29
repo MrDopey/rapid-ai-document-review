@@ -1,6 +1,6 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
+// Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us5.spec.ts for the same convention. US7's fold-summary flow needs no directive of its own:
 // PiService.generateFoldSynopsis just sends FakeAgentSession a plain prompt and gets back its
 // standard deterministic echo ("Here is a fake deterministic answer to: ..."), which is what makes

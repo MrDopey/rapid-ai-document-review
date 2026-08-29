@@ -1,6 +1,6 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
+// Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us4.spec.ts for the same convention. PROPOSE_EDIT_DIRECTIVE drives the real propose_document_edit
 // tool deterministically; ERROR_DIRECTIVE (added for US5's FR-029a/FR-038a scenarios) makes a turn
 // fail with `agent_error` instead of answering, so a conversation can be put into `errored` on cue.

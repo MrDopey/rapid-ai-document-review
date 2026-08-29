@@ -6,25 +6,26 @@
     "node": ">=26.1.0"
   },
   "workspaces": [
-    "packages/shared",
-    "packages/backend",
-    "packages/frontend"
+    "app/shared",
+    "app/backend",
+    "app/frontend"
   ],
   "scripts": {
-    "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/backend && npm run build --workspace=packages/frontend",
-    "dev": "npm run dev --workspace=packages/backend",
-    "dev:frontend": "npm run dev --workspace=packages/frontend",
-    "db:migrate": "npm run db:migrate --workspace=packages/backend",
+    "build": "npm run build --workspace=app/shared && npm run build --workspace=app/backend && npm run build --workspace=app/frontend",
+    "dev": "npm run dev --workspace=app/backend",
+    "dev:frontend": "npm run dev --workspace=app/frontend",
+    "db:migrate": "npm run db:migrate --workspace=app/backend",
     "lint": "eslint .",
     "format": "prettier --check .",
     "test": "npm run test:unit && npm run test:integration && npm run test:contract",
-    "test:unit": "npm run test:unit --workspace=packages/backend",
-    "test:integration": "npm run test:integration --workspace=packages/backend",
-    "test:contract": "npm run test:contract --workspace=packages/backend",
-    "test:contract:live": "npm run test:contract:live --workspace=packages/backend",
+    "test:unit": "npm run test:unit --workspace=app/backend",
+    "test:integration": "npm run test:integration --workspace=app/backend",
+    "test:contract": "npm run test:contract --workspace=app/backend",
+    "test:contract:live": "npm run test:contract:live --workspace=app/backend",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.18.0",
     "@playwright/test": "^1.62.0",
     "eslint": "^9.18.0",

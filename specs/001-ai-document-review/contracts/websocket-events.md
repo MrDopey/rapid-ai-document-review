@@ -8,7 +8,7 @@ activity. The backend is the only sender of state; the client sends nothing but 
 handshake and heartbeats. This is the mechanism behind FR-037 (work survives disconnection) and
 SC-006 (fully caught-up within 5 s of reconnect).
 
-Payload shapes are defined once in `packages/shared/src/contracts/events.ts` as a discriminated Zod
+Payload shapes are defined once in `app/shared/src/contracts/events.ts` as a discriminated Zod
 union on `type`, so both sides share one definition.
 
 ---

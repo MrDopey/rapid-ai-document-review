@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's directives (see us3/us5.spec.ts for the
+// Mirrors app/backend/src/pi/fake-agent-session.ts's directives (see us3/us5.spec.ts for the
 // same convention) — deterministic, credential-free ways to drive a proposed edit or a failed turn
 // through the real EventBridge/EventHub/WS pipeline.
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
@@ -193,22 +193,37 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
   }
 
   function effectiveBackground(el: Element): { r: number; g: number; b: number } {
+    // Walk every ancestor with a non-transparent background, not just the nearest one — a
+    // partial-alpha layer (e.g. `rgba(255,255,255,0.06)` message-bubble tints) must be composited
+    // onto whatever its own ancestors actually paint, not onto an assumed white canvas. `body` has
+    // a real, dark-mode-aware opaque background (`var(--bg-color)`), so stopping at the first
+    // partial-alpha hit and assuming white was wrong the moment a real dark palette existed.
+    const layers: { r: number; g: number; b: number; a: number }[] = [];
     let node: Element | null = el;
     while (node) {
       const bg = parseColor(getComputedStyle(node).backgroundColor);
       if (bg && bg.a > 0) {
-        if (bg.a >= 1) return bg;
-        // Composite the partial-alpha background over an assumed white canvas (this app's actual
-        // default — `style.css` never overrides it) rather than treating it as opaque.
-        return {
-          r: bg.r * bg.a + 255 * (1 - bg.a),
-          g: bg.g * bg.a + 255 * (1 - bg.a),
-          b: bg.b * bg.a + 255 * (1 - bg.a),
-        };
+        layers.push(bg);
+        if (bg.a >= 1) break;
       }
       node = node.parentElement;
     }
-    return { r: 255, g: 255, b: 255 };
+    // Composite outermost-first (last collected) down to innermost (first collected), starting
+    // from an opaque white canvas only if nothing in the whole chain was ever fully opaque.
+    let composite = { r: 255, g: 255, b: 255 };
+    for (let i = layers.length - 1; i >= 0; i -= 1) {
+      const bg = layers[i];
+      if (bg.a >= 1) {
+        composite = bg;
+        continue;
+      }
+      composite = {
+        r: bg.r * bg.a + composite.r * (1 - bg.a),
+        g: bg.g * bg.a + composite.g * (1 - bg.a),
+        b: bg.b * bg.a + composite.b * (1 - bg.a),
+      };
+    }
+    return composite;
   }
 
   function isLargeText(fontSizePx: number, fontWeight: string): boolean {
@@ -443,24 +458,18 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     await page.goto('/');
     await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
 
-    async function runAuditAndAssert(viewName: string): Promise<void> {
+    async function runAuditAndAssert(viewName: string, scheme: 'light' | 'dark'): Promise<void> {
       const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);
-      expect(roleViolations, `${viewName}: role/name violations`).toEqual([]);
-      expect(contrastViolations, `${viewName}: contrast violations`).toEqual([]);
+      expect(roleViolations, `${viewName} [${scheme}]: role/name violations`).toEqual([]);
+      expect(contrastViolations, `${viewName} [${scheme}]: contrast violations`).toEqual([]);
     }
 
-    await test.step('main editor + HUD + conversation view', async () => {
-      await runAuditAndAssert('main view');
-    });
-
-    await test.step('history panel', async () => {
-      await page.getByRole('button', { name: 'History' }).click();
-      await expect(page.locator('.history-panel')).toBeVisible();
-      await runAuditAndAssert('history panel');
-      await page.getByRole('button', { name: 'Hide history' }).click();
-    });
-
-    await test.step('diff preview dialog', async () => {
+    // Fixture setup (fixed at "light" — the palette these targets actually render depends only on
+    // `prefers-color-scheme`/`page.emulateMedia`, not on when the DOM/edit fixtures were created)
+    // is done once and then re-viewed under both color schemes below, rather than re-created per
+    // scheme: recreating the diff-preview edit twice would insert `anchor`'s literal text into the
+    // document twice, making the second `old_string` match ambiguous.
+    await test.step('set up a pending edit fixture for the diff-preview dialog', async () => {
       // Main accumulates edits across the whole shared-backend e2e run (see env.ts), including
       // superseded/conflicted ones from earlier specs (US5's Primary-conflict-exhaustion
       // scenario in particular) whose preview is `reconcilable: false` by now. Rather than audit
@@ -479,38 +488,76 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
 
       const main = (await getConversations(page)).find((c) => c.kind === 'main');
       if (!main) throw new Error('expected a Main conversation to already exist');
-      const summary = 'A11y audit fixture proposal';
       const res = await page.request.post(`/api/conversations/${main.id}/send`, {
-        data: { message: proposeEdit(summary, [{ old_string: anchor, new_string: `${anchor}-REVISED` }]) },
+        data: {
+          message: proposeEdit('A11y audit fixture proposal', [
+            { old_string: anchor, new_string: `${anchor}-REVISED` },
+          ]),
+        },
       });
       expect(res.ok()).toBe(true);
       await waitIdleApi(page, main.id);
 
-      const row = page.locator('.edit-row', { hasText: summary });
+      const row = page.locator('.edit-row', { hasText: 'A11y audit fixture proposal' });
       await expect(row).toBeVisible({ timeout: 10_000 });
-      const previewButton = row.getByRole('button', { name: `Preview: ${summary}` });
-      await previewButton.click();
-      const dialog = page.getByRole('dialog', { name: 'Review proposed edit' });
-      await expect(dialog).toBeVisible();
-      // The dialog itself renders synchronously; its preview content arrives from an async fetch
-      // (DiffViewer.vue's `load()`) — wait for that to settle (either outcome) before auditing,
-      // otherwise the audit can run against the transient "Loading preview…" state.
-      await expect(dialog.locator('[role="tabpanel"], .conflict-banner').first()).toBeVisible({ timeout: 10_000 });
-      await runAuditAndAssert('diff preview dialog');
-      await page.keyboard.press('Escape');
-      await expect(dialog).not.toBeVisible();
     });
 
-    await test.step('close-confirmation dialog', async () => {
-      const branchRow = page.locator('.conversation-row', { hasText: 'A11y Fixture Document' });
-      await branchRow.click();
-      await expect(page.locator('.conversation-header h2')).toHaveText('A11y Fixture Document');
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-      const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
-      await expect(dialog).toBeVisible();
-      await runAuditAndAssert('close-confirmation dialog');
-      await dialog.getByRole('button', { name: 'Cancel' }).click();
-      await expect(dialog).not.toBeVisible();
-    });
+    // Dark-mode contrast regression guard: the same per-view audit sequence runs once per color
+    // scheme (`page.emulateMedia` flips which half of style.css's `prefers-color-scheme: dark`
+    // tokens apply, live, without needing to reload or re-create anything above), asserting zero
+    // contrast/role violations in both — so a future change that only "works" in light mode (the
+    // original bug this test guards against: `color-scheme: light dark` with no real dark palette)
+    // fails here instead of shipping.
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+
+      // The close-confirmation-dialog step below switches the active conversation to the
+      // "A11y Fixture Document" branch and never switches back — on a second loop iteration
+      // (dark), every step here would otherwise run against whatever that step left selected,
+      // not Main, so the diff-preview step's Main-only edit row is never found. Return to Main
+      // explicitly at the top of every iteration rather than relying on leftover selection state.
+      await test.step(`select Main [${scheme}]`, async () => {
+        await page.locator('.conversation-row', { hasText: 'Main' }).first().click();
+        await expect(page.locator('.conversation-header h2')).toHaveText('Main');
+      });
+
+      await test.step(`main editor + HUD + conversation view [${scheme}]`, async () => {
+        await runAuditAndAssert('main view', scheme);
+      });
+
+      await test.step(`history panel [${scheme}]`, async () => {
+        await page.getByRole('button', { name: 'History' }).click();
+        await expect(page.locator('.history-panel')).toBeVisible();
+        await runAuditAndAssert('history panel', scheme);
+        await page.getByRole('button', { name: 'Hide history' }).click();
+      });
+
+      await test.step(`diff preview dialog [${scheme}]`, async () => {
+        const row = page.locator('.edit-row', { hasText: 'A11y audit fixture proposal' });
+        const previewButton = row.getByRole('button', { name: 'Preview: A11y audit fixture proposal' });
+        await previewButton.click();
+        const dialog = page.getByRole('dialog', { name: 'Review proposed edit' });
+        await expect(dialog).toBeVisible();
+        // The dialog itself renders synchronously; its preview content arrives from an async fetch
+        // (DiffViewer.vue's `load()`) — wait for that to settle (either outcome) before auditing,
+        // otherwise the audit can run against the transient "Loading preview…" state.
+        await expect(dialog.locator('[role="tabpanel"], .conflict-banner').first()).toBeVisible({ timeout: 10_000 });
+        await runAuditAndAssert('diff preview dialog', scheme);
+        await page.keyboard.press('Escape');
+        await expect(dialog).not.toBeVisible();
+      });
+
+      await test.step(`close-confirmation dialog [${scheme}]`, async () => {
+        const branchRow = page.locator('.conversation-row', { hasText: 'A11y Fixture Document' });
+        await branchRow.click();
+        await expect(page.locator('.conversation-header h2')).toHaveText('A11y Fixture Document');
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
+        await expect(dialog).toBeVisible();
+        await runAuditAndAssert('close-confirmation dialog', scheme);
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).not.toBeVisible();
+      });
+    }
   });
 });

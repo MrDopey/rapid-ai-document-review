@@ -5,7 +5,7 @@
 
 Application-level operations only — no endpoint exposes SQLite rows or Pi internals
 (Constitution Principles I and II). Base path `/api`. All bodies are JSON. Request and response
-shapes are defined once as Zod schemas in `packages/shared/src/contracts/http.ts` and used both for
+shapes are defined once as Zod schemas in `app/shared/src/contracts/http.ts` and used both for
 Fastify route validation and for the typed frontend client.
 
 No authentication: the service binds to `127.0.0.1` only and a single local user is assumed
@@ -17,13 +17,13 @@ No authentication: the service binds to `127.0.0.1` only and a single local user
 
 ### `ConflictDetail`
 
-The `conflictDetail` object is defined once in `packages/shared/src/contracts/http.ts` and is the
+The `conflictDetail` object is defined once in `app/shared/src/contracts/http.ts` and is the
 **canonical definition** for all three contracts (HTTP, WebSocket, agent tools). Any location in
 this document or in `websocket-events.md` or `agent-tools.md` that references `conflictDetail` uses
 this type — it is never independently defined per-contract.
 
 ```ts
-// packages/shared/src/contracts/http.ts
+// app/shared/src/contracts/http.ts
 ConflictDetail = z.object({
   operations: z.array(z.object({
     index: z.number().int(),

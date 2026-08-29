@@ -26,7 +26,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'node packages/backend/dist/server.js',
+      command: 'node app/backend/dist/server.js',
       url: `http://127.0.0.1:${E2E_BACKEND_PORT}/healthz`,
       reuseExistingServer: false,
       env: {
@@ -44,7 +44,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev --workspace=packages/frontend',
+      command: 'npm run dev --workspace=app/frontend',
       url: 'http://127.0.0.1:3001',
       reuseExistingServer: false,
       env: { BACKEND_PORT: String(E2E_BACKEND_PORT) },

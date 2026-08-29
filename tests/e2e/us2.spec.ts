@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 // The backend runs with PI_FAKE_SESSIONS=1 (playwright.config.ts) since no live model provider
 // credential is available in this environment (quickstart.md: agent scenarios otherwise fail
-// with AGENT_UNAVAILABLE). FakeAgentSession (packages/backend/src/pi/fake-agent-session.ts) is a
+// with AGENT_UNAVAILABLE). FakeAgentSession (app/backend/src/pi/fake-agent-session.ts) is a
 // deterministic stand-in exercised through the real send -> ConcurrencyLimiter -> PiService ->
 // EventBridge -> EventHub -> WS -> UI path — only the literal model call is replaced.
 const DOC_CONTENT = '# US2 Fixture Document\n\nThis document exists to exercise the Main conversation.';

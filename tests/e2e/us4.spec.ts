@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's READ_DOCUMENT_DIRECTIVE — a user
+// Mirrors app/backend/src/pi/fake-agent-session.ts's READ_DOCUMENT_DIRECTIVE — a user
 // message beginning with this prefix causes FakeAgentSession to actually invoke the real
 // read_document tool (document-tools.ts) and echo its full text result (which embeds the
 // conversation's context revision and the document content served at it) back as the assistant's

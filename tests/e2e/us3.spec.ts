@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's PROPOSE_EDIT_DIRECTIVE — a user/system
+// Mirrors app/backend/src/pi/fake-agent-session.ts's PROPOSE_EDIT_DIRECTIVE — a user/system
 // message beginning with this prefix, followed by a JSON { summary, operations } payload, causes
 // FakeAgentSession to actually invoke the real propose_document_edit tool (document-tools.ts)
 // instead of its canned answer, so these scenarios exercise the genuine EditService/

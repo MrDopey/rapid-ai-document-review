@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Mirrors packages/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
+// Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us5.spec.ts for the same convention. `FakeAgentSession` never decides on its own to call
 // `propose_document_edit` again after a conflict — the conflict-recovery ("replacement") turn
 // ConflictService fires automatically just gets a canned plain-text reply from it, same as any
