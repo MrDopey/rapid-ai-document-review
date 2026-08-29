@@ -87,6 +87,11 @@ The devcontainer at `.devcontainer/` provisions Node 26.1.0, the GitHub CLI, and
 Without the devcontainer, ensure Node 26.1.0 is installed locally instead.
 
 ```bash
+export GEMINI_API_KEY=
+export RADR_BE_PI_AGENT_MODEL=google/gemini-3.6-flash
+export RADR_BE_HOST=0.0.0.0
+export RADR_FE_HOST=0.0.0.0
+
 # 1. Install dependencies
 npm install
 
@@ -98,6 +103,11 @@ npm run dev
 
 # 4. In a second terminal, start the frontend dev server
 npm run dev:frontend
+
+# To debug pi agent
+export PI_CODING_AGENT_DIR=./app/backend/data/pi-agent 
+
+pi --model $RADR_BE_PI_AGENT_MODEL --session ./app/backend/data/pi-sessions/<doc>/<session-id>.jsonl
 ```
 
 Open `http://127.0.0.1:3001`. The Vite dev server proxies `/api` and `/events` to the backend on port 3000. With no document created yet, the paste screen appears.
@@ -159,11 +169,3 @@ rapid-ai-document-review/
 **Agent conversations fail with `AGENT_UNAVAILABLE`**
 
 No model provider credential is configured. Set `ANTHROPIC_API_KEY` (or another provider credential supported by the Pi Coding Agent SDK) for live use, or set `RADR_BE_PI_FAKE_SESSIONS=1` to develop against a fake agent session without one.
-
-**Backend refuses to start with an error about `RADR_BE_HOST`**
-
-`RADR_BE_HOST` must be `127.0.0.1`. The application is scoped to localhost-only access and does not support network exposure in this version.
-
-**Backend refuses to start with an error about `RADR_BE_PI_AGENT_MODEL`**
-
-`RADR_BE_PI_AGENT_MODEL` is required and must be set to a resolvable `provider/model` value — see Configuration above.
