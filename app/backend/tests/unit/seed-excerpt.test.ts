@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from '../../src/conversation/seed-excerpt.js';
+import {
+  buildMainSeedMessage,
+  deriveBranchName,
+  extractSeedExcerpt,
+  wrapDocumentRevision,
+} from '../../src/conversation/seed-excerpt.js';
 
 /** Builds `count` blank-line-separated paragraphs, each `wordsPerParagraph` words long. */
 function buildParagraphs(count: number, wordsPerParagraph: number): string[] {
@@ -113,12 +118,23 @@ describe('deriveBranchName', () => {
 });
 
 describe('buildMainSeedMessage', () => {
-  it('leads with the title/revision and includes the full document content, uncapped', () => {
+  it('leads with the title/revision and includes the full document content, uncapped, wrapped in a matching <document-revision-N> tag', () => {
     const content = 'A'.repeat(3000); // well beyond extractSeedExcerpt's 2,000-word cap
     const message = buildMainSeedMessage('Quarterly Strategy', 3, content);
 
     expect(message).toContain('Quarterly Strategy');
     expect(message).toContain('revision 3');
+    expect(message).toContain('<document-revision-3>');
+    expect(message).toContain('</document-revision-3>');
     expect(message).toContain(content);
+    // Content itself is nested inside the tag, not merely present somewhere in the message.
+    expect(message).toContain(`<document-revision-3>\n${content}\n</document-revision-3>`);
+  });
+});
+
+describe('wrapDocumentRevision', () => {
+  it('wraps content in matching opening/closing tags naming the revision', () => {
+    const wrapped = wrapDocumentRevision(7, 'Some document content.');
+    expect(wrapped).toBe('<document-revision-7>\nSome document content.\n</document-revision-7>');
   });
 });

@@ -23,7 +23,7 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
-import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
+import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt, wrapDocumentRevision } from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
 
@@ -289,10 +289,10 @@ export class ConversationService {
       ? [
           `Here is the passage this conversation was branched from (document v${document.currentRevision}):`,
           '',
-          seedExcerpt,
+          wrapDocumentRevision(document.currentRevision, seedExcerpt),
           '',
           `Highlighted selection:`,
-          seedSelection.text,
+          wrapDocumentRevision(document.currentRevision, seedSelection.text),
         ].join('\n')
       : `This conversation was branched from "${parent.name}".`;
 

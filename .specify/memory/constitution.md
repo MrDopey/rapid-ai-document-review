@@ -1,12 +1,13 @@
 <!--
 Sync Impact Report
-Version change: 1.2.0 → 1.3.0
-Rationale: MINOR — a new subsection added under "UI Conventions" documenting the keyboard-shortcut
-conventions established over recent implementation passes (single-source-of-truth registry,
-description-writing style, and the Alt+<letter> guardrail), no principle redefined or removed.
+Version change: 1.4.0 → 1.4.1
+Rationale: PATCH — reworded the "Quality & Review Gates" document-content-tagging bullet for
+concision and to correct its framing: the real requirement is a matching pair of delimiter tags
+around embedded document content, and `<document-revision-N>` is only an example naming
+convention, not a mandated exact tag name. No substantive requirement changed (a matching-tag
+pair was always the underlying rule); no principle redefined, added, or removed.
 Modified principles: n/a (no Core Principle changed)
-Added sections: "UI Conventions" → "Keyboard Shortcuts" (new subsection, appended after the existing
-  title | primary action | status bullets, following the same pattern as that prior addition)
+Added sections: none
 Removed sections: none
 Deferred items: none
 -->
@@ -116,6 +117,12 @@ possible until a concrete need proves otherwise (YAGNI applied to the Pi integra
   rather than assuming lost work.
 * A conversation MUST NOT be closable while it has staged edits without a verdict (applied or
   dropped).
+* Document content embedded in any seed/context message sent to the LLM (e.g. a Main
+  conversation's seed message, a branch's seed excerpt) MUST be wrapped in a matching pair of
+  XML-style tags (e.g. `<document-revision-N>...</document-revision-N>`) that clearly delimit it
+  from the surrounding prose; the opening and closing tag names MUST match.
+  **Rationale**: A matching-tag delimiter lets the model tell literal document content apart from
+  surrounding instructional prose, rather than relying on prose phrasing alone.
 
 ## UI Conventions
 
@@ -176,4 +183,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 1.3.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-29
+**Version**: 1.4.1 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-30

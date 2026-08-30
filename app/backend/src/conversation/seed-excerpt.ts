@@ -143,6 +143,18 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
 }
 
 /**
+ * Wraps literal document content (a full document, or an excerpt/selection of one) in an
+ * XML-style `<document-revision-N>...</document-revision-N>` tag naming the revision it came
+ * from, so the model can clearly delimit document content from the surrounding instructional
+ * prose in a seed/context message (project convention — see constitution). The opening and
+ * closing tags always name the same revision.
+ */
+export function wrapDocumentRevision(revision: number, content: string): string {
+  const tag = `document-revision-${revision}`;
+  return [`<${tag}>`, content, `</${tag}>`].join('\n');
+}
+
+/**
  * Seeds a newly created Main conversation with the document under review (feature: "inject the
  * document as the first message"), mirroring `extractSeedExcerpt`'s branch-seed convention of a
  * short lead-in line followed by the content itself. Unlike a branch excerpt, this is never
@@ -150,7 +162,11 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
  * content `read_document` (document-tools.ts) would otherwise serve on demand.
  */
 export function buildMainSeedMessage(title: string, revision: number, content: string): string {
-  return [`Here is the document under review, "${title}" (revision ${revision}):`, '', content].join('\n');
+  return [
+    `Here is the document under review, "${title}" (revision ${revision}):`,
+    '',
+    wrapDocumentRevision(revision, content),
+  ].join('\n');
 }
 
 /** Generates a conversation name from the selection's first heading or leading words (FR-014). */

@@ -68,6 +68,15 @@ onMounted(() => {
     ]),
     markdown(),
     EditorView.lineWrapping,
+    // CodeMirror's own base theme hardcodes `.cm-content`'s caret-color to plain black (it has no
+    // notion of this app's `prefers-color-scheme`-driven dark palette in style.css). In dark mode
+    // the pane's background/text flip to the dark tokens below, but without this override the
+    // caret stayed black-on-near-black — rendered, but invisible. Tying it to the same
+    // `--text-color` token already used for the pane's own text keeps the caret exactly as visible
+    // as the text around it in both schemes.
+    EditorView.theme({
+      '.cm-content': { caretColor: 'var(--text-color, #111)' },
+    }),
     // The actual focusable/editable node CodeMirror creates is `.cm-content`, a descendant of
     // `hostRef` — labelling `hostRef` itself (a plain, non-interactive wrapper div) would leave
     // the element assistive technology actually focuses without its own accessible name. Setting
