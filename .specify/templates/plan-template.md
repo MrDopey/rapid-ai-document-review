@@ -12,11 +12,7 @@
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
+<!-- ACTION REQUIRED: Replace with this feature's actual technical details; fields below are a guide, not a fixed schema. -->
 
 **Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
 
@@ -35,6 +31,17 @@
 **Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
 
 **Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+
+### Shared CSS Utility Reuse (frontend UI changes only)
+
+<!--
+  ACTION REQUIRED for frontend UI features: before styling a new element, read
+  app/frontend/src/style.css and reuse an existing shared utility class if one fits
+  (e.g. `.text-wrap-safe`/`.text-wrap-safe-pre` for unbounded/dynamic text, instead of
+  a bespoke overflow-wrap rule). Add new CSS only when no existing utility applies, and
+  hoist a pattern into style.css on its 2nd/3rd use rather than re-authoring it locally.
+  Skip for non-UI features.
+-->
 
 ## Constitution Check
 
@@ -57,12 +64,7 @@ specs/[###-feature]/
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
+<!-- ACTION REQUIRED: Replace the placeholder tree below with this feature's concrete layout (real paths, e.g. apps/admin). Delete unused options; the delivered plan must not include Option labels. -->
 
 ```text
 # [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)

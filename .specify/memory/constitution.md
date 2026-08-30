@@ -1,14 +1,20 @@
 <!--
 Sync Impact Report
-Version change: 1.4.0 → 1.4.1
-Rationale: PATCH — reworded the "Quality & Review Gates" document-content-tagging bullet for
-concision and to correct its framing: the real requirement is a matching pair of delimiter tags
-around embedded document content, and `<document-revision-N>` is only an example naming
-convention, not a mandated exact tag name. No substantive requirement changed (a matching-tag
-pair was always the underlying rule); no principle redefined, added, or removed.
-Modified principles: n/a (no Core Principle changed)
+Version change: 1.5.0 → 2.0.0
+Rationale: MAJOR — removed the "Quality & Review Gates" bullet (added in 1.5.0) requiring a
+duplicated small CSS pattern to be hoisted into style.css's shared utility-class layer, and
+requiring any unbounded/dynamic text element to use `.text-wrap-safe`/`.text-wrap-safe-pre`. This
+is not dropped guidance — it is relocated to the per-feature planning workflow (a new subsection
+in `.specify/templates/plan-template.md`, plus an explicit read-`style.css` step added to
+`.claude/skills/speckit-plan/SKILL.md` and `.claude/skills/speckit-implement/SKILL.md`), because it
+describes how to plan/implement a UI change rather than a rarely-changing, project-wide governance
+principle. The versioning policy below only lists "removal" under MAJOR (MINOR is additions-only),
+so this relocation is versioned as a MAJOR removal of a governance rule from this document,
+regardless of the guidance surviving elsewhere.
+Modified principles: n/a (no Core Principle redefined)
 Added sections: none
-Removed sections: none
+Removed sections: none (the "Quality & Review Gates" section itself is retained; only its
+CSS-hoisting bullet, added in 1.5.0, is removed from it)
 Deferred items: none
 -->
 
@@ -183,4 +189,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 1.4.1 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-30
+**Version**: 2.0.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-30
