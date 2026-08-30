@@ -4,12 +4,14 @@ import { EditorView } from '@codemirror/view';
 import EditorComponent from '../../src/components/editor/EditorComponent.vue';
 
 // Spec: specs/005-canvas-conversation-threads. Confirmed design: the single "Start conversation
-// from selection" button is split into two — "Branch (New)" (empty placeholder, unchanged default
-// behavior) and "Branch (Main)" (restores the pre-canvas seed-message behavior, carrying forward
-// context/text from Main) — both sharing the same `:disabled="!selection"` guard, and each emits
-// `branch-from-selection` with an explicit `includeSeedMessage` boolean alongside the selection
-// range so the whole chain (DocumentCanvas.vue -> App.vue -> conversationsStore.branch ->
-// ConversationService.branch) can thread the flag through to the backend.
+// from selection" button is split into two — "Branch (New)" (empty placeholder, no continuity)
+// and "Branch (Main)" (continues from the current point: the parent's last exchange renders as
+// read-only continuity context, no document/selection resend) — both sharing the same
+// `:disabled="!selection"` guard, and each emits `branch-from-selection` with an explicit
+// `includeSeedMessage` boolean alongside the selection range so the whole chain (DocumentCanvas.vue
+// -> App.vue -> conversationsStore.branch -> ConversationService.branch) can thread the flag
+// through to the backend, where it now selects continuity (`forkedFromMessageId`) rather than a
+// seed message.
 //
 // CodeMirror's own view isn't exposed by this component (`defineExpose` only surfaces
 // `undo`/`redo`/`anchorTop`), so tests drive a real selection through `EditorView.findFromDOM` —

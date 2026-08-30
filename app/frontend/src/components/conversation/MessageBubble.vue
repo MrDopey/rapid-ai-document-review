@@ -5,13 +5,19 @@ import { render } from '../../render/markdown-pipeline.js';
 import { domPurifySanitizer } from '../../render/sanitizer.js';
 import type { ConversationMessageState } from '../../stores/conversations.js';
 
-// FR-008/data-model.md's MessageDisplayState: `expanded` defaults to `true` (no clamp, current
-// behavior unchanged) so every pre-existing caller (ConversationView.vue's full transcript, which
-// never passes this prop) keeps rendering messages at full height, exactly as before this feature.
-// Only a caller that actually wants the compact/expand behavior (ConversationThreadBox.vue) passes
-// `expanded` explicitly and owns the per-message state (data-model.md scopes `MessageDisplayState`
-// by `messageId`, not per-conversation, so the parent — not this component — is the natural owner
-// of "all my messages'" combined state, which the bulk toggle (FR-009) needs).
+// FR-008/data-model.md's MessageDisplayState: `expanded` defaults to `true` (no clamp) purely as a
+// safe default for any caller that omits the prop entirely (e.g. `ConversationThreadBox.vue`'s own
+// read-only `continuity-context` messages, which are always shown in full). Every caller that
+// renders a real, ongoing transcript — `ConversationThreadBox.vue`'s own messages and
+// `ConversationView.vue`'s full/focused transcript alike — passes `expanded` explicitly and owns
+// the per-message state itself (data-model.md scopes `MessageDisplayState` by `messageId`, not per-
+// conversation, so the parent — not this component — is the natural owner of "all my messages'"
+// combined state, which `ConversationThreadBox.vue`'s bulk toggle, FR-009, needs). Bug fix history:
+// `ConversationView.vue` used to be the one caller that relied on this default instead of wiring up
+// its own state — since the toggle button still renders whenever content overflows, regardless of
+// `expanded`'s value, that left a "Show more"/"Show less" button in the focused view whose click
+// went nowhere (nothing listened for `update:expanded`). See `ConversationView.vue`'s own
+// `expandedByMessage` for the fix.
 const props = withDefaults(defineProps<{ message: ConversationMessageState; seed?: boolean; expanded?: boolean }>(), {
   expanded: true,
 });
@@ -126,19 +132,17 @@ const safeReasoning = computed(() =>
   color: var(--neutral-muted-color, #4b5563);
   margin-bottom: 0.25rem;
 }
-/* Dark-mode contrast fix (a11y audit regression): `--neutral-muted-color`'s dark value (#9aa3af)
-   is only validated against the *flat* panel/bubble surfaces in style.css — it clears 4.5:1 there,
-   but a `.message-bubble[data-role="user"]`'s own tint (`--user-bubble-bg`, a translucent blue)
-   composites on top of that panel surface and lightens the effective background further, e.g. to
-   ~rgb(47,62,83) inside the canvas thread box — where `--neutral-muted-color` alone measures only
-   ~4.27:1. Bumping just `.message-role-label` to a brighter neutral (rather than the shared token,
-   which many lower-stakes flat-surface consumers already rely on at its current value) clears
-   4.5:1+ against every message-bubble tint in dark mode without touching light mode, which never
-   had this problem (dark text on a light/tinted-light bubble has a huge margin already). */
-@media (prefers-color-scheme: dark) {
-  .message-role-label {
-    color: #a8b2bd;
-  }
+/* Contrast fix (a11y audit regression): `.message-role-label` sits on this bubble's own tint
+   (`--user-bubble-bg`/`--assistant-bubble-bg`, both translucent), not a flat panel surface, so it
+   needs style.css's tinted-surface token, `--neutral-muted-color-on-tint`, rather than the
+   flat-surface `--neutral-muted-color` its `.message-role` parent uses above. In dark mode that
+   tint composites on top of the panel surface and lightens the effective background further —
+   e.g. to ~rgb(47,62,83) inside the canvas thread box — where `--neutral-muted-color` alone
+   measures only ~4.27:1. `--neutral-muted-color-on-tint` is identical to `--neutral-muted-color`
+   in light mode (dark text on a light/tinted-light bubble already has a huge margin), so this only
+   actually changes anything in dark mode. */
+.message-role-label {
+  color: var(--neutral-muted-color-on-tint, #c3cad3);
 }
 /* `.text-wrap-safe`'s shared overflow-wrap/pre/code handling now lives in style.css —
    `.message-bubble`/`.message-list` are plain block boxes here (not flex/grid items), so no

@@ -178,6 +178,18 @@ export interface StorageAdapter {
   listConversations(documentId: string, options: ConversationListOptions): Page<ConversationRow>;
   listAllConversations(documentId: string): ConversationRow[];
   updateConversation(id: string, patch: Partial<ConversationRow>): ConversationRow;
+  /**
+   * Physically removes a conversation row (005-canvas-conversation-threads follow-up: discarding
+   * an untouched branch placeholder — see `ConversationService.discardIfEmpty` — never used for
+   * the ordinary `close()` lifecycle, which only ever flips `status`). Any of this conversation's
+   * own `conversation_event` rows are re-pointed to `conversation_id: null` rather than deleted —
+   * `getNextSequence`/`getLatestSequence` derive the next sequence number from `MAX(sequence)` over
+   * the whole table, so deleting the highest-sequence row would free that number for reuse and
+   * could desync an already-connected client's replay cursor. Any `staged_edit` rows scoped to it
+   * are deleted outright (no such reuse concern there), though a caller is expected to only ever
+   * call this for a conversation with none.
+   */
+  deleteConversation(id: string): void;
 
   // staged_edit
   createStagedEdit(row: StagedEditRow): StagedEditRow;

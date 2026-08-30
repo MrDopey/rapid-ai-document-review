@@ -82,3 +82,28 @@ export function persistCanvasScrollPosition(position: CanvasScrollPosition): voi
     // Best-effort persistence only.
   }
 }
+
+/**
+ * "Sync scroll" toggle (App.vue's `.actions-group`, composables/scrollSync.ts) — a lone boolean,
+ * same per-viewer/best-effort/non-throwing convention as the rest of this file, under its own key
+ * for the same reason `CANVAS_SCROLL_KEY` is: not an `fr`/pixel split `loadPaneSizes` already
+ * shapes for. Defaults to off (there's no prior partial implementation or related state this
+ * should match on) whenever nothing valid is stored yet.
+ */
+const SYNC_SCROLL_ENABLED_KEY = 'raidr:syncScrollEnabled';
+
+export function loadSyncScrollEnabled(): boolean {
+  try {
+    return localStorage.getItem(SYNC_SCROLL_ENABLED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function persistSyncScrollEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(SYNC_SCROLL_ENABLED_KEY, String(enabled));
+  } catch {
+    // Best-effort persistence only.
+  }
+}

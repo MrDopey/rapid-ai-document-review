@@ -7,12 +7,12 @@ import { focusExclusively } from './test-utils.js';
 // standard deterministic echo ("Here is a fake deterministic answer to: ..."), which is what makes
 // the synopsis content assertable below without any live model.
 const BRANCH_SHORTCUT = 'Alt+Shift+C';
-// 005-canvas-conversation-threads: branching no longer sends a seed message by default (a branch
-// persists as a truly empty placeholder — see conversation-service.ts's `branch()` doc comment).
-// Alt+Shift+S (`includeSeedMessage: true`) explicitly restores the old seed-message behavior for
-// callers that still need it — used below only where a real seed message (and thus a `.seed-card`)
-// is the point of the assertion (step 2 of the first test).
-const BRANCH_WITH_SEED_SHORTCUT = 'Alt+Shift+S';
+// 005-canvas-conversation-threads: branching never sends a seed message, for either toolbar
+// button — a branch always persists as a truly empty placeholder (see conversation-service.ts's
+// `branch()` doc comment). Alt+Shift+S ("Branch (Main)", `includeSeedMessage: true`) instead opts
+// into message-level continuity (`forkedFromMessageId`) — irrelevant to this spec's own history
+// assertions below, so every branch here uses the plain Alt+Shift+C default and gets its history
+// from a real sent message instead of an auto-seed.
 
 const MARKERS = {
   foldTarget: 'US7-MARKER-FOLD: This sentence anchors the fold-summary branch target.',
@@ -119,16 +119,8 @@ async function selectConversation(page: Page, name: string): Promise<void> {
  *  the shared `npm run test:e2e` process), the document is long enough that CodeMirror's
  *  virtualized rendering has not put these markers — appended at the very end — into the DOM yet.
  *  `Control+End` moves the caret to the document end and scrolls it into view first, a standard
- *  keyboard-only editor command, which renders the tail lines this spec's markers live in.
- *  `includeSeedMessage` (005-canvas-conversation-threads, default false, matching the empty-
- *  placeholder branch default) selects `BRANCH_WITH_SEED_SHORTCUT` instead, for the one caller
- *  below that specifically needs a real seed message. */
-async function branchFromMarker(
-  page: Page,
-  markerText: string,
-  expectedName: string,
-  includeSeedMessage = false,
-): Promise<void> {
+ *  keyboard-only editor command, which renders the tail lines this spec's markers live in. */
+async function branchFromMarker(page: Page, markerText: string, expectedName: string): Promise<void> {
   await page.locator('.editor-host').click();
   await page.keyboard.press('Control+End');
   const line = page.locator('.cm-line', { hasText: markerText });
@@ -136,7 +128,7 @@ async function branchFromMarker(
   await line.click();
   await page.keyboard.press('Home');
   await page.keyboard.press('Shift+End');
-  await page.keyboard.press(includeSeedMessage ? BRANCH_WITH_SEED_SHORTCUT : BRANCH_SHORTCUT);
+  await page.keyboard.press(BRANCH_SHORTCUT);
 
   await expect(page.locator('.conversation-header h2')).toHaveText(expectedName, { timeout: 10_000 });
   await waitIdle(page);
@@ -154,15 +146,19 @@ test.describe('US7 — Review closed conversations', () => {
 
     await test.step('branch a conversation to close with a fold summary (FR-011)', async () => {
       branchName = 'US7 Fold Target';
-      // `includeSeedMessage: true` (Alt+Shift+S) — step 2 below asserts the seed card survives
-      // close/reopen, which needs a real seed message to exist in the first place (the plain
-      // Alt+Shift+C default branch persists with zero messages of its own — see
-      // conversation-service.ts's `branch()`).
-      await branchFromMarker(page, 'US7-MARKER-FOLD', branchName, true);
+      await branchFromMarker(page, 'US7-MARKER-FOLD', branchName);
+
+      // A branch persists with zero messages of its own (conversation-service.ts's `branch()`) —
+      // step 2 below asserts history survives close/reopen, which needs a real sent message to
+      // exist in the first place.
+      const composer = page.getByLabel(`Message ${branchName}`);
+      await composer.fill('What do you make of this passage?');
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      await waitIdle(page);
     });
 
     await test.step('1. closing with "Fold summary" checked eventually delivers a compact summary into the parent (FR-034, FR-034a)', async () => {
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('button', { name: 'Archive', exact: true }).click();
       const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
       await expect(dialog).toBeVisible();
       await dialog.getByLabel('Fold a compact summary into the parent conversation').check();
@@ -221,10 +217,8 @@ test.describe('US7 — Review closed conversations', () => {
       await expect(hudRow.locator('.status-badge')).toHaveAttribute('data-status', 'closed');
 
       // History and proposals remain intact and visible (SC-009) — the conversation view still
-      // renders its prior messages rather than going blank. The seed card is the reliable proxy
-      // for "seed message still present" — its literal wording (seed-excerpt.ts's
-      // buildBranchSeedMessage) is an implementation detail this test shouldn't pin.
-      await expect(page.locator('.message-bubble.seed-card')).toBeVisible();
+      // renders its prior messages rather than going blank.
+      await expect(page.locator('.message-list')).toContainText('What do you make of this passage?');
     });
 
     await test.step('3. requesting a review produces an independent conversation without altering the closed one (FR-036)', async () => {
@@ -278,7 +272,7 @@ test.describe('US7 — Review closed conversations', () => {
 
     await test.step('close the parent (no fold needed for this scenario)', async () => {
       await selectConversation(page, 'US7 Parent Target');
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('button', { name: 'Archive', exact: true }).click();
       const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
       await expect(dialog).toBeVisible();
       await dialog.getByRole('button', { name: 'Close conversation' }).click();

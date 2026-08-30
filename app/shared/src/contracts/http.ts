@@ -48,6 +48,7 @@ export const ErrorCode = z.enum([
   'CONVERSATION_NOT_ERRORED',
   'CONVERSATION_ERRORED',
   'CONVERSATION_NOT_CLOSED',
+  'CONVERSATION_NOT_EMPTY',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -262,14 +263,24 @@ export const CreateConversationRequest = z.object({
   parentConversationId: z.string(),
   name: z.string().min(1).optional(),
   selection: z.object({ from: z.number().int(), to: z.number().int() }).optional(),
-  // 005-canvas-conversation-threads: opt-in seed message. A branch persists as a truly empty
-  // placeholder by default (no auto-sent message) — passing `true` here (only meaningful alongside
-  // `selection`; the "Branch this conversation" message-context path never sets it) restores the
-  // pre-canvas behavior of delivering `buildBranchSeedMessage`'s excerpt as the branch's first
-  // message via the ordinary send() path.
+  // 005-canvas-conversation-threads: opt-in continuity. A branch persists as a truly empty
+  // placeholder by default (no auto-sent message, ever) — passing `true` here (only meaningful
+  // alongside `selection`; the "Branch this conversation" message-context path never sets it, and
+  // always gets continuity regardless) populates the branch's `forkedFromMessageId` with the
+  // parent's last message id, so the continuity-snippet UI renders the parent's last exchange for
+  // context. It no longer resends any document/selection content as a chat message — see
+  // conversation-service.ts's `branch()`.
   includeSeedMessage: z.boolean().optional(),
 });
 export type CreateConversationRequest = z.infer<typeof CreateConversationRequest>;
+
+// Rename (title edit): a narrowly-scoped PATCH, distinct from `CloseConversationRequest`'s
+// lifecycle transition — this only ever touches `name`. Trimmed before the length check so a
+// whitespace-only value is rejected as empty, same intent as the UI's own blank-after-trim guard.
+export const RenameConversationRequest = z.object({
+  name: z.string().trim().min(1, 'Name cannot be empty'),
+});
+export type RenameConversationRequest = z.infer<typeof RenameConversationRequest>;
 
 export const MessageDto = z.object({
   id: z.string(),
@@ -362,6 +373,18 @@ export const ReviewConversationResponse = z.object({
   reviewedConversationIds: z.array(z.string()),
 });
 export type ReviewConversationResponse = z.infer<typeof ReviewConversationResponse>;
+
+/**
+ * 005-canvas-conversation-threads follow-up: `DELETE /api/conversations/:id` physically discards
+ * an untouched branch placeholder (zero messages, never `close()`'s confirmed archive lifecycle —
+ * see `ConversationService.discardIfEmpty`'s doc comment). `discarded` is always `true` on a 200 —
+ * anything ineligible responds `409 CONVERSATION_NOT_EMPTY` instead of a false-y body.
+ */
+export const DiscardConversationResponse = z.object({
+  conversationId: z.string(),
+  discarded: z.literal(true),
+});
+export type DiscardConversationResponse = z.infer<typeof DiscardConversationResponse>;
 
 // ---- Edits ----
 

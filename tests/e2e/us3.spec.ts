@@ -258,9 +258,9 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       await expect(closeRow).toBeVisible({ timeout: 15_000 });
       await waitIdle(page);
 
-      // US7's close dialog (FR-034): clicking the header "Close" button opens a confirmation
+      // US7's close dialog (FR-034): clicking the header "Archive" button opens a confirmation
       // dialog offering a separate "Fold summary" option before the close itself is confirmed.
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('button', { name: 'Archive', exact: true }).click();
       const closeDialog = page.getByRole('alertdialog', { name: 'Close conversation' });
       await expect(closeDialog).toBeVisible();
       await closeDialog.getByRole('button', { name: 'Close conversation' }).click();
@@ -270,7 +270,7 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       await closeRow.getByRole('button', { name: 'Drop' }).click();
       await expect(closeRow.locator('.status-badge')).toHaveText('dropped', { timeout: 10_000 });
 
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('button', { name: 'Archive', exact: true }).click();
       await expect(closeDialog).toBeVisible();
       await closeDialog.getByRole('button', { name: 'Close conversation' }).click();
       await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'closed', {

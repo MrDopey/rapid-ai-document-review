@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useConversationsStore, type ConversationMessageState } from '../../stores/conversations.js';
 import { ApiError } from '../../transport/http-client.js';
 import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
@@ -32,6 +32,60 @@ const store = useConversationsStore();
 
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
 const messages = computed(() => store.messagesFor(props.conversationId));
+
+// Rename affordance: click-to-edit title, following the same "one action per slot" convention as
+// `branchThisConversation` below — an inline text input replaces the plain-text `.thread-title`
+// span rather than opening a modal/dialog, since this is a single-field, low-stakes edit. Save on
+// Enter/blur, cancel on Escape (constitution's "UI Conventions": no confirmation dialog for a
+// reversible, single-field text edit).
+const isEditingName = ref(false);
+const nameDraft = ref('');
+const renameError = ref<string | null>(null);
+const renameSaving = ref(false);
+const nameInputEl = ref<HTMLInputElement | null>(null);
+
+async function startEditingName(): Promise<void> {
+  if (!conversation.value) return;
+  nameDraft.value = conversation.value.name;
+  renameError.value = null;
+  isEditingName.value = true;
+  await nextTick();
+  nameInputEl.value?.focus();
+  nameInputEl.value?.select();
+}
+
+function cancelEditingName(): void {
+  isEditingName.value = false;
+  renameError.value = null;
+}
+
+async function saveName(): Promise<void> {
+  if (!isEditingName.value || !conversation.value) return;
+  const trimmed = nameDraft.value.trim();
+  if (!trimmed) {
+    // FR: empty-name validation — rejected inline, editing stays open so the user can fix it
+    // (matching `branchError`'s inline-message convention below) rather than silently reverting.
+    renameError.value = 'Name cannot be empty';
+    return;
+  }
+  if (trimmed === conversation.value.name) {
+    // No-op edit (e.g. blur with nothing changed): close without a network round trip.
+    isEditingName.value = false;
+    renameError.value = null;
+    return;
+  }
+  renameSaving.value = true;
+  try {
+    await store.rename(conversation.value.id, trimmed);
+    isEditingName.value = false;
+    renameError.value = null;
+  } catch (err) {
+    renameError.value =
+      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to rename conversation.';
+  } finally {
+    renameSaving.value = false;
+  }
+}
 
 // Branch-lineage cue (sidebar list view): a plain-text breadcrumb naming this conversation's
 // parent, if any. Note on scope: this data model has no message-level fork-point field at all —
@@ -179,7 +233,32 @@ defineExpose({ el: rootEl });
     <span class="pane-eyebrow">Conversation</span>
     <header class="thread-header">
       <div class="thread-header-top">
-        <span class="thread-title text-wrap-safe">{{ conversation.name }}</span>
+        <div class="thread-title-group">
+          <input
+            v-if="isEditingName"
+            ref="nameInputEl"
+            v-model="nameDraft"
+            type="text"
+            class="thread-title-input"
+            aria-label="Conversation name"
+            :disabled="renameSaving"
+            @keydown.enter.prevent="saveName"
+            @keydown.escape.prevent="cancelEditingName"
+            @blur="saveName"
+          />
+          <template v-else>
+            <span class="thread-title text-wrap-safe">{{ conversation.name }}</span>
+            <button
+              type="button"
+              class="thread-rename-button"
+              aria-label="Rename conversation"
+              title="Rename conversation"
+              @click="startEditingName"
+            >
+              ✎
+            </button>
+          </template>
+        </div>
         <span class="thread-status">
           <span class="badge status-badge" :data-status="conversation.status">{{ conversation.status }}</span>
           <span
@@ -200,6 +279,7 @@ defineExpose({ el: rootEl });
           >
         </span>
       </div>
+      <span v-if="renameError" class="rename-error" role="alert">{{ renameError }}</span>
       <!-- Branch-lineage cue (sidebar list view): plain text, not a button/badge, naming the parent
            conversation this one was branched from. See `parentConversation`'s doc comment above for
            why this can only name the parent conversation, not a specific message within it. -->
@@ -305,10 +385,64 @@ defineExpose({ el: rootEl });
   justify-content: space-between;
   gap: 0.35rem;
 }
+.thread-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
 .thread-title {
   font-weight: 600;
   font-size: 0.85rem;
   min-width: 0;
+}
+/* Icon-only button, same 24x24 minimum hit area as `.thread-action-button` (research.md §4) —
+   deliberately borderless/transparent at rest so it doesn't compete visually with the title text,
+   picking up a visible border only on hover/focus (same treatment as `.thread-action-button`'s own
+   hover state, just starting from a quieter baseline appropriate to a secondary, always-visible
+   affordance). */
+.thread-rename-button {
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  color: var(--neutral-muted-color, #4b5563);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.thread-rename-button:hover,
+.thread-rename-button:focus-visible {
+  color: var(--text-color, #111);
+  background: var(--panel-bg-alt, #eef0f3);
+  border-color: var(--neutral-muted-color, #4b5563);
+}
+.thread-rename-button:focus-visible {
+  outline: 2px solid var(--accent-color, #2563eb);
+  outline-offset: 1px;
+}
+.thread-title-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-color, #111);
+  background: var(--panel-bg, #f7f7f8);
+  border: 1px solid var(--accent-color, #2563eb);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+.thread-title-input:disabled {
+  opacity: 0.7;
+}
+.rename-error {
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.7rem;
 }
 .thread-status {
   display: flex;
@@ -433,26 +567,20 @@ defineExpose({ el: rootEl });
   background: var(--seed-bg, #f3f4f6);
   opacity: 0.85;
 }
+/* Contrast fix (a11y audit), same reasoning as `MessageBubble.vue`'s `.message-role-label` fix:
+   `.continuity-context`'s own `--seed-bg` tint is further lightened by its `opacity: 0.85`, which
+   blends it (and this label's text) toward whatever backdrop sits behind it — composited contrast
+   for the flat-surface `--neutral-muted-color` measures right at ~4.5:1 with no margin there,
+   risking a drop below AA depending on the real backdrop. style.css's tinted-surface token,
+   `--neutral-muted-color-on-tint`, is the one meant for exactly this case and clears 5:1+ with
+   real margin against every composited backdrop tested in dark mode; light mode is unaffected
+   since dark text on this light/tinted-light card already has a huge margin. */
 .continuity-label {
   font-size: 0.65rem;
   font-weight: 600;
-  color: var(--neutral-muted-color, #4b5563);
+  color: var(--neutral-muted-color-on-tint, #c3cad3);
   text-transform: uppercase;
   letter-spacing: 0.02em;
-}
-/* Dark-mode contrast fix (a11y audit), same reasoning as `MessageBubble.vue`'s
-   `.message-role-label` fix: `--neutral-muted-color`'s dark value is only validated against the
-   *flat* panel/bubble surfaces in style.css. Here `.continuity-context`'s own `--seed-bg` tint is
-   further lightened by its `opacity: 0.85`, which blends it toward whatever backdrop sits behind
-   it — composited contrast measures right at ~4.5:1 with no margin, risking a drop below AA
-   depending on the real backdrop. Bump just `.continuity-label` to a brighter neutral (rather than
-   the shared token) so it clears 5:1+ with real margin against every composited backdrop in dark
-   mode; light mode is untouched since dark text on this light/tinted-light card already has a
-   huge margin. */
-@media (prefers-color-scheme: dark) {
-  .continuity-label {
-    color: #c3cad3;
-  }
 }
 .branch-error {
   color: var(--danger-color, #b91c1c);

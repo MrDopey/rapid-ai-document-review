@@ -33,6 +33,17 @@ watch(
   },
   { immediate: true },
 );
+
+// Synchronized scrolling (App.vue's "Sync scroll" toggle, composables/scrollSync.ts): App.vue
+// wires this pane's own scrollable element (`hostRef` — it's `.preview-pane` itself, not a
+// wrapper) together with DocumentCanvas.vue's, via `attachScrollSync`. Exposed as a getter (not
+// the `hostRef` ref directly) so every read returns the live element, including across this
+// component's own mount/unmount.
+defineExpose({
+  get scrollEl(): HTMLDivElement | null {
+    return hostRef.value;
+  },
+});
 </script>
 
 <template>

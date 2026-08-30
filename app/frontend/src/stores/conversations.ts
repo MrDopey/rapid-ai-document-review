@@ -45,6 +45,12 @@ export interface ConversationsState {
    *  generated and delivered (never at close time). Surfaced in ConversationView.vue so the user
    *  (and e2e tests) can observe delivery without waiting on a subsequent agent turn. */
   foldedSummaries: Record<string, FoldedSummaryInfo>;
+  /** Per-conversation unsent composer draft text (005-canvas-conversation-threads follow-up):
+   *  mirrored here — not just held locally in `ConversationView.vue`'s own `draft` ref — so
+   *  `discardIfEmpty` below can still see whether the user left unsent text behind at the moment a
+   *  conversation's focus panel closes and that component is about to unmount. A conversation with
+   *  no entry (or only whitespace) here counts as having no draft. */
+  drafts: Record<string, string>;
   loaded: boolean;
 }
 
@@ -60,6 +66,7 @@ export const useConversationsStore = defineStore('conversations', {
     messagesByConversation: {},
     queueInfo: {},
     foldedSummaries: {},
+    drafts: {},
     loaded: false,
   }),
 
@@ -126,6 +133,15 @@ export const useConversationsStore = defineStore('conversations', {
       await httpClient.clearPrimary(conversationId);
     },
 
+    /** Renames a conversation's title. The updated DTO comes straight back from the PATCH
+     *  response (same convention as `branch()`/`review()` above) — `handleServerFrame`'s
+     *  `conversation_renamed` case below only matters for a second, already-connected client. */
+    async rename(conversationId: string, name: string): Promise<ConversationDto> {
+      const conversation = await httpClient.renameConversation(conversationId, name);
+      this.upsertConversation(conversation);
+      return conversation;
+    },
+
     async close(conversationId: string, foldSummaryIntoParent = false): Promise<void> {
       await httpClient.closeConversation(conversationId, foldSummaryIntoParent);
       const conv = this.findConversation(conversationId);
@@ -148,6 +164,45 @@ export const useConversationsStore = defineStore('conversations', {
       return this.messagesByConversation[conversationId] ?? [];
     },
 
+    /** Mirrors `ConversationView.vue`'s own composer `draft` ref for `conversationId` — see
+     *  `drafts`'s doc comment above. Stores an empty string as a real (not deleted) entry so a
+     *  conversation that once had draft text but was cleared (sent, or emptied by hand) is still
+     *  distinguishable from one this store has simply never heard from. */
+    setDraft(conversationId: string, text: string): void {
+      this.drafts[conversationId] = text;
+    },
+
+    /**
+     * 005-canvas-conversation-threads follow-up: discards a branch placeholder conversation the
+     * user created and then closed without ever sending a message or leaving unsent draft text
+     * behind (see `ConversationService.discardIfEmpty`'s doc comment for the full eligibility
+     * rule). A no-op — never an error — for anything that doesn't meet every condition, so callers
+     * (`App.vue`'s `unfocusConversation`) can call this unconditionally on every focus-panel close
+     * rather than duplicating the eligibility check themselves. Best-effort: a failed HTTP call
+     * (e.g. a race against a second client sending a message moments earlier) is swallowed rather
+     * than surfaced, since the panel has already visually closed by the time this runs.
+     */
+    async discardIfEmpty(conversationId: string): Promise<boolean> {
+      const conversation = this.findConversation(conversationId);
+      if (!conversation || conversation.kind !== 'branch') return false;
+      if (this.messagesFor(conversationId).length > 0) return false;
+      if ((this.drafts[conversationId] ?? '').trim().length > 0) return false;
+
+      try {
+        await httpClient.discardConversation(conversationId);
+      } catch {
+        return false;
+      }
+
+      const index = this.conversations.findIndex((c) => c.id === conversationId);
+      if (index !== -1) this.conversations.splice(index, 1);
+      delete this.messagesByConversation[conversationId];
+      delete this.foldedSummaries[conversationId];
+      delete this.queueInfo[conversationId];
+      delete this.drafts[conversationId];
+      return true;
+    },
+
     handleServerFrame(frame: ServerFrame): void {
       if (frame.kind === 'subscribed') {
         this.conversations = frame.frame.snapshot.conversations;
@@ -161,6 +216,15 @@ export const useConversationsStore = defineStore('conversations', {
         case 'conversation_status_changed': {
           const conv = this.findConversation(conversationId);
           if (conv) conv.status = event.data.status;
+          break;
+        }
+
+        // A second connected client's rename lands here; the client that issued the PATCH itself
+        // already applied it via `rename()`'s response above (`upsertConversation` makes this
+        // idempotent either way).
+        case 'conversation_renamed': {
+          const conv = this.findConversation(conversationId);
+          if (conv) conv.name = event.data.name;
           break;
         }
 

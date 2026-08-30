@@ -521,6 +521,12 @@ export class SqliteStorageAdapter implements StorageAdapter {
     return merged;
   }
 
+  deleteConversation(id: string): void {
+    this.db.prepare(`UPDATE conversation_event SET conversation_id = NULL WHERE conversation_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM staged_edit WHERE conversation_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM conversation WHERE id = ?`).run(id);
+  }
+
   // ---- staged_edit ----
 
   createStagedEdit(row: StagedEditRow): StagedEditRow {

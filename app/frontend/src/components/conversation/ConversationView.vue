@@ -6,6 +6,7 @@ import { ApiError } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import { clamp, useResizeHandle } from '../../composables/useResizeHandle.js';
 import { loadPaneSizes, persistPaneSizes } from '../../composables/panePersistence.js';
+import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
 import MessageBubble from './MessageBubble.vue';
 import EditsList from '../edits/EditsList.vue';
 
@@ -14,7 +15,20 @@ const emit = defineEmits<{ (e: 'select', id: string): void }>();
 const store = useConversationsStore();
 const editsStore = useEditsStore();
 
-const draft = ref('');
+// 005-canvas-conversation-threads follow-up: mirrored into `store.drafts` on every change (rather
+// than kept purely local) so `store.discardIfEmpty` can still see unsent draft text at the moment
+// this conversation's focus panel closes and this component is about to unmount — the draft always
+// wins over that cleanup. Initialized from any draft the store already has for this conversation
+// (e.g. left over from a previous time this same conversation's panel was open and closed without
+// being discarded), so unsent text survives a close/reopen instead of silently vanishing.
+const draft = ref(store.drafts[props.conversationId] ?? '');
+watch(draft, (value) => store.setDraft(props.conversationId, value));
+watch(
+  () => props.conversationId,
+  (id) => {
+    draft.value = store.drafts[id] ?? '';
+  },
+);
 const sending = ref(false);
 const closing = ref(false);
 const closeError = ref<string | null>(null);
@@ -45,6 +59,76 @@ function dismissDirectEditHint(): void {
 
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+
+// Bug fix (005-canvas-conversation-threads follow-up): this full/"focused" transcript view used to
+// render `MessageBubble` with neither `:expanded` nor an `@update:expanded` listener, relying on
+// `MessageBubble.vue`'s `expanded` prop default of `true`. That default only meant "never clamped",
+// it did not mean "the toggle is inert here" — `MessageBubble`'s toggle button is shown whenever the
+// message's real content overflows the clamp height, regardless of `expanded`'s value, so a long
+// message here still grew a "Show less" button. Clicking it emitted `update:expanded` straight into
+// the void (nothing listened), so the button looked broken. This view now owns its own per-message
+// expand state, the same way `ConversationThreadBox.vue` already does (data-model.md's
+// `MessageDisplayState` is keyed by `messageId` alone, so both call sites share one persisted
+// default via `messageDisplayState.ts` without colliding, even with several focused panels for
+// different conversations open at once).
+const expandedByMessage = ref<Record<string, boolean>>({});
+watch(
+  messages,
+  (list) => {
+    for (const message of list) {
+      if (!(message.id in expandedByMessage.value)) {
+        expandedByMessage.value[message.id] = loadMessageExpanded(message.id);
+      }
+    }
+  },
+  { immediate: true },
+);
+function setMessageExpanded(messageId: string, expanded: boolean): void {
+  expandedByMessage.value[messageId] = expanded;
+  persistMessageExpanded({ [messageId]: expanded });
+}
+
+// Parity fix (005-canvas-conversation-threads follow-up): the sidebar's compact
+// `ConversationThreadBox.vue` offers a bulk "Expand all"/"Collapse all" toggle (its own
+// `toggleAllMessages`, FR-009) over the exact same per-message `expandedByMessage` state this view
+// already owns above — this focused/detail view had no equivalent, even though it owns the richer
+// (unclamped-by-default) copy of that same state. Same semantics as the sidebar's: if any message
+// is currently collapsed, one click expands every message in this conversation; once all are
+// already expanded, the same control collapses them all instead.
+const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
+const bulkToggleLabel = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
+function toggleAllMessages(): void {
+  const nextExpanded = anyCollapsed.value;
+  const entries: Record<string, boolean> = {};
+  for (const message of messages.value) {
+    expandedByMessage.value[message.id] = nextExpanded;
+    entries[message.id] = nextExpanded;
+  }
+  persistMessageExpanded(entries);
+}
+
+// Parity fix: the sidebar's `ConversationThreadBox.vue` also offers a "Branch" action (branching
+// *this* conversation with no selection, US2/FR-006/FR-007 — see that component's
+// `branchThisConversation` doc comment for why a whole-conversation branch is the only kind this
+// data model supports) that this focused/detail view had no equivalent of. Same store call, same
+// server-computed `canBranch` gating (mirrors `maxConversationDepth`, already covers "closed
+// conversations can't be branched from" per the read-only banner above — no client-reimplemented
+// depth/status check needed here either).
+const branching = ref(false);
+const branchError = ref<string | null>(null);
+async function branchThisConversation(): Promise<void> {
+  if (!conversation.value) return;
+  branchError.value = null;
+  branching.value = true;
+  try {
+    await store.branch({ parentConversationId: conversation.value.id });
+  } catch (err) {
+    branchError.value =
+      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to branch this conversation.';
+  } finally {
+    branching.value = false;
+  }
+}
 
 // Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
 // being queued (`conversation.status === 'working'`, server-driven via the
@@ -332,9 +416,12 @@ async function onRequestReview(): Promise<void> {
   <section class="conversation-view" aria-label="Conversation">
     <!-- UI convention: title | status | action, in one header row (see
          .specify/memory/constitution.md "UI Conventions") — the same 3-section pattern as
-         HudPanel.vue's conversation-list rows. The right-hand action slot shows whichever single
-         action currently applies: "Request review" once closed, or "Close" while still open
-         (subject to the same kind-based gating as before, `kind !== 'main'`). -->
+         HudPanel.vue's conversation-list rows. The right-hand action slot holds every
+         per-conversation action this view offers: the bulk expand/collapse toggle and Branch
+         (parity with `ConversationThreadBox.vue`'s sidebar box, always shown when applicable)
+         alongside whichever single close-state action currently applies — "Request review" once
+         closed, or "Archive" while still open (subject to the same kind-based gating as before,
+         `kind !== 'main'`). -->
     <header class="conversation-header">
       <div class="header-titles">
         <span class="pane-eyebrow">Conversation</span>
@@ -344,6 +431,31 @@ async function onRequestReview(): Promise<void> {
         conversation.status
       }}</span>
       <div class="header-actions">
+        <!-- Parity fix: same bulk expand/collapse and Branch actions the sidebar's
+             `ConversationThreadBox.vue` offers, now also available from this focused/detail view
+             (see `toggleAllMessages`/`branchThisConversation` doc comments above). Shown alongside
+             Archive/Request review rather than replacing either — this slot now holds every
+             per-conversation action this view offers, not just one. -->
+        <button
+          v-if="messages.length > 1"
+          type="button"
+          class="bulk-toggle-button"
+          :aria-label="`${bulkToggleLabel} messages in this conversation`"
+          @click="toggleAllMessages"
+        >
+          {{ bulkToggleLabel }}
+        </button>
+        <button
+          v-if="conversation"
+          type="button"
+          class="branch-button"
+          :disabled="!conversation.canBranch || branching"
+          :aria-label="`Branch this conversation${!conversation.canBranch ? ' (maximum conversation depth reached)' : ''}`"
+          :title="!conversation.canBranch ? 'Maximum conversation depth reached' : 'Branch this conversation'"
+          @click="branchThisConversation"
+        >
+          Branch
+        </button>
         <button
           v-if="conversation?.status === 'closed'"
           type="button"
@@ -360,7 +472,7 @@ async function onRequestReview(): Promise<void> {
           :disabled="closing"
           @click="openCloseDialog"
         >
-          Close
+          Archive
         </button>
       </div>
     </header>
@@ -378,6 +490,7 @@ async function onRequestReview(): Promise<void> {
 
     <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
     <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
+    <div v-if="branchError" class="error-banner" role="alert">{{ branchError }}</div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
@@ -391,6 +504,8 @@ async function onRequestReview(): Promise<void> {
           :key="msg.id ?? index"
           :message="msg"
           :seed="isSeedMessage(msg, index)"
+          :expanded="expandedByMessage[msg.id] ?? false"
+          @update:expanded="(value) => setMessageExpanded(msg.id, value)"
         />
         <!-- Fix: visible "sent — awaiting response" indicator for the gap between the turn being
              queued and the first assistant token actually streaming in (previously silent — only

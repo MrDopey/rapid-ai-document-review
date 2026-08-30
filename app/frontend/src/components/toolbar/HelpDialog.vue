@@ -27,11 +27,12 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
             Type a message to a conversation to ask questions or request changes to the document.
           </li>
           <li>
-            Highlight text in the document and click "Branch (Main)" (or press Alt+Shift+S) to get
-            a reviewable edit proposal instead of a direct answer — the proposal shows up under
-            "Proposed edits", where you can preview it and choose to accept or drop it before
-            anything changes in the document. "Branch (New)" (Alt+Shift+C) starts the same focused
-            conversation with an empty transcript instead.
+            Highlight text in the document to start a focused conversation about just that
+            passage. Click "Branch (New)" (or press Alt+Shift+C) for an empty transcript with no
+            history, or "Branch (Main)" (Alt+Shift+S) to continue from where you are — it shows
+            Main's last exchange for context, without resending the document. Either way, any edit
+            it proposes shows up under "Proposed edits", where you can preview it and choose to
+            accept or drop it before anything changes in the document.
           </li>
         </ul>
       </section>
@@ -54,11 +55,13 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
       <section class="help-section">
         <h3>What does "branching" mean?</h3>
         <p>
-          Branching creates a new conversation that continues from the <strong>current</strong>
-          point in an existing conversation, as its own separate thread — so you can explore a
+          Branching creates a new conversation as its own separate thread, so you can explore a
           different direction without altering the original. When branching from a text selection
-          in the document, "Branch (New)" (Alt+Shift+C) starts that thread empty, while "Branch
-          (Main)" (Alt+Shift+S) also sends the selection as its first message to restore context.
+          in the document, "Branch (New)" (Alt+Shift+C) starts that thread as an empty
+          placeholder with no history. "Branch (Main)" (Alt+Shift+S) instead continues from your
+          current point: it shows Main's last exchange at the top of the new thread for context,
+          but never resends the document or selection as a message — you still start from a blank
+          message box either way.
         </p>
       </section>
     </div>

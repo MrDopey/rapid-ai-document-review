@@ -557,7 +557,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       await test.step(`close-confirmation dialog [${scheme}]`, async () => {
         const branchRow = page.locator('.conversation-row', { hasText: 'A11y Fixture Document' });
         await focusExclusively(page, branchRow, 'A11y Fixture Document');
-        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByRole('button', { name: 'Archive', exact: true }).click();
         const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
         await expect(dialog).toBeVisible();
         await runAuditAndAssert('close-confirmation dialog', scheme);

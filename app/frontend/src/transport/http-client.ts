@@ -10,6 +10,7 @@ import {
   CreateDocumentResponse,
   DesignatePrimaryRequest,
   DesignatePrimaryResponse,
+  DiscardConversationResponse,
   DropEditResponse,
   DropRemainingResponse,
   ErrorEnvelope,
@@ -24,6 +25,7 @@ import {
   PreviewEditResponse,
   PrimaryWhenBusy,
   RefreshSendResponse,
+  RenameConversationRequest,
   RestoreRevisionResponse,
   RetryResponse,
   ReviewConversationResponse,
@@ -160,6 +162,13 @@ export const httpClient = {
     );
   },
 
+  async renameConversation(id: string, name: string) {
+    const body: RenameConversationRequest = { name };
+    return request(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, (j) =>
+      ConversationDto.parse(j),
+    );
+  },
+
   async closeConversation(id: string, foldSummaryIntoParent = false) {
     const body: CloseConversationRequest = { foldSummaryIntoParent };
     return request(`/api/conversations/${id}/close`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
@@ -182,6 +191,12 @@ export const httpClient = {
 
   async clearPrimary(id: string) {
     return request(`/api/conversations/${id}/primary`, { method: 'DELETE' }, (j) => ClearPrimaryResponse.parse(j));
+  },
+
+  /** 005-canvas-conversation-threads follow-up: physically discards an untouched branch
+   *  placeholder — see `ConversationService.discardIfEmpty`'s doc comment for eligibility. */
+  async discardConversation(id: string) {
+    return request(`/api/conversations/${id}`, { method: 'DELETE' }, (j) => DiscardConversationResponse.parse(j));
   },
 
   async listEdits(conversationId: string) {

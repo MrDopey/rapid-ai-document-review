@@ -231,6 +231,17 @@ const connectors = computed<BranchConnector[]>(() => {
 const threadColumnsHeight = computed(() =>
   layoutEntries.value.reduce((max, e) => Math.max(max, e.top + heightOf(e.id)), 0),
 );
+
+// Synchronized scrolling (App.vue's "Sync scroll" toggle, composables/scrollSync.ts): App.vue
+// wires this canvas's own native scroll container (`canvasEl` — the same element T034's
+// scroll-position persistence above already reads/writes) together with PreviewComponent.vue's,
+// via `attachScrollSync`. Exposed as a getter so every read returns the live element, including
+// across this component's own mount/unmount (`canvasEl` starts null until `onCanvasRootRef` runs).
+defineExpose({
+  get scrollEl(): HTMLElement | null {
+    return canvasEl.value;
+  },
+});
 </script>
 
 <template>

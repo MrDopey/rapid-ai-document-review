@@ -1,10 +1,32 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import MessageBubble from '../../src/components/conversation/MessageBubble.vue';
 import ConversationThreadBox from '../../src/components/conversation/ConversationThreadBox.vue';
+import ConversationDetailPanel from '../../src/components/conversation/ConversationDetailPanel.vue';
 import { useConversationsStore, type ConversationMessageState } from '../../src/stores/conversations.js';
+import { httpClient } from '../../src/transport/http-client.js';
+
+// The new "Branch" parity test below (focused-view header action) drives
+// `useConversationsStore().branch()`, which calls through to `httpClient.branchConversation` —
+// mocked here (same convention as `ConversationThreadBox.spec.ts`) so it never hits a real network
+// call.
+vi.mock('../../src/transport/http-client.js', () => ({
+  httpClient: {
+    getConversation: vi.fn(),
+    branchConversation: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {
+    status = 0;
+    code = 'UNKNOWN';
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
+}));
 
 // Spec: specs/005-canvas-conversation-threads, User Story 3 (FR-008/FR-009), T024.
 //
@@ -76,7 +98,7 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
     expect(wrapper.find('.expand-toggle-button').text()).toBe('Show less');
   });
 
-  it('defaults `expanded` to true when the prop is omitted (ConversationView.vue’s existing, unmodified call site)', async () => {
+  it('defaults `expanded` to true when the prop is omitted (e.g. a read-only continuity-context message)', async () => {
     const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }) });
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
@@ -180,6 +202,81 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     // back up rather than resetting to the FR-008 default.
     const remount = mountBox([makeMessage({ id: 'm1', text: 'a'.repeat(2000) })]);
     expect(remount.getComponent(MessageBubble).props('expanded')).toBe(true);
+  });
+});
+
+// Regression test: the expand/collapse toggle (FR-008) must also work in the "focused" view — the
+// multi-focus overlay panel (`ConversationDetailPanel.vue`, rendering `ConversationView.vue`), not
+// just in the compact canvas thread box (`ConversationThreadBox.vue`, already covered above).
+//
+// Root cause of the original bug: `ConversationView.vue` rendered `MessageBubble` without either
+// `:expanded` or `@update:expanded`, relying on `MessageBubble.vue`'s `expanded` prop defaulting to
+// `true`. That default doesn't suppress the toggle button — the button renders whenever the
+// message's real content overflows the clamp height, independent of `expanded` — so a long message
+// in the focused view still grew a "Show less" button, but clicking it emitted `update:expanded`
+// into the void (`ConversationView.vue` had nothing listening), so the toggle looked broken. Fixed
+// by giving `ConversationView.vue` its own `expandedByMessage` state, the same shape as
+// `ConversationThreadBox.vue`'s. This test mounts the real `ConversationDetailPanel.vue` (the exact
+// wrapper used for the focused overlay in `App.vue`) with a real `ConversationView.vue` inside it —
+// not `MessageBubble` in isolation — so a regression in that wiring fails here again.
+describe('ConversationDetailPanel/ConversationView — expand/collapse toggle works in the focused view (regression)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    localStorage.clear();
+  });
+
+  function mountFocusedPanel(messages: ConversationMessageState[]) {
+    const store = useConversationsStore();
+    store.conversations = [conversationFixture()];
+    store.messagesByConversation['conv1'] = messages;
+    // `ConversationView.vue`'s `onMounted` unconditionally calls `loadDetail` (unlike
+    // `ConversationThreadBox.vue`, it has no "already loaded" guard) — stub it out so this test
+    // never issues a real HTTP call and never clobbers the fixture seeded above.
+    vi.spyOn(store, 'loadDetail').mockResolvedValue(undefined);
+
+    return mount(ConversationDetailPanel, {
+      props: { conversationId: 'conv1', active: true },
+      // `EditsList` also fetches on mount via its own store — irrelevant to this toggle test, and
+      // stubbed for the same reason `ConversationThreadBox.spec.ts` stubs `ConversationView` above.
+      global: { plugins: [pinia], stubs: { EditsList: true } },
+    });
+  }
+
+  it('a long message in the focused/detail-panel view defaults collapsed with a working "Show more" toggle', async () => {
+    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', text: 'a'.repeat(2000) })]);
+    mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
+    await wrapper.vm.$nextTick();
+
+    const bubble = wrapper.getComponent(MessageBubble);
+    expect(bubble.props('expanded')).toBe(false);
+    const toggle = bubble.get('.expand-toggle-button');
+    expect(toggle.text()).toBe('Show more');
+
+    await toggle.trigger('click');
+    await wrapper.vm.$nextTick();
+
+    // The key regression assertion: clicking the toggle must actually flip the message's own
+    // `expanded` prop (via `ConversationView.vue`'s `update:expanded` listener), not just emit an
+    // event nobody catches.
+    const bubbleAfter = wrapper.getComponent(MessageBubble);
+    expect(bubbleAfter.props('expanded')).toBe(true);
+    expect(bubbleAfter.get('.expand-toggle-button').text()).toBe('Show less');
+    expect((bubbleAfter.get('.message-text').element as HTMLElement).style.maxHeight).toBe('');
+  });
+
+  it('persists the focused view\'s toggle to localStorage, keyed by message id (shared with the thread-box view)', async () => {
+    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', text: 'a'.repeat(2000) })]);
+    mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.getComponent(MessageBubble).get('.expand-toggle-button').trigger('click');
+    await wrapper.vm.$nextTick();
+
+    const stored = JSON.parse(localStorage.getItem('raidr:messageExpanded') ?? '{}');
+    expect(stored.m1).toBe(true);
   });
 });
 
@@ -299,5 +396,81 @@ describe('ConversationThreadBox — continuity context for a freshly-created pla
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('.continuity-context').exists()).toBe(false);
+  });
+});
+
+// Parity fix (005-canvas-conversation-threads follow-up): the sidebar's compact
+// `ConversationThreadBox.vue` offers "Expand all"/"Collapse all" and "Branch" header actions that
+// the focused/detail view (`ConversationDetailPanel.vue` hosting `ConversationView.vue`) previously
+// lacked entirely. Mounts the same real `ConversationDetailPanel.vue` used for the focused overlay
+// in `App.vue` (not `ConversationView.vue` in isolation), the same convention as the
+// expand/collapse regression suite above.
+describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity with the sidebar box', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    localStorage.clear();
+    vi.mocked(httpClient.branchConversation).mockReset();
+  });
+
+  function mountFocusedPanel(
+    messages: ConversationMessageState[],
+    conversationOverrides: Partial<ConversationDto> = {},
+  ) {
+    const store = useConversationsStore();
+    store.conversations = [conversationFixture(conversationOverrides)];
+    store.messagesByConversation['conv1'] = messages;
+    vi.spyOn(store, 'loadDetail').mockResolvedValue(undefined);
+
+    return { store, wrapper: mount(ConversationDetailPanel, {
+      props: { conversationId: 'conv1', active: true },
+      global: { plugins: [pinia], stubs: { EditsList: true } },
+    }) };
+  }
+
+  it('renders no bulk toggle for a conversation with only one message', () => {
+    const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })]);
+    expect(wrapper.find('.bulk-toggle-button').exists()).toBe(false);
+  });
+
+  it('bulk-expands every message at once via the focused view\'s own "Expand all" button, same as the sidebar box', async () => {
+    const { wrapper } = mountFocusedPanel([
+      makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
+      makeMessage({ id: 'm2', text: 'b'.repeat(2000) }),
+    ]);
+    const bubbles = wrapper.findAllComponents(MessageBubble);
+    for (const bubble of bubbles) mockTallScrollHeight(bubble.get('.message-text').element);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Expand all');
+    await wrapper.get('.bulk-toggle-button').trigger('click');
+    await wrapper.vm.$nextTick();
+
+    const expandedBubbles = wrapper.findAllComponents(MessageBubble);
+    expect(expandedBubbles.every((b) => b.props('expanded') === true)).toBe(true);
+    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Collapse all');
+  });
+
+  it('renders a Branch button, calling store.branch (httpClient.branchConversation) with this conversation as parent', async () => {
+    vi.mocked(httpClient.branchConversation).mockResolvedValue(
+      conversationFixture({ id: 'branch1', name: 'Branch', parentId: 'conv1', kind: 'branch' }),
+    );
+    const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })]);
+
+    const branchButton = wrapper.get('.branch-button');
+    expect(branchButton.attributes('disabled')).toBeUndefined();
+    await branchButton.trigger('click');
+    await flushPromises();
+
+    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv1' });
+  });
+
+  it('disables the Branch button when the server-computed canBranch is false (e.g. max depth reached)', () => {
+    const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })], { canBranch: false });
+    const branchButton = wrapper.get('.branch-button');
+    expect(branchButton.attributes('disabled')).toBeDefined();
+    expect(branchButton.attributes('title')).toMatch(/maximum conversation depth/i);
   });
 });

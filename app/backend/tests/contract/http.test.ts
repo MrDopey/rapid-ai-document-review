@@ -5,8 +5,10 @@ import {
   ApplyEditResponse,
   ClearPrimaryResponse,
   CloseConversationResponse,
+  ConversationDto,
   CreateDocumentResponse,
   DesignatePrimaryResponse,
+  DiscardConversationResponse,
   DropEditResponse,
   DropRemainingResponse,
   ErrorEnvelope,
@@ -587,6 +589,61 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
   });
 
+  describe('DELETE /api/conversations/:id (discard an untouched branch)', () => {
+    it('discards a zero-message branch outright, removing it from the list', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const b = await branch(ctx.app, created.mainConversation.id);
+      expect(b.status).toBe(201);
+      const branchId = (b.json as { id: string }).id;
+
+      const res = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+      expect(res.status).toBe(200);
+      expect(DiscardConversationResponse.parse(res.json)).toEqual({ conversationId: branchId, discarded: true });
+      expect(ctx.storage.getConversation(branchId)).toBeNull();
+
+      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      expect(list.conversations.some((c) => c.id === branchId)).toBe(false);
+    });
+
+    it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
+      await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'DELETE', '/api/conversations/conv_nope');
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
+    });
+
+    it('409 CONVERSATION_NOT_EMPTY once a message has been sent, and the conversation survives', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, { message: 'hello' });
+
+      const res = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_EMPTY');
+      expect(ctx.storage.getConversation(branchId)).not.toBeNull();
+    });
+
+    it('409 CONVERSATION_NOT_EMPTY for Main (never a branch, even with zero messages)', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'DELETE', `/api/conversations/${created.mainConversation.id}`);
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_EMPTY');
+    });
+
+    it('409 CONVERSATION_NOT_EMPTY once another conversation has branched off it', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const b = await branch(ctx.app, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await branch(ctx.app, branchId);
+
+      const res = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+      expect(res.status).toBe(409);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_EMPTY');
+      expect(ctx.storage.getConversation(branchId)).not.toBeNull();
+    });
+  });
+
   describe('GET /api/conversations/:id', () => {
     it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
       await createDoc(ctx.app, ctx.storage);
@@ -609,6 +666,65 @@ describe('Contract: HTTP API (http-api.md)', () => {
         (await call(ctx.app, 'GET', `/api/conversations/${branchId}`)).json,
       );
       expect(closedDetail.conversation.readOnly).toBe(true);
+    });
+  });
+
+  describe('PATCH /api/conversations/:id (rename)', () => {
+    it('renames and validates the response shape', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
+        name: 'Renamed conversation',
+      });
+      expect(res.status).toBe(200);
+      const parsed = ConversationDto.parse(res.json);
+      expect(parsed.name).toBe('Renamed conversation');
+
+      // Persisted, not just returned in the response.
+      const refetched = GetConversationResponse.parse(
+        (await call(ctx.app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
+      );
+      expect(refetched.conversation.name).toBe('Renamed conversation');
+      expect(ctx.storage.getConversation(created.mainConversation.id)?.name).toBe('Renamed conversation');
+    });
+
+    it('trims surrounding whitespace before saving', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
+        name: '  Spacey Name  ',
+      });
+      expect(res.status).toBe(200);
+      expect(ConversationDto.parse(res.json).name).toBe('Spacey Name');
+    });
+
+    it('400 VALIDATION_FAILED for an empty (or whitespace-only) name', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const emptyRes = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, { name: '' });
+      expect(emptyRes.status).toBe(400);
+      expect(ErrorEnvelope.parse(emptyRes.json).error.code).toBe('VALIDATION_FAILED');
+
+      const whitespaceRes = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
+        name: '   ',
+      });
+      expect(whitespaceRes.status).toBe(400);
+      expect(ErrorEnvelope.parse(whitespaceRes.json).error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
+      await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'PATCH', '/api/conversations/conv_nope', { name: 'New name' });
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
+    });
+
+    it('allows renaming a closed conversation (pure metadata edit, not a lifecycle transition)', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
+      const branchId = (b.json as { id: string }).id;
+      await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
+
+      const res = await call(ctx.app, 'PATCH', `/api/conversations/${branchId}`, { name: 'Renamed after close' });
+      expect(res.status).toBe(200);
+      expect(ConversationDto.parse(res.json).name).toBe('Renamed after close');
     });
   });
 

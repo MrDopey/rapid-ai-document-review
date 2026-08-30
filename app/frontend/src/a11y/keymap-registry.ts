@@ -113,4 +113,11 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
       'open dialog.',
     scope: 'Global',
   },
+  {
+    keys: 'Ctrl+Alt+Y',
+    description:
+      'Toggle "Sync scroll" — scrolling either the Editor or Preview pane also scrolls the other to the ' +
+      'matching position. Works from anywhere except the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
 ] as const;

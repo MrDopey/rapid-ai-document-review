@@ -4,6 +4,7 @@ import {
   CreateConversationRequest,
   DesignatePrimaryRequest,
   PaginationQuery,
+  RenameConversationRequest,
   SendMessageRequest,
   type ErrorCode,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -11,6 +12,7 @@ import {
   AgentUnavailableError,
   ConversationClosedError,
   ConversationNotClosedError,
+  ConversationNotEmptyError,
   ConversationNotErroredError,
   ConversationNotFoundError,
   MaxConversationDepthExceededError,
@@ -46,6 +48,9 @@ function handleConversationError(
   }
   if (err instanceof ConversationNotClosedError) {
     return { status: 409, code: 'CONVERSATION_NOT_CLOSED' };
+  }
+  if (err instanceof ConversationNotEmptyError) {
+    return { status: 409, code: 'CONVERSATION_NOT_EMPTY' };
   }
   if (err instanceof ConversationNotErroredError) {
     return { status: 409, code: 'CONVERSATION_NOT_ERRORED' };
@@ -112,9 +117,39 @@ export function registerConversationRoutes(
     }
   });
 
+  // 005-canvas-conversation-threads follow-up: discards an untouched branch placeholder (zero
+  // messages, no children — see `ConversationService.discardIfEmpty`'s doc comment) outright,
+  // rather than leaving it soft-closed forever. Distinct from `POST /:id/close` (FR-033), which
+  // stays untouched by this addition.
+  app.delete<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
+    try {
+      const result = conversationService.discardIfEmpty(request.params.id);
+      return reply.send(result);
+    } catch (err) {
+      const mapped = handleConversationError(err);
+      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
+      throw err;
+    }
+  });
+
   app.get<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
     try {
       return reply.send(conversationService.getOne(request.params.id));
+    } catch (err) {
+      const mapped = handleConversationError(err);
+      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
+      throw err;
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
+    const parsed = RenameConversationRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
+    }
+    try {
+      const conversation = conversationService.rename(request.params.id, parsed.data.name);
+      return reply.send(conversation);
     } catch (err) {
       const mapped = handleConversationError(err);
       if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);

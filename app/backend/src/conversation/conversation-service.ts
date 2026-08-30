@@ -23,7 +23,7 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
-import { buildBranchSeedMessage, buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
+import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
 
@@ -31,6 +31,7 @@ export class ConversationNotFoundError extends Error {}
 export class ConversationClosedError extends Error {}
 export class ConversationNotErroredError extends Error {}
 export class ConversationNotClosedError extends Error {}
+export class ConversationNotEmptyError extends Error {}
 export class AgentUnavailableError extends Error {}
 /** Shared shape for "a branch/refresh would exceed a configured depth limit" (FR-*): both
  *  `MaxConversationDepthExceededError` and `MaxEditingDepthExceededError` carry the identical
@@ -221,6 +222,28 @@ export class ConversationService {
   }
 
   /**
+   * Renames a conversation's title (narrowly scoped: only `name` ever changes here, unlike
+   * `close()`'s lifecycle transition). Deliberately allowed regardless of `status` — closed and
+   * errored conversations keep their history readable/findable, and there's no reason a rename
+   * (pure metadata, no bearing on `canEdit`/`canBranch`) should be blocked just because the
+   * conversation itself no longer accepts new messages. The request body's `name` already arrives
+   * trimmed and non-empty (`RenameConversationRequest`'s zod schema), so no further validation is
+   * needed here.
+   */
+  rename(conversationId: string, name: string): ConversationDto {
+    const conversation = this.getConversationOrThrow(conversationId);
+    const document = this.storage.getDocument();
+    if (!document) throw new DocumentNotFoundError('Document not found');
+
+    const now = new Date().toISOString();
+    const updated = this.storage.updateConversation(conversationId, { name, updatedAt: now });
+
+    this.publish(conversation.documentId, conversationId, 'conversation_renamed', { name });
+
+    return toConversationDto(this.storage, updated, document.currentRevision, this.automerge.get().getContent());
+  }
+
+  /**
    * Branches a new conversation from a document selection or from another conversation
    * (FR-011/FR-013). Unlike `ensureMain`'s/`review()`'s seed messages, a branch defaults to never
    * auto-sending anything and never starting an agent turn (005-canvas-conversation-threads): it
@@ -228,19 +251,20 @@ export class ConversationService {
    * first message. `extractSeedExcerpt` is still used below, but only to derive the branch's name
    * (the nearest enclosing section heading).
    *
-   * `request.includeSeedMessage` (the toolbar's second "Branch + seed text" button/Alt+Shift+S,
-   * distinct from the default "Branch"/Alt+Shift+C path) opts back into the pre-canvas behavior for
-   * a selection-anchored branch only: `buildBranchSeedMessage`'s full-document-plus-highlight
-   * excerpt is delivered as the branch's first message via the ordinary `send()` path, exactly as
-   * it used to be delivered unconditionally before this flag existed. It is meaningless (and
-   * ignored) without a `selection` — the message-context "Branch this conversation" path never sets
-   * it.
+   * `request.includeSeedMessage` (the toolbar's "Branch (Main)" button/Alt+Shift+S, distinct from
+   * the default "Branch (New)"/Alt+Shift+C path) no longer resends anything as a chat message —
+   * that pre-canvas "restore context" behavior is gone. Instead it opts a selection-anchored branch
+   * into the same message-level continuity a message-context branch already gets: `forkedFromMessageId`
+   * is populated with the parent's last message id, which `ConversationThreadBox.vue`'s
+   * `continuityMessages` renders as a read-only snippet of the parent's last exchange. Omitted/false
+   * on a selection-anchored branch keeps `forkedFromMessageId` null — the clean/empty placeholder
+   * fork with no continuity ("Branch (New)").
    *
-   * Instead of a seed message, a branch created from within a conversation (no `selection` given)
-   * carries `forkedFromMessageId`: the id of the parent's last message at the point of branching —
-   * a message-level fork anchor distinct from `seedSelection`'s document character-range anchor.
-   * A selection-anchored branch has no message context, so `forkedFromMessageId` stays `null`
-   * there.
+   * A branch created from within a conversation (no `selection` given — the sidebar's "Branch this
+   * conversation" button) always gets `forkedFromMessageId` populated, regardless of
+   * `includeSeedMessage` (which is meaningless there — there's no selection to opt in from): it's
+   * the id of the parent's last message at the point of branching, a message-level fork anchor
+   * distinct from `seedSelection`'s document character-range anchor.
    */
   branch(request: CreateConversationRequest): ConversationDto {
     const parent = this.getConversationOrThrow(request.parentConversationId);
@@ -269,8 +293,8 @@ export class ConversationService {
       const { from, to } = request.selection;
       const text = documentContent.slice(from, to);
       seedSelection = { from, to, text };
-      // Used only for `deriveBranchName`'s heading search below — the seed message itself now
-      // embeds the full `documentContent`, not this excerpt (see `buildBranchSeedMessage`).
+      // Used only for `deriveBranchName`'s heading search below — a branch never sends a seed
+      // message any more, so this excerpt has no other purpose.
       seedExcerpt = extractSeedExcerpt(documentContent, from, to);
     }
 
@@ -279,11 +303,14 @@ export class ConversationService {
     const id = newId('conv');
     const piSessionPath = join(dirname(parent.piSessionPath), `${id}.jsonl`);
 
-    // Message-level fork anchor (005-canvas-conversation-threads): populated only when the branch
-    // was created from within a conversation (no `selection` given) — the id of the parent's last
-    // message at the point of branching. A selection-anchored branch has no message context, so
-    // this stays `null` (the document excerpt in `seedSelection` is its anchor instead).
-    const forkedFromMessageId = request.selection ? null : (this.buildMessages(parent.id).at(-1)?.id ?? null);
+    // Message-level fork anchor (005-canvas-conversation-threads): populated when the branch was
+    // created from within a conversation (no `selection` given — always gets continuity) or when a
+    // selection-anchored branch opted in via `includeSeedMessage` ("Branch (Main)"). A plain
+    // selection-anchored branch without that opt-in ("Branch (New)") has no message context to
+    // anchor to, so this stays `null` there (the document excerpt in `seedSelection` is its anchor
+    // instead).
+    const forkedFromMessageId =
+      !request.selection || request.includeSeedMessage ? (this.buildMessages(parent.id).at(-1)?.id ?? null) : null;
 
     const row = this.storage.createConversation({
       id,
@@ -315,27 +342,10 @@ export class ConversationService {
       forkedFromMessageId: row.forkedFromMessageId,
     });
 
-    // A branch persists as a truly empty placeholder by default — zero messages, no agent turn
-    // ever started (005-canvas-conversation-threads) — unless the caller opted into
-    // `includeSeedMessage` for a selection-anchored branch (the toolbar's "Branch + seed text"
-    // button/Alt+Shift+S), in which case the pre-canvas seed message is restored below.
-    if (request.includeSeedMessage && seedSelection) {
-      const seedMessage = buildBranchSeedMessage(document.currentRevision, documentContent, seedSelection.text);
-      // Fire-and-forget: POST /api/conversations returns as soon as the conversation exists
-      // (http-api.md); the seed turn's progress/failure surfaces entirely over the event stream,
-      // same as any other send (agent-tools.md, FR-037). `publishUserMessage` inside `send()` still
-      // runs synchronously before the first `await`, so the message is already present in the
-      // conversation's history by the time this function returns.
-      void this.send(row.id, seedMessage).catch((err) => {
-        // `event: 'agent_error'` — matches the frame PiService.send() already published for this
-        // same failure via the bridge before rethrowing (FR-042); logged again here only because
-        // this call site knows it was specifically the branch seed message.
-        logger.warn(
-          { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
-          'failed to deliver branch seed message',
-        );
-      });
-    }
+    // A branch persists as a truly empty placeholder — zero messages, no agent turn ever started
+    // (005-canvas-conversation-threads) — for every creation path, including `includeSeedMessage:
+    // true`: that flag only affects `forkedFromMessageId` above now, it never resends the document
+    // as a chat message (see this method's doc comment).
 
     return toConversationDto(this.storage, row, document.currentRevision, documentContent || this.automerge.get().getContent());
   }
@@ -424,6 +434,56 @@ export class ConversationService {
       summaryFoldedIntoParent: willFold,
       parentConversationId: conversation.parentId,
     };
+  }
+
+  /**
+   * 005-canvas-conversation-threads follow-up: physically discards a branch placeholder
+   * conversation that was created (via either "Branch" toolbar button, or the sidebar's "Branch
+   * this conversation") and then never used — the "opened a branch, sent nothing, changed my
+   * mind" case, distinct from `close()`'s FR-033 lifecycle (which the user explicitly confirms,
+   * and which leaves the row around, read-only, possibly folding a summary into its parent).
+   * Leaving an untouched branch's row around forever would just be permanent clutter, so this
+   * removes it outright rather than soft-closing it.
+   *
+   * Requires every one of:
+   *  - `kind === 'branch'` — Main (`ensureMain`'s single per-document row) and `review`
+   *    conversations (which always start with a real seed message, so they could never satisfy
+   *    the next condition anyway) are never discarded this way.
+   *  - Zero real messages (`buildMessages`) — a fresh branch's own `conversation_started` event
+   *    carries no `message_completed` row, so this stays true right up until the first `send()`.
+   *  - No other conversation has since branched off *it* — deleting this row would either orphan
+   *    that child's `parent_id` or simply be refused outright by the FK on `conversation.parent_id`.
+   *
+   * Anything short of that throws `ConversationNotEmptyError` rather than silently no-op-ing, so a
+   * caller (the frontend's own precondition check can itself race against a second client sending
+   * a message a moment earlier) gets an explicit signal rather than a false "discarded: true".
+   */
+  discardIfEmpty(conversationId: string): { conversationId: string; discarded: true } {
+    const conversation = this.getConversationOrThrow(conversationId);
+    if (conversation.kind !== 'branch') {
+      throw new ConversationNotEmptyError('Only a branch conversation can be discarded this way');
+    }
+    if (this.buildMessages(conversationId).length > 0) {
+      throw new ConversationNotEmptyError('Conversation has messages and cannot be discarded');
+    }
+    const hasChildren = this.storage
+      .listAllConversations(conversation.documentId)
+      .some((c) => c.parentId === conversationId);
+    if (hasChildren) {
+      throw new ConversationNotEmptyError('Conversation has its own branches and cannot be discarded');
+    }
+
+    // Same reasoning as `close()`'s own wasPrimary handling: never transferred implicitly
+    // (FR-027a) — just cleared, since the conversation is about to stop existing entirely.
+    if (conversation.isPrimary) {
+      this.primaryService.closeClears(conversationId);
+    }
+    // No pending turn/session work is possible on a zero-message conversation, but eviction is
+    // cheap and idempotent — matches `close()`'s own unconditional-when-safe eviction above.
+    this.piService.evictSession(conversationId);
+    this.storage.deleteConversation(conversationId);
+
+    return { conversationId, discarded: true };
   }
 
   /**

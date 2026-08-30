@@ -1,10 +1,30 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { computeAnchorY, type AnchorPositionSource } from '../../src/components/canvas/anchorY.js';
 import ConversationThreadBox from '../../src/components/conversation/ConversationThreadBox.vue';
 import { useConversationsStore } from '../../src/stores/conversations.js';
+import { httpClient } from '../../src/transport/http-client.js';
+
+// Rename UI (title edit) below drives `useConversationsStore().rename()`, which calls through to
+// `httpClient.renameConversation` — mocked here (same convention as App.spec.ts) so these tests
+// never hit a real network call.
+vi.mock('../../src/transport/http-client.js', () => ({
+  httpClient: {
+    getConversation: vi.fn(),
+    renameConversation: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {
+    status = 0;
+    code = 'UNKNOWN';
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
+}));
 
 // Spec: specs/005-canvas-conversation-threads (data-model.md's ConversationLayout.anchorY, T011).
 // Tests the anchor-Y helper directly against a fake `AnchorPositionSource` (a stand-in for
@@ -118,5 +138,125 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
     expect(focusButton.classes()).toContain('focus-disabled');
     expect(focusButton.attributes('aria-disabled')).toBe('true');
     expect(focusButton.attributes('title')).toMatch(/max 2/);
+  });
+});
+
+// Rename UI: click-to-edit title, save on Enter/blur, cancel on Escape, empty-name validation.
+describe('ConversationThreadBox — rename UI', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.renameConversation).mockReset();
+  });
+
+  function mountBox() {
+    const store = useConversationsStore();
+    store.conversations = [conversationFixture({ id: 'conv-1', name: 'Original Name' })];
+    store.messagesByConversation['conv-1'] = [];
+    return { store, wrapper: mount(ConversationThreadBox, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } }) };
+  }
+
+  it('shows the plain-text title and a rename button by default, no input', () => {
+    const { wrapper } = mountBox();
+    expect(wrapper.find('.thread-title').text()).toBe('Original Name');
+    expect(wrapper.find('.thread-rename-button').exists()).toBe(true);
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+  });
+
+  it('clicking the rename button opens an input pre-filled with the current name', async () => {
+    const { wrapper } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    expect(input.exists()).toBe(true);
+    expect(input.element.value).toBe('Original Name');
+    expect(wrapper.find('.thread-title').exists()).toBe(false);
+  });
+
+  it('saves the new name on Enter, calling the store/API and closing the editor', async () => {
+    vi.mocked(httpClient.renameConversation).mockResolvedValue(
+      conversationFixture({ id: 'conv-1', name: 'New Name' }),
+    );
+    const { wrapper, store } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('New Name');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'New Name');
+    expect(store.conversations[0]?.name).toBe('New Name');
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+    expect(wrapper.find('.thread-title').text()).toBe('New Name');
+  });
+
+  it('saves on blur, same as Enter', async () => {
+    vi.mocked(httpClient.renameConversation).mockResolvedValue(
+      conversationFixture({ id: 'conv-1', name: 'Blurred Name' }),
+    );
+    const { wrapper } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('Blurred Name');
+    await input.trigger('blur');
+    await flushPromises();
+
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'Blurred Name');
+    expect(wrapper.find('.thread-title').text()).toBe('Blurred Name');
+  });
+
+  it('cancels on Escape without calling the API, reverting to the original name', async () => {
+    const { wrapper, store } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('Discarded edit');
+    await input.trigger('keydown.escape');
+    await flushPromises();
+
+    expect(httpClient.renameConversation).not.toHaveBeenCalled();
+    expect(store.conversations[0]?.name).toBe('Original Name');
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+    expect(wrapper.find('.thread-title').text()).toBe('Original Name');
+  });
+
+  it('rejects an empty (or whitespace-only) name inline, without calling the API, and keeps editing open', async () => {
+    const { wrapper } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('   ');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+
+    expect(httpClient.renameConversation).not.toHaveBeenCalled();
+    expect(wrapper.find('.rename-error').exists()).toBe(true);
+    expect(wrapper.find('.thread-title-input').exists()).toBe(true);
+  });
+
+  it('does not call the API when saving with the name unchanged, and just closes the editor', async () => {
+    const { wrapper } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+
+    expect(httpClient.renameConversation).not.toHaveBeenCalled();
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+  });
+
+  it('shows an inline error and keeps editing open when the API call fails', async () => {
+    const { ApiError } = await import('../../src/transport/http-client.js');
+    vi.mocked(httpClient.renameConversation).mockRejectedValue(
+      new ApiError(500, 'UNKNOWN', 'Server exploded'),
+    );
+    const { wrapper } = mountBox();
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('New Name');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+
+    expect(wrapper.find('.rename-error').text()).toBe('Server exploded');
+    expect(wrapper.find('.thread-title-input').exists()).toBe(true);
   });
 });

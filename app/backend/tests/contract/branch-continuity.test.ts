@@ -184,23 +184,33 @@ describe('Branch creation: message-level fork anchor + no auto-sent seed message
 });
 
 /**
- * `includeSeedMessage` (005-canvas-conversation-threads): the toolbar's second "Branch + seed
- * text" button/Alt+Shift+S opts a selection-anchored branch back into the pre-canvas behavior of
- * delivering `buildBranchSeedMessage`'s excerpt as the branch's first message — the suite above
- * covers the now-default `includeSeedMessage: false`/omitted case (zero messages); this suite
- * covers the opt-in case, plus confirms the flag is a no-op without a `selection`.
+ * `includeSeedMessage` (005-canvas-conversation-threads): originally opted a selection-anchored
+ * branch back into the pre-canvas behavior of delivering `buildBranchSeedMessage`'s excerpt as the
+ * branch's first message. User-confirmed decision superseded that: the flag no longer resends
+ * anything as a chat message — instead it populates `forkedFromMessageId` with the parent's last
+ * message id, same as the message-context "Branch this conversation" path always does, so the
+ * branch's continuity-snippet UI (`ConversationThreadBox.vue`'s `continuityMessages`) renders the
+ * parent's last exchange. `includeSeedMessage: false`/omitted on a selection-anchored branch keeps
+ * `forkedFromMessageId` null — the clean/empty placeholder fork with no continuity ("Branch
+ * (New)"). Every branch, regardless of this flag, still never auto-sends a seed message (the
+ * suite above covers that generally).
  */
-describe('Branch creation: includeSeedMessage opts a selection-anchored branch into a seed message', () => {
+describe('Branch creation: includeSeedMessage now opts a selection-anchored branch into continuity, not a seed message', () => {
   let ctx: Ctx;
 
   beforeEach(async () => {
     ctx = await createTestApp();
   });
 
-  it('includeSeedMessage: true on a selection-anchored branch delivers a seed message as the first message', async () => {
+  it("includeSeedMessage: true on a selection-anchored branch populates forkedFromMessageId with the parent's last message id, and sends no seed message", async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
+
+    await sendAndSettle(ctx.app, ctx.storage, mainId, 'Some context-setting question first.');
+    const mainDetailBeforeBranch = await getDetail(ctx.app, mainId);
+    const lastParentMessageId = mainDetailBeforeBranch.messages.at(-1)?.id;
+    expect(lastParentMessageId).toBeTruthy();
 
     const from = created.content.indexOf('Highlight this passage');
     const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
@@ -209,19 +219,16 @@ describe('Branch creation: includeSeedMessage opts a selection-anchored branch i
       includeSeedMessage: true,
     });
     expect(branchRes.status).toBe(201);
-    const branchId = (branchRes.json as { id: string }).id;
+    const branchDto = branchRes.json as ConversationDtoWithFork;
+    expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
 
-    // `publishUserMessage` inside `send()` runs synchronously before any `await`, so the seed
-    // message is already recorded by the time `POST /api/conversations` itself returns — no
-    // wait/poll needed, mirroring the "truly empty placeholder" suite's own no-wait assertion.
-    const detail = await getDetail(ctx.app, branchId);
-    expect(detail.messages).toHaveLength(1);
-    expect(detail.messages[0]?.role).toBe('user');
-    expect(detail.messages[0]?.text).toContain('Highlight this passage');
-    expect(detail.messages[0]?.text).toContain('<highlighted-selection>');
+    // No seed message: `publishUserMessage` would have run synchronously before any `await` (as it
+    // did pre-decision), so the absence is already observable without a wait/poll.
+    const detail = await getDetail(ctx.app, branchDto.id);
+    expect(detail.messages).toEqual([]);
   });
 
-  it('includeSeedMessage: false on a selection-anchored branch starts as a truly empty placeholder (explicit false, not just omitted)', async () => {
+  it('includeSeedMessage: false on a selection-anchored branch keeps forkedFromMessageId null and starts as a truly empty placeholder (explicit false, not just omitted)', async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
@@ -233,25 +240,30 @@ describe('Branch creation: includeSeedMessage opts a selection-anchored branch i
       includeSeedMessage: false,
     });
     expect(branchRes.status).toBe(201);
-    const branchId = (branchRes.json as { id: string }).id;
+    const branchDto = branchRes.json as ConversationDtoWithFork;
+    expect(branchDto.forkedFromMessageId).toBeNull();
 
-    const detail = await getDetail(ctx.app, branchId);
+    const detail = await getDetail(ctx.app, branchDto.id);
     expect(detail.messages).toEqual([]);
   });
 
-  it('includeSeedMessage: true without a selection (message-context branch) is a no-op — still a truly empty placeholder', async () => {
+  it('includeSeedMessage: true without a selection (message-context branch) changes nothing — forkedFromMessageId is already populated on that path regardless of the flag', async () => {
     const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
     const mainId = created.mainConversation.id;
+    const mainDetailBeforeBranch = await getDetail(ctx.app, mainId);
+    const lastParentMessageId = mainDetailBeforeBranch.messages.at(-1)?.id;
+    expect(lastParentMessageId).toBeTruthy();
 
     const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
       parentConversationId: mainId,
       includeSeedMessage: true,
     });
     expect(branchRes.status).toBe(201);
-    const branchId = (branchRes.json as { id: string }).id;
+    const branchDto = branchRes.json as ConversationDtoWithFork;
+    expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
 
     await sleep(200);
-    const detail = await getDetail(ctx.app, branchId);
+    const detail = await getDetail(ctx.app, branchDto.id);
     expect(detail.messages).toEqual([]);
   });
 });

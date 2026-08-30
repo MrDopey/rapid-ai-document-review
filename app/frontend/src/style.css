@@ -17,13 +17,26 @@
      its own hex literal) both per the existing token convention and so a future contrast fix only
      has to change one value. Each is picked to clear 4.5:1 against every real background it's
      used against, including the darkened `.conversation-row.selected` tint and the browser's
-     native button-face color, not just the lightest literal `--panel-bg`. */
+     native button-face color, not just the lightest literal `--panel-bg` — except
+     `--neutral-muted-color` directly below, whose own flat-vs-tinted split is called out in its
+     own comment rather than this one. */
   --warning-color: #92400e;
-  /* Validated against flat panel/page surfaces only (--panel-bg/--bg-color etc). Do NOT use as
-     text color on translucent/tinted backgrounds (alpha-blended bubble fills, opacity-reduced
-     containers) without independently verifying contrast against the actual composited
-     background — compositing can push effective contrast below what this token's value implies. */
+  /* Muted text on FLAT panel/page surfaces (--panel-bg/--bg-color etc) only. On a translucent/
+     tinted or opacity-reduced surface — alpha-blended bubble fills like --user-bubble-bg/
+     --assistant-bubble-bg, or an opacity-reduced container like ConversationThreadBox.vue's
+     `.continuity-context` — use `--neutral-muted-color-on-tint` below instead: compositing can
+     push this token's effective contrast below AA there, in a way that isn't obvious from its
+     value alone. */
   --neutral-muted-color: #4b5563;
+  /* Muted text on TINTED/translucent/opacity-reduced surfaces — the counterpart to
+     `--neutral-muted-color` above for exactly the cases its comment warns about. Current
+     consumers: MessageBubble.vue's `.message-role-label` (sits on --user-bubble-bg/
+     --assistant-bubble-bg) and ConversationThreadBox.vue's `.continuity-label` (sits inside an
+     `opacity: 0.85` container over --seed-bg). Light mode: identical to `--neutral-muted-color` —
+     dark text already has a huge margin on any tinted-*light* surface, so no separate light value
+     is needed. Dark mode (below) uses a brighter value, verified to clear 5:1+ against both
+     consumers above. */
+  --neutral-muted-color-on-tint: var(--neutral-muted-color);
   --success-color: #1a7f37;
   --danger-color: #b3261e;
   /* Additional semantic tokens (contrast-bug fix, dark-mode pass): every hardcoded banner/badge/
@@ -65,11 +78,16 @@
     --text-color: #e8e8e8;
     --bg-color: #14161b;
     --warning-color: #fbbf24;
-    /* Validated against flat panel/page surfaces only (--panel-bg/--bg-color etc). Do NOT use as
-       text color on translucent/tinted backgrounds (alpha-blended bubble fills, opacity-reduced
-       containers) without independently verifying contrast against the actual composited
-       background — compositing can push effective contrast below what this token's value implies. */
+    /* Flat-surface value only — see the caveat at this token's `:root` definition above. Measures
+       only ~4.3:1 against the tinted surfaces `--neutral-muted-color-on-tint` below is validated
+       against, so don't reuse it there. */
     --neutral-muted-color: #9aa3af;
+    /* Brighter than `--neutral-muted-color` specifically so it clears 5:1+ with real margin
+       against both known tinted/opacity-blended surfaces (not just the flat ~4.3:1
+       `--neutral-muted-color` measures there): ~5.1-8.4:1 on MessageBubble.vue's
+       `--user-bubble-bg` tint (range depends on the real panel backdrop behind the bubble) and
+       ~6.7:1 on ConversationThreadBox.vue's opacity-blended `--seed-bg` card. */
+    --neutral-muted-color-on-tint: #c3cad3;
     --success-color: #4ade80;
     --danger-color: #f87171;
     --info-color: #a5d3ff;

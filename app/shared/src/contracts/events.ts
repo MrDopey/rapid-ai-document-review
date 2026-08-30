@@ -114,6 +114,8 @@ export const ConversationStaleEvent = base(
   z.object({ contextRevision: z.number().int(), currentRevision: z.number().int() }),
 );
 
+export const ConversationRenamedEvent = base('conversation_renamed', z.object({ name: z.string() }));
+
 export const ConversationClosedEvent = base(
   'conversation_closed',
   z.object({
@@ -274,6 +276,7 @@ export const ApplicationEvent = z.discriminatedUnion('type', [
   ConversationStatusChangedEvent,
   ConversationContextRefreshedEvent,
   ConversationStaleEvent,
+  ConversationRenamedEvent,
   ConversationClosedEvent,
   ConversationSummaryFoldedEvent,
   PrimaryChangedEvent,

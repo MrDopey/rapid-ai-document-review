@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useDocumentStore } from './stores/document.js';
 import { useConversationsStore } from './stores/conversations.js';
 import { useSettingsStore } from './stores/settings.js';
@@ -16,7 +16,8 @@ import ConversationDetailPanel from './components/conversation/ConversationDetai
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
 import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
-import { loadPaneSizes, persistPaneSizes } from './composables/panePersistence.js';
+import { loadPaneSizes, persistPaneSizes, loadSyncScrollEnabled, persistSyncScrollEnabled } from './composables/panePersistence.js';
+import { attachScrollSync } from './composables/scrollSync.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { orderConversationsByAnchor } from './components/canvas/conversationLayout.js';
 
@@ -89,6 +90,12 @@ function unfocusConversation(id: string): void {
   next.delete(id);
   focusedConversationIds.value = next;
   lastInteractedId.value = id;
+  // 005-canvas-conversation-threads follow-up: closing a conversation's focus panel is also the
+  // one moment an untouched branch placeholder (created but never sent to, no draft left behind)
+  // gets cleaned up rather than left as permanent clutter — see `discardIfEmpty`'s doc comment.
+  // Fire-and-forget: the panel itself has already closed above regardless of outcome, and this is
+  // a no-op for every conversation that isn't an eligible empty branch.
+  void conversationsStore.discardIfEmpty(id);
 }
 
 /** The one toggle every Focus click (HudPanel row, ConversationThreadBox's Focus/Close buttons)
@@ -124,8 +131,11 @@ function replaceFocus(oldId: string | null, newId: string): void {
  *  every currently-focused conversation at once, the closest multi-panel equivalent of the old
  *  single-overlay's backdrop-dismiss. */
 function closeAllFocused(): void {
+  const closedIds = [...focusedConversationIds.value];
   focusedConversationIds.value = new Set();
   lastInteractedId.value = null;
+  // Same cleanup as `unfocusConversation` above, for every panel this backdrop-dismiss just closed.
+  for (const id of closedIds) void conversationsStore.discardIfEmpty(id);
 }
 
 // Display order for the overlay's panels: always re-derived by filtering `HudPanel.vue`'s own
@@ -170,6 +180,50 @@ function persistCurrentPaneSizes(): void {
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Synchronized scrolling between the Preview pane and the Editor/Canvas pane (composables/
+// scrollSync.ts has the full mapping-strategy/feedback-loop-guard rationale). Off by default —
+// there's no existing partial implementation or related persisted state to match, so this starts
+// exactly like every other independent-scroll pane pair in the app until a viewer opts in; that
+// choice is then persisted per-viewer via `panePersistence.ts`, the same convention `previewFr`/
+// `canvasFr` above and `DocumentCanvas.vue`'s own scroll-position persistence already use.
+// ---------------------------------------------------------------------------------------------
+const syncScrollEnabled = ref(loadSyncScrollEnabled());
+const previewComponentRef = ref<InstanceType<typeof PreviewComponent> | null>(null);
+const documentCanvasRef = ref<InstanceType<typeof DocumentCanvas> | null>(null);
+let detachScrollSync: (() => void) | null = null;
+
+function toggleSyncScroll(): void {
+  syncScrollEnabled.value = !syncScrollEnabled.value;
+  persistSyncScrollEnabled(syncScrollEnabled.value);
+}
+
+function onToggleSyncScrollCheckbox(event: Event): void {
+  syncScrollEnabled.value = (event.target as HTMLInputElement).checked;
+  persistSyncScrollEnabled(syncScrollEnabled.value);
+}
+
+// Both panes only exist in the DOM once `hasDocument` is true (the `v-else="hasDocument"` branch
+// below) — wiring/tearing down alongside it (rather than once in `onMounted`) covers the
+// paste-screen -> document transition without leaking a listener pair onto elements that no
+// longer exist. `attachScrollSync` itself gates on `syncScrollEnabled`, so this wiring is safe to
+// leave attached regardless of the toggle's own on/off state.
+watch(
+  hasDocument,
+  async (has) => {
+    detachScrollSync?.();
+    detachScrollSync = null;
+    if (!has) return;
+    await nextTick();
+    const previewEl = previewComponentRef.value?.scrollEl ?? null;
+    const canvasScrollEl = documentCanvasRef.value?.scrollEl ?? null;
+    if (previewEl && canvasScrollEl) {
+      detachScrollSync = attachScrollSync(previewEl, canvasScrollEl, () => syncScrollEnabled.value);
+    }
+  },
+  { immediate: true },
+);
+
 const DESKTOP_QUERY = '(min-width: 961px)';
 const desktopMedia = window.matchMedia(DESKTOP_QUERY);
 const isDesktop = ref(desktopMedia.matches);
@@ -213,20 +267,31 @@ const panesStyle = computed(() => {
 });
 
 // Fix (coordinator follow-up, 005-canvas-conversation-threads): `.conversation-detail-overlay`
-// below is `position: absolute` with its `right` edge pinned here rather than via a bare CSS
-// `inset: 0` — plain `inset: 0` spans `.panes`' *entire* box, including History's own reserved
-// grid column (`panesStyle` above) whenever it's open, silently sitting on top of it (the overlay's
-// explicit z-index wins regardless of DOM order) and swallowing every pointer event meant for
-// History's controls (e.g. "Restore") — directly contradicting the "Fix 1" comment on
-// `HistoryPanel` below, which promises History is never covered while open. Shrinking the overlay's
-// right edge by History's own reserved column width leaves that column outside the overlay's box
-// entirely, so History stays genuinely interactive with any conversation panel focused. Only
-// applies on desktop (`isDesktop`) — `panesStyle` itself only reserves that column there; below the
-// breakpoint History renders as its own full-width row instead (see the `@media` rules below), a
-// layout this fix intentionally leaves alone.
-const conversationOverlayStyle = computed(() => ({
-  right: isDesktop.value && historyOpen.value ? `${HISTORY_PANEL_WIDTH_PX}px` : '0',
-}));
+// below is `position: absolute` with no explicit `grid-column` of its own, so per the CSS Grid
+// spec its containing block for that absolute positioning falls back to `.panes`' entire padding
+// box — Preview + the resize handle + Canvas (+ History's reserved column, when open) combined —
+// rather than just the Canvas column it visually sits over. Its `justify-content: center` then
+// centers the focused panel(s) against that *combined* width, so dragging the Preview|Canvas
+// splitter (which only changes how that combined width is split, via `previewFr`/`canvasFr` in
+// `panesStyle` above) shifts Canvas's actual position/width without moving the overlay's centering
+// reference, and the panel visibly drifts off Canvas/the editor underneath it.
+//
+// Pinning `grid-column: 3 / 4` here (Canvas's own track — see the "Grid order" comment on
+// `panesStyle` above: Preview, handle, Canvas, [History]) makes that column itself the overlay's
+// containing block, so its `inset: 0` (set in CSS) resolves against exactly Canvas's current
+// edges — tracking the splitter live with no JS recalculation needed — and, as a side effect,
+// already excludes History's own column 4 by construction whenever History is open, so no
+// separate `historyOpen`-dependent width math (this computed's previous `right` value) is needed
+// to keep History interactive. Both line numbers must be spelled out (`3 / 4`, not the bare `3`
+// shorthand): per the CSS Grid abspos-containing-block rules, an edge only becomes the
+// corresponding grid line's edge when its own grid-column-start/end is explicitly non-auto — `3`
+// alone only sets grid-column-start (leaving -end auto), so the right edge would still fall back
+// to `.panes`' own padding edge (i.e. past History's column) instead of Canvas's own right edge.
+// Only applies on desktop (`isDesktop`) — `panesStyle` itself only establishes that column layout
+// there; below the breakpoint `.panes` reflows to rows (see the `@media` rules below) where
+// Canvas is no longer a distinct column, so the overlay falls back to spanning `.panes`' full box
+// exactly as it already did pre-fix, a layout this fix intentionally leaves alone.
+const conversationOverlayStyle = computed(() => (isDesktop.value ? { gridColumn: '3 / 4' } : undefined));
 
 /** Pointer-driven + keyboard-operable resize (Fix 3) for the horizontal Preview|Canvas split:
  *  converts a horizontal drag/step delta into a preview/canvas `fr` split, clamped to a sane
@@ -263,8 +328,9 @@ function isEditingContext(event: KeyboardEvent): boolean {
   return target.isContentEditable;
 }
 
-/** Ctrl+Alt+P/R/H — see the doc comment above for why these three (and only these three) live
- *  here rather than in HudPanel.vue or PrimaryPanel.vue. */
+/** Ctrl+Alt+P/R/H/Y — see the doc comment above for why these (and only these) live here rather
+ *  than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global Actions"
+ *  box for the same reason: a global, toolbar-level toggle, not owned by any single pane. */
 function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.metaKey || event.shiftKey) return;
   if (isEditingContext(event)) return;
@@ -284,6 +350,10 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.code === 'KeyH') {
     event.preventDefault();
     historyOpen.value = !historyOpen.value;
+  }
+  if (event.code === 'KeyY') {
+    event.preventDefault();
+    toggleSyncScroll();
   }
 }
 
@@ -305,6 +375,7 @@ onBeforeUnmount(() => {
   desktopMedia.removeEventListener('change', handleDesktopMediaChange);
   document.removeEventListener('keydown', onGlobalKeydown);
   panesResizeObserver?.disconnect();
+  detachScrollSync?.();
 });
 
 function connectWs(): void {
@@ -434,50 +505,62 @@ async function onToggleReasoning(event: Event): Promise<void> {
             @update:error="primaryErrorMessage = $event"
           />
           <div class="global-actions-box">
-            <label class="reasoning-toggle">
-              <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
-              Show reasoning
-            </label>
-            <button type="button" @click="historyOpen = !historyOpen">
-              {{ historyOpen ? 'Hide history' : 'History' }}
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts"
-              @click="shortcutsOpen = true"
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
-                <path
-                  d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Help"
-              title="Help"
-              @click="helpOpen = true"
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-                <path
-                  d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
-              </svg>
-            </button>
+            <!-- 006-toolbar-reorg (confirmed layout): Group 1 "actions" — visible-label controls,
+                 stretched across a 2-column layout so they share the box's full width. -->
+            <div class="actions-group">
+              <label class="reasoning-toggle">
+                <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
+                Show reasoning
+              </label>
+              <label class="reasoning-toggle" title="Scroll the Editor and Preview panes together. Keyboard shortcut: Ctrl+Alt+Y">
+                <input type="checkbox" :checked="syncScrollEnabled" @change="onToggleSyncScrollCheckbox" />
+                Sync scroll
+              </label>
+              <button type="button" @click="historyOpen = !historyOpen">
+                {{ historyOpen ? 'Hide history' : 'History' }}
+              </button>
+            </div>
+            <!-- Group 2 "info" — icon-only controls (labels dropped, aria-label/title kept for a11y),
+                 rendered as a tight centered cluster rather than stretched half-width cells. -->
+            <div class="info-group">
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="Keyboard shortcuts"
+                title="Keyboard shortcuts"
+                @click="shortcutsOpen = true"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                  <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <path
+                    d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="Help"
+                title="Help"
+                @click="helpOpen = true"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <path
+                    d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -493,7 +576,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <HelpDialog @close="helpOpen = false" />
     </div>
     <div ref="panesEl" class="panes" :style="panesStyle">
-      <PreviewComponent :content="store.content" />
+      <PreviewComponent ref="previewComponentRef" :content="store.content" />
       <div
         v-if="isDesktop"
         class="resize-handle resize-handle--horizontal"
@@ -505,6 +588,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
         @keydown="editorPreviewResize.onKeydown($event)"
       ></div>
       <DocumentCanvas
+        ref="documentCanvasRef"
         :model-value="store.content"
         :filter="conversationFilter"
         :focused-conversation-ids="focusedConversationIds"
@@ -630,13 +714,38 @@ async function onToggleReasoning(event: Event): Promise<void> {
 }
 /* Global Actions is the bottom box of the right column — `flex: 1 1 auto` lets it absorb
    whatever extra height the stretched column has beyond the Primary box above it, so the column's
-   bottom edge still lines up with the HUD box's own bottom edge. */
+   bottom edge still lines up with the HUD box's own bottom edge. Its two pseudo-grouped sub-boxes
+   (`.actions-group`, `.info-group`) are pinned to its top and bottom via `justify-content:
+   space-between`, so that extra height becomes a deliberate gap between them instead of dead
+   space below everything. */
 .global-actions-box {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  justify-content: space-between;
   gap: 0.5rem;
+}
+/* Group 1 "actions": "Show reasoning" + "Sync scroll" + "History", stretched across a 3-column
+   layout so all three controls share the group's full width — keeps its visible text labels. */
+.actions-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+/* Group 2 "info": "Keyboard shortcuts" + "Help", icon-only. Deliberately NOT a 2-column stretch —
+   a tight, centered cluster with normal gap spacing reads better than half-width icon cells. */
+.info-group {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
 }
 .reasoning-toggle {
   display: flex;
@@ -735,12 +844,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
    despite the cap already accounting for `.panes`' measured width. */
 .conversation-detail-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  /* `right` is set inline (`conversationOverlayStyle`) rather than fixed here — it must shrink to
-     exclude History's reserved grid column whenever History is open (see that computed's doc
-     comment above), which a static CSS value can't express. */
+  /* `grid-column: 3 / 4` (Canvas's own track) is set inline on desktop via `conversationOverlayStyle`
+     — see that computed's doc comment above — making Canvas's grid cell this element's containing
+     block, so a plain `inset: 0` here resolves against exactly Canvas's current edges instead of
+     `.panes`' entire box. Below the desktop breakpoint no inline `grid-column` is set, so this
+     falls back to spanning `.panes`' full box, matching the pre-fix mobile layout. */
+  inset: 0;
   z-index: 55;
   background: rgba(0, 0, 0, 0.4);
   display: flex;
