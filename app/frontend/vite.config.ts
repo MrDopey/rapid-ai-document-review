@@ -1,5 +1,5 @@
 import vue from '@vitejs/plugin-vue';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 const backendTarget = `http://127.0.0.1:${process.env.RADR_FE_BACKEND_PORT ?? '3000'}`;
 
@@ -18,6 +18,9 @@ if (frontendHost !== '127.0.0.1') {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  test: {
+    environment: 'jsdom',
+  },
   server: {
     host: frontendHost,
     port: 3001,

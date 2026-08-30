@@ -23,6 +23,14 @@ export default defineConfig({
       dependencies: ['stories'],
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'history-diff',
+      // Self-contained spec (creates its own document) — depends on 'stories' only so it runs
+      // after us1's "no document yet" scenario, not because it shares any fixture with it.
+      testMatch: /history-diff\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: [
     {

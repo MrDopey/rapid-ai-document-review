@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useConversationsStore, type ConversationMessageState } from '../../stores/conversations.js';
 import { useEditsStore } from '../../stores/edits.js';
 import { ApiError } from '../../transport/http-client.js';
@@ -150,8 +150,40 @@ function load(): void {
   void store.loadDetail(props.conversationId);
 }
 
+// Fix: while a message streams in, the transcript auto-scrolls to the bottom on every token — see
+// the `messages` watcher below. That's the desired behaviour while the user is following along at
+// the bottom, but if they've deliberately scrolled up (e.g. to re-read earlier history), the very
+// next token delta yanks them straight back down. `stickToBottom` tracks whether the user is
+// currently at (or near) the bottom of `.message-list`; the auto-scroll only fires while it's
+// true. It's kept in sync by a plain `scroll` listener (near-bottom => true, else => false) rather
+// than by distinguishing user- vs. programmatic scrolls: a programmatic scroll-to-bottom always
+// lands "near bottom" itself, so it re-affirms `true`, and the user scrolling back down by hand is
+// indistinguishable from — and handled the same as — that.
+const NEAR_BOTTOM_THRESHOLD_PX = 32;
+const stickToBottom = ref(true);
+function onListScroll(): void {
+  const el = listRef.value;
+  if (!el) return;
+  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX;
+}
+
 onMounted(load);
+onMounted(() => {
+  listRef.value?.addEventListener('scroll', onListScroll);
+});
+onBeforeUnmount(() => {
+  listRef.value?.removeEventListener('scroll', onListScroll);
+});
 watch(() => props.conversationId, load);
+watch(
+  () => props.conversationId,
+  () => {
+    // A freshly-loaded conversation always starts auto-following the bottom, rather than
+    // inheriting a stale `false` left over from wherever the user had scrolled to in whatever
+    // conversation was previously open.
+    stickToBottom.value = true;
+  },
+);
 watch(
   () => conversation.value?.status,
   (status, previousStatus) => {
@@ -162,6 +194,7 @@ watch(
 watch(
   messages,
   async () => {
+    if (!stickToBottom.value) return;
     await nextTick();
     listRef.value?.scrollTo({ top: listRef.value.scrollHeight });
   },

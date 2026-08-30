@@ -4,12 +4,15 @@ import type { PendingProposalReconciliationEntry } from '@rapid-ai-document-revi
 import { useDocumentStore } from '../../stores/document.js';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { useEditsStore } from '../../stores/edits.js';
+import RevisionDiffViewer from '../diff/RevisionDiffViewer.vue';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
 const editsStore = useEditsStore();
+
+const diffingRevision = ref<number | null>(null);
 
 /** Set only right after a restore whose response included `pendingProposalReconciliation`
  *  (http-api.md §POST /revisions/:revision/restore) — purely informational: the restore has
@@ -111,12 +114,20 @@ async function onCopy(revision: number): Promise<void> {
           <button type="button" @click="onRestore(rev.revision)">Restore</button>
           <a :href="exportUrl(rev.revision)" download>Download</a>
           <button type="button" @click="onCopy(rev.revision)">Copy</button>
+          <button v-if="rev.revision > 1" type="button" @click="diffingRevision = rev.revision">Diff</button>
         </div>
       </li>
     </ul>
     <button v-if="store.revisionsNextCursor" type="button" @click="store.loadRevisions()">
       Load more
     </button>
+    <div v-if="diffingRevision !== null" class="modal-overlay diff-overlay">
+      <RevisionDiffViewer
+        :revision="diffingRevision"
+        :previous-revision="diffingRevision - 1"
+        @close="diffingRevision = null"
+      />
+    </div>
   </div>
 </template>
 
