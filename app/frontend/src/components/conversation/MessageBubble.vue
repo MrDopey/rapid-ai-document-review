@@ -10,9 +10,12 @@ const settings = useSettingsStore();
 
 // All agent-produced (and, defensively, user-authored) content passes the sanitizer before
 // touching the DOM (FR-008a, Constitution Principle VI) — same pipeline as document Markdown.
-const safeText = computed(() => domPurifySanitizer.sanitize(render(props.message.text ?? '')));
+// html:false here: conversation messages never author raw HTML, and a literal `<tag>` (e.g. a
+// seed message's `<document-revision-N>`) should show as visible text, not be parsed as markup
+// and silently swallowed by the sanitizer as an unknown element.
+const safeText = computed(() => domPurifySanitizer.sanitize(render(props.message.text ?? '', { html: false })));
 const safeReasoning = computed(() =>
-  props.message.reasoning ? domPurifySanitizer.sanitize(render(props.message.reasoning)) : '',
+  props.message.reasoning ? domPurifySanitizer.sanitize(render(props.message.reasoning, { html: false })) : '',
 );
 </script>
 
