@@ -199,8 +199,10 @@ test.describe('US7 — Review closed conversations', () => {
       await expect(hudRow.locator('.status-badge')).toHaveAttribute('data-status', 'closed');
 
       // History and proposals remain intact and visible (SC-009) — the conversation view still
-      // renders its prior messages rather than going blank.
-      await expect(page.locator('.message-list')).toContainText('branched from');
+      // renders its prior messages rather than going blank. The seed card is the reliable proxy
+      // for "seed message still present" — its literal wording (seed-excerpt.ts's
+      // buildBranchSeedMessage) is an implementation detail this test shouldn't pin.
+      await expect(page.locator('.message-bubble.seed-card')).toBeVisible();
     });
 
     await test.step('3. requesting a review produces an independent conversation without altering the closed one (FR-036)', async () => {

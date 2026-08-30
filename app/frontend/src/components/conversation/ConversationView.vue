@@ -130,8 +130,7 @@ const editsResize = useResizeHandle({
 // display-only heuristic that recognizes it by its fixed template and position rather than a
 // dedicated flag, and renders it as a distinct context card instead of a normal "You" bubble.
 const BRANCH_SEED_PREFIXES = [
-  'Here is the passage this conversation was branched from',
-  'This conversation was branched from "',
+  'Here is the full document under review (revision', // buildBranchSeedMessage (seed-excerpt.ts)
 ];
 function isSeedMessage(message: ConversationMessageState, index: number): boolean {
   return (
