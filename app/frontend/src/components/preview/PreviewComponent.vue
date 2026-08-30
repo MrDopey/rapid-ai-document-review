@@ -42,7 +42,13 @@ watch(
     </div>
     <!-- A plain <div>'s implicit "generic" role does not support an author-supplied name — role="region"
          makes this a genuine labelled landmark so `aria-label` is actually exposed to assistive tech. -->
-    <div ref="hostRef" class="preview-pane" role="region" aria-label="Rendered document preview" v-html="safeHtml"></div>
+    <div
+      ref="hostRef"
+      class="preview-pane text-wrap-safe"
+      role="region"
+      aria-label="Rendered document preview"
+      v-html="safeHtml"
+    ></div>
   </div>
 </template>
 
@@ -62,6 +68,11 @@ watch(
   background: var(--panel-bg, #f7f7f8);
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
+/* Fix: this renders the exact same markdown, through the exact same `render()` pipeline, as
+   MessageBubble.vue's `.message-text` — but had none of that component's overflow-wrap/pre/code
+   handling, so an unbroken run (a long URL, identifier, or fenced-code line) overflowed this pane
+   the same way it once did the chat bubble. `.text-wrap-safe`'s shared overflow-wrap/pre/code
+   handling (applied via the template class) now lives in style.css. */
 .preview-pane {
   flex: 1;
   min-height: 0;

@@ -156,3 +156,42 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+/* Shared text-wrap-safe utility — for any element rendering unbounded/dynamic text (LLM-generated
+   Markdown/reasoning, user-entered document/conversation titles, edit summaries, revision notes)
+   that would otherwise overflow its container with no natural break point. Used by MessageBubble,
+   PreviewComponent, ConversationView, App.vue's toolbar title, EditsList, and HistoryPanel — each
+   of which previously duplicated some subset of `overflow-wrap: break-word` (some also missing it
+   entirely) in its own scoped stylesheet. `min-width: 0` is deliberately NOT part of this class:
+   it's only needed when the element is itself a flex/grid item, which is a layout concern of the
+   call site, not a property of the text itself — same separation MessageBubble.vue's original fix
+   already drew. */
+.text-wrap-safe {
+  overflow-wrap: break-word;
+}
+/* Companion rule for `<pre>`/`<code>` nested inside a `.text-wrap-safe` container — i.e. rendered
+   Markdown's fenced code blocks/inline code spans, reached via a plain descendant selector since
+   this stylesheet is global (unlike a component's `<style scoped>`, no `:deep()` is needed even
+   though the content arrives via `v-html`). `overflow-x: auto` on `pre` is a fallback so a run
+   with no break point at all (e.g. a long hash) still scrolls instead of escaping the block;
+   `code` additionally breaks via `word-break` since inline code often has no spaces to wrap at.
+   Used by MessageBubble.vue and PreviewComponent.vue — the markdown pipeline's only two
+   consumers. */
+.text-wrap-safe :where(pre) {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.text-wrap-safe :where(code) {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* Companion class for an element that is itself a preformatted/literal-text block (a word-diff, a
+   full-document preview, a folded-summary banner) rather than a wrapper around rendered Markdown —
+   same wrap behaviour as the `pre` rule above, applied directly instead of via nesting. Used by
+   ConversationView's folded-summary banner and DiffViewer/RevisionDiffViewer's diff output. */
+.text-wrap-safe-pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}

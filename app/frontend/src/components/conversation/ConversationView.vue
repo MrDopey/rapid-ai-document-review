@@ -46,6 +46,22 @@ function dismissDirectEditHint(): void {
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
 
+// Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
+// being queued (`conversation.status === 'working'`, server-driven via the
+// `conversation_status_changed` WS event) and the first assistant token actually streaming in —
+// today that gap is silent (the composer's own `sending` only covers the HTTP round trip to queue
+// the turn, not the LLM's response time). Derived entirely from state already in the store: once
+// the newest message is an assistant message that has started streaming *text*, or the turn has
+// left `working`, this clears on its own — no new store state needed. Declared up here (rather
+// than near the other action handlers further down) so it's available to the scroll-stickiness
+// watchers below, which need to react to it alongside `messages`.
+const awaitingResponse = computed(() => {
+  if (conversation.value?.status !== 'working') return false;
+  const last = messages.value[messages.value.length - 1];
+  if (!last || last.role !== 'assistant') return true;
+  return last.streaming && !last.text;
+});
+
 // ---------------------------------------------------------------------------------------------
 // New: a vertical, draggable/keyboard-operable split between the message transcript and the
 // proposed-edits list below it, reusing the same `useResizeHandle`/`panePersistence` composables
@@ -191,15 +207,25 @@ watch(
   },
 );
 
-watch(
-  messages,
-  async () => {
-    if (!stickToBottom.value) return;
-    await nextTick();
-    listRef.value?.scrollTo({ top: listRef.value.scrollHeight });
-  },
-  { deep: true },
-);
+/** Shared by both the `messages` and `awaitingResponse` watchers below: scrolls `.message-list` to
+ *  its bottom, but only while the user hasn't deliberately scrolled away (`stickToBottom`). Waits a
+ *  tick first so it runs after the DOM reflects whatever just changed (a new/updated message, or
+ *  the awaiting-response indicator appearing/disappearing as the last child of the list). */
+async function scrollToBottomIfSticky(): Promise<void> {
+  if (!stickToBottom.value) return;
+  await nextTick();
+  listRef.value?.scrollTo({ top: listRef.value.scrollHeight });
+}
+
+watch(messages, scrollToBottomIfSticky, { deep: true });
+// Fix: the awaiting-response indicator (rendered in `.message-list`, right after the last message
+// — see the template) is derived state, not itself a mutation of `messages`. It normally appears
+// in the same tick as a new user message is pushed (so the `messages` watch above already covers
+// it), but it can also flip on its own — e.g. `conversation.status` turning `working` slightly
+// before or after that message lands via the WS event vs. the HTTP response — so this watches
+// `awaitingResponse` too, reusing the same sticky-scroll logic, rather than relying on that timing
+// coincidence.
+watch(awaitingResponse, scrollToBottomIfSticky);
 
 async function onSend(): Promise<void> {
   const text = draft.value.trim();
@@ -301,20 +327,6 @@ async function onRequestReview(): Promise<void> {
     reviewing.value = false;
   }
 }
-
-// Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
-// being queued (`conversation.status === 'working'`, server-driven via the
-// `conversation_status_changed` WS event) and the first assistant token actually streaming in —
-// today that gap is silent (the composer's own `sending` only covers the HTTP round trip to queue
-// the turn, not the LLM's response time). Derived entirely from state already in the store: once
-// the newest message is an assistant message that has started streaming *text*, or the turn has
-// left `working`, this clears on its own — no new store state needed.
-const awaitingResponse = computed(() => {
-  if (conversation.value?.status !== 'working') return false;
-  const last = messages.value[messages.value.length - 1];
-  if (!last || last.role !== 'assistant') return true;
-  return last.streaming && !last.text;
-});
 </script>
 
 <template>
@@ -327,7 +339,7 @@ const awaitingResponse = computed(() => {
     <header class="conversation-header">
       <div class="header-titles">
         <span class="pane-eyebrow">Conversation</span>
-        <h2>{{ conversation?.name ?? 'Conversation' }}</h2>
+        <h2 class="text-wrap-safe">{{ conversation?.name ?? 'Conversation' }}</h2>
       </div>
       <span v-if="conversation" class="badge status-badge" :data-status="conversation.status">{{
         conversation.status
@@ -370,7 +382,7 @@ const awaitingResponse = computed(() => {
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
-      <pre>{{ foldedSummary.summary }}</pre>
+      <pre class="text-wrap-safe-pre">{{ foldedSummary.summary }}</pre>
     </div>
 
     <div ref="transcriptEditsEl" class="transcript-edits" :style="transcriptEditsStyle">
@@ -381,6 +393,17 @@ const awaitingResponse = computed(() => {
           :message="msg"
           :seed="isSeedMessage(msg, index)"
         />
+        <!-- Fix: visible "sent — awaiting response" indicator for the gap between the turn being
+             queued and the first assistant token actually streaming in (previously silent — only
+             the header's status badge and the Send button's own "Sending…" label reflected
+             `working`, neither of which is very noticeable). Rendered here, after the last message,
+             so it reads as "here's what's happening in response to what I just sent" rather than
+             detached down in the composer/footer area. Clears itself once streaming text arrives or
+             the turn leaves `working` — see `awaitingResponse`. -->
+        <div v-if="awaitingResponse" class="awaiting-response" role="status">
+          <span class="awaiting-response-spinner" aria-hidden="true"></span>
+          Request sent — waiting for response…
+        </div>
       </div>
       <div
         v-if="hasEdits"
@@ -396,7 +419,7 @@ const awaitingResponse = computed(() => {
     </div>
 
     <div v-if="conversation?.status === 'errored' && !errorDismissed" class="error-banner" role="alert">
-      <span class="error-banner-message">{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
+      <span class="error-banner-message text-wrap-safe">{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
       <span class="error-banner-actions">
         <button type="button" @click="onRetry">Retry</button>
         <button type="button" aria-label="Dismiss error" @click="dismissError">Dismiss</button>
@@ -416,16 +439,6 @@ const awaitingResponse = computed(() => {
         <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
           Got it
         </button>
-      </div>
-
-      <!-- Fix: visible "sent — awaiting response" indicator for the gap between the turn being
-           queued and the first assistant token actually streaming in (previously silent — only
-           the header's status badge and the Send button's own "Sending…" label reflected
-           `working`, neither of which is very noticeable). Clears itself once streaming text
-           arrives or the turn leaves `working` — see `awaitingResponse`. -->
-      <div v-if="awaitingResponse" class="awaiting-response" role="status">
-        <span class="awaiting-response-spinner" aria-hidden="true"></span>
-        Request sent — waiting for response…
       </div>
 
       <form class="composer" @submit.prevent="onSend">
@@ -521,6 +534,9 @@ const awaitingResponse = computed(() => {
   white-space: nowrap;
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
+/* `.text-wrap-safe`'s shared overflow-wrap handling (applied to the h2 in the template) now lives
+   in style.css — closes a gap where a long conversation name had no wrap protection even though
+   `.header-titles` above already sets `min-width: 0`. */
 .conversation-header h2 {
   margin: 0;
   font-size: 1rem;
@@ -570,12 +586,12 @@ const awaitingResponse = computed(() => {
   background: var(--danger-bg, #fee2e2);
   color: var(--danger-color, #991b1b);
 }
+/* `.text-wrap-safe`'s shared overflow-wrap handling now lives in style.css. `min-width: 0` stays
+   here: an unbroken long error string (e.g. a raw provider error payload) sits in the
+   `.error-banner` flex row, which otherwise refuses to let this span shrink below its content's
+   intrinsic width, forcing the whole banner — and with it the page — wider than the viewport. */
 .error-banner-message {
-  /* Fix: an unbroken long error string (e.g. a raw provider error payload) has no natural break
-     points, so without this it forced the whole banner — and with it the page — wider than the
-     viewport instead of wrapping. */
   min-width: 0;
-  overflow-wrap: break-word;
   max-height: 8rem;
   overflow-y: auto;
 }
@@ -592,13 +608,20 @@ const awaitingResponse = computed(() => {
   flex-direction: column;
   flex: 0 0 auto;
 }
-/* New: low-noise "sent — awaiting response" indicator (see `awaitingResponse`) — reuses the same
-   status color as the header's `working` badge (`--status-active-color`) for visual consistency. */
+/* Fix: low-noise "sent — awaiting response" indicator (see `awaitingResponse`) — now rendered as
+   the last child of `.message-list`, right after the last message bubble, rather than down in
+   `.input-area`. Sized/spaced like a message bubble (same horizontal padding and bottom margin as
+   `.message-bubble` in MessageBubble.vue) so it sits naturally in the transcript flow, but kept
+   visually distinct from an actual chat bubble — no bubble background/border-radius, just the
+   spinner + status-colored text — so it still reads as a transient status line rather than a
+   message from either party. Reuses the same status color as the header's `working` badge
+   (`--status-active-color`) for visual consistency. */
 .awaiting-response {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.3rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
   color: var(--status-active-color, #1d4ed8);
   font-size: 0.75rem;
 }
@@ -717,8 +740,9 @@ const awaitingResponse = computed(() => {
   color: var(--success-color, #065f46);
   font-size: 0.8rem;
 }
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
+   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .folded-summary-banner pre {
-  white-space: pre-wrap;
   margin: 0.35rem 0 0;
   font-family: inherit;
 }

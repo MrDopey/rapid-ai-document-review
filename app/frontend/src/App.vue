@@ -247,7 +247,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
 
   <div v-else class="editor-layout">
     <header class="toolbar">
-      <h1>{{ store.document?.title }}</h1>
+      <h1 class="text-wrap-safe">{{ store.document?.title }}</h1>
       <label class="reasoning-toggle">
         <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
         Show reasoning
@@ -378,8 +378,14 @@ async function onToggleReasoning(event: Event): Promise<void> {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border-color, #ddd);
 }
+/* Fix: the document title is unbounded/user-supplied and `.toolbar` is a flex row with no
+   `min-width: 0` on its children, so a long title pushed the whole toolbar (and its buttons)
+   wider instead of wrapping. `.text-wrap-safe`'s shared overflow-wrap handling (applied via the
+   template class) now lives in style.css; `min-width: 0` stays here since it's this flex item's
+   own layout concern. */
 .toolbar h1 {
   margin-right: auto;
+  min-width: 0;
   font-size: 1.1rem;
 }
 .reasoning-toggle {

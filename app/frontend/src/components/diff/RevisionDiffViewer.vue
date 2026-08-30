@@ -65,7 +65,7 @@ const identical = computed(
     <p v-if="loading">Loading revisions…</p>
     <p v-else-if="error" role="alert">{{ error }}</p>
     <p v-else-if="identical">No differences found.</p>
-    <div v-else class="diff-body">
+    <div v-else class="diff-body text-wrap-safe-pre">
       <template v-for="(part, i) in diffParts" :key="i">
         <del v-if="part.removed" class="removed">{{ part.value }}</del>
         <ins v-else-if="part.added" class="added">{{ part.value }}</ins>
@@ -92,8 +92,9 @@ const identical = computed(
   border-bottom: 2px solid var(--border-color, #ddd);
   border-radius: 8px 8px 0 0;
 }
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
+   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .diff-body {
-  white-space: pre-wrap;
   font-family: inherit;
 }
 .removed {

@@ -105,7 +105,7 @@ const wordDiffs = computed(() =>
         >
           <div v-for="(hunk, i) in preview.hunks" :key="hunk.operationIndex" class="hunk">
             <p class="hunk-context">…{{ hunk.contextBefore }}</p>
-            <p class="hunk-diff">
+            <p class="hunk-diff text-wrap-safe-pre">
               <template v-for="(part, j) in wordDiffs[i]" :key="j">
                 <del v-if="part.removed" class="removed">
                   <span class="marker" aria-hidden="true">−</span>
@@ -130,7 +130,7 @@ const wordDiffs = computed(() =>
           tabindex="0"
           :hidden="view !== 'full'"
         >
-          <pre>{{ preview.fullPreview }}</pre>
+          <pre class="text-wrap-safe-pre">{{ preview.fullPreview }}</pre>
         </div>
       </template>
     </template>
@@ -185,8 +185,9 @@ const wordDiffs = computed(() =>
   font-size: 0.85rem;
   margin: 0.15rem 0;
 }
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
+   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .hunk-diff {
-  white-space: pre-wrap;
   margin: 0.35rem 0;
 }
 .removed {
@@ -203,8 +204,9 @@ const wordDiffs = computed(() =>
   font-weight: 700;
   margin-right: 0.15rem;
 }
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
+   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .full-preview pre {
-  white-space: pre-wrap;
   font-family: inherit;
 }
 </style>

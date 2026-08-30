@@ -62,7 +62,7 @@ function closePreview(): void {
     <ul>
       <li v-for="edit in edits" :key="edit.id" class="edit-row" :data-status="edit.status">
         <div class="edit-summary">
-          <span class="summary-text">{{ edit.summary }}</span>
+          <span class="summary-text text-wrap-safe">{{ edit.summary }}</span>
           <span class="badge status-badge" :data-status="edit.status">{{ edit.status }}</span>
         </div>
         <div class="edit-meta">
@@ -150,6 +150,13 @@ function closePreview(): void {
   justify-content: space-between;
   gap: 0.5rem;
   font-weight: 600;
+}
+/* Fix: an LLM-generated edit summary is unbounded text sitting in `.edit-summary`'s flex row,
+   which otherwise refuses to let this span shrink below its content's intrinsic width.
+   `.text-wrap-safe`'s shared overflow-wrap handling (applied via the template class) now lives in
+   style.css; `min-width: 0` stays here since it's this flex item's own layout concern. */
+.summary-text {
+  min-width: 0;
 }
 .edit-meta {
   display: flex;

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildBranchSeedMessage,
   buildMainSeedMessage,
   deriveBranchName,
   extractSeedExcerpt,
   wrapDocumentRevision,
+  wrapHighlightedSelection,
 } from '../../src/conversation/seed-excerpt.js';
 
 /** Builds `count` blank-line-separated paragraphs, each `wordsPerParagraph` words long. */
@@ -136,5 +138,35 @@ describe('wrapDocumentRevision', () => {
   it('wraps content in matching opening/closing tags naming the revision', () => {
     const wrapped = wrapDocumentRevision(7, 'Some document content.');
     expect(wrapped).toBe('<document-revision-7>\nSome document content.\n</document-revision-7>');
+  });
+});
+
+describe('wrapHighlightedSelection', () => {
+  it('wraps content in matching opening/closing <highlighted-selection> tags', () => {
+    const wrapped = wrapHighlightedSelection('Some selected text.');
+    expect(wrapped).toBe('<highlighted-selection>\nSome selected text.\n</highlighted-selection>');
+  });
+});
+
+describe('buildBranchSeedMessage', () => {
+  it('embeds the full document (not an excerpt) and the highlighted selection in separate, distinctly-tagged blocks, then primes for the next turn', () => {
+    const documentContent = 'A'.repeat(3000); // well beyond extractSeedExcerpt's 2,000-word cap
+    const selectionText = 'The specific highlighted passage.';
+    const message = buildBranchSeedMessage(4, documentContent, selectionText);
+
+    // Full document, wrapped in the matching <document-revision-N> tag (constitution convention).
+    expect(message).toContain('<document-revision-4>\n' + documentContent + '\n</document-revision-4>');
+    // Highlighted selection, wrapped in its own distinctly-named matching tag.
+    expect(message).toContain('<highlighted-selection>\n' + selectionText + '\n</highlighted-selection>');
+
+    // Ordering: full document block precedes the highlighted-selection block.
+    expect(message.indexOf('<document-revision-4>')).toBeLessThan(message.indexOf('<highlighted-selection>'));
+
+    // Closing prose primes the agent for a follow-up user message about the highlighted passage
+    // specifically, not the whole document, without issuing an instruction itself.
+    const closingProse = message.slice(message.indexOf('</highlighted-selection>'));
+    expect(closingProse).toMatch(/next message/i);
+    expect(closingProse).toMatch(/highlighted passage/i);
+    expect(closingProse).not.toContain(documentContent);
   });
 });

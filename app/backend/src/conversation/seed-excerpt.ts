@@ -155,6 +155,17 @@ export function wrapDocumentRevision(revision: number, content: string): string 
 }
 
 /**
+ * Wraps the highlighted selection text in its own matching-tag pair, `<highlighted-selection>` —
+ * distinct from `wrapDocumentRevision`'s `<document-revision-N>` tag used for the full document —
+ * so the model can't confuse "the whole document" with "the specific passage the user selected",
+ * even though both are literal document content per the constitution's tagging convention.
+ */
+export function wrapHighlightedSelection(content: string): string {
+  const tag = 'highlighted-selection';
+  return [`<${tag}>`, content, `</${tag}>`].join('\n');
+}
+
+/**
  * Seeds a newly created Main conversation with the document under review (feature: "inject the
  * document as the first message"), mirroring `extractSeedExcerpt`'s branch-seed convention of a
  * short lead-in line followed by the content itself. Unlike a branch excerpt, this is never
@@ -166,6 +177,34 @@ export function buildMainSeedMessage(title: string, revision: number, content: s
     `Here is the document under review, "${title}" (revision ${revision}):`,
     '',
     wrapDocumentRevision(revision, content),
+  ].join('\n');
+}
+
+/**
+ * Seeds a newly-branched conversation (FR-011/FR-012) with the *full* document content — reusing
+ * `buildMainSeedMessage`'s full-document-embedding approach rather than `extractSeedExcerpt`'s
+ * around-the-selection excerpt, so the branch's agent has the same whole-document context a Main
+ * conversation gets — plus the highlighted selection the user branched from, each delimited in its
+ * own matching XML-style tag pair per the constitution's tagging convention: `<document-revision-N>`
+ * (`wrapDocumentRevision`) for the full document, and a distinctly-named `<highlighted-selection>`
+ * (`wrapHighlightedSelection`) for the passage, so the model can't mistake one block for the other.
+ * Closes by priming the agent that the *next* user message will concern the highlighted passage
+ * specifically, not the document as a whole — there is no edit instruction yet at seed time, only
+ * that context-setting for the turn to come.
+ */
+export function buildBranchSeedMessage(revision: number, documentContent: string, selectionText: string): string {
+  return [
+    `Here is the full document under review (revision ${revision}), for context:`,
+    '',
+    wrapDocumentRevision(revision, documentContent),
+    '',
+    'The user highlighted the following passage to start this conversation:',
+    '',
+    wrapHighlightedSelection(selectionText),
+    '',
+    "The next message you receive will be the user's request — an edit, or a clarification or " +
+      'discussion — about that highlighted passage specifically, not the document as a whole. ' +
+      'Wait for that message before proposing or making any changes.',
   ].join('\n');
 }
 

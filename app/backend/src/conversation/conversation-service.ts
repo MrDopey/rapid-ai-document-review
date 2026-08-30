@@ -23,7 +23,7 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
-import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt, wrapDocumentRevision } from './seed-excerpt.ts';
+import { buildBranchSeedMessage, buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
 
@@ -219,9 +219,12 @@ export class ConversationService {
 
   /**
    * Branches a new conversation from a document selection or from another conversation
-   * (FR-011/FR-013). The seed excerpt (FR-012) is delivered as the branch's first message via the
-   * ordinary `send()` path — it appears in the transcript and can be folded into a parent's
+   * (FR-011/FR-013). The branch seed message — the full document plus the highlighted selection
+   * (FR-012), built by `buildBranchSeedMessage` — is delivered as the branch's first message via
+   * the ordinary `send()` path — it appears in the transcript and can be folded into a parent's
    * summary later (FR-034) — rather than as a system prompt or a side-channel into Pi.
+   * `extractSeedExcerpt` is still used below, but only to derive the branch's name (the nearest
+   * enclosing section heading), not to build the seed message itself.
    */
   branch(request: CreateConversationRequest): ConversationDto {
     const parent = this.getConversationOrThrow(request.parentConversationId);
@@ -244,12 +247,15 @@ export class ConversationService {
 
     let seedSelection: SeedSelection | null = null;
     let seedExcerpt = '';
+    let documentContent = '';
     if (request.selection) {
-      const content = this.automerge.get().getContent();
+      documentContent = this.automerge.get().getContent();
       const { from, to } = request.selection;
-      const text = content.slice(from, to);
+      const text = documentContent.slice(from, to);
       seedSelection = { from, to, text };
-      seedExcerpt = extractSeedExcerpt(content, from, to);
+      // Used only for `deriveBranchName`'s heading search below — the seed message itself now
+      // embeds the full `documentContent`, not this excerpt (see `buildBranchSeedMessage`).
+      seedExcerpt = extractSeedExcerpt(documentContent, from, to);
     }
 
     const name = request.name ?? (seedSelection ? deriveBranchName(seedExcerpt, seedSelection.text) : 'Branch');
@@ -286,14 +292,7 @@ export class ConversationService {
     });
 
     const seedMessage = seedSelection
-      ? [
-          `Here is the passage this conversation was branched from (document v${document.currentRevision}):`,
-          '',
-          wrapDocumentRevision(document.currentRevision, seedExcerpt),
-          '',
-          `Highlighted selection:`,
-          wrapDocumentRevision(document.currentRevision, seedSelection.text),
-        ].join('\n')
+      ? buildBranchSeedMessage(document.currentRevision, documentContent, seedSelection.text)
       : `This conversation was branched from "${parent.name}".`;
 
     // Fire-and-forget: POST /api/conversations returns as soon as the conversation exists

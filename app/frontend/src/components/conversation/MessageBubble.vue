@@ -34,7 +34,7 @@ const safeReasoning = computed(() =>
       <div class="reasoning-content" v-html="safeReasoning"></div>
     </details>
 
-    <div class="message-text" v-html="safeText"></div>
+    <div class="message-text text-wrap-safe" v-html="safeText"></div>
   </article>
 </template>
 
@@ -67,32 +67,9 @@ const safeReasoning = computed(() =>
   color: var(--neutral-muted-color, #4b5563);
   margin-bottom: 0.25rem;
 }
-/* Fix: rendered Markdown (linkify'd URLs, long fenced-code lines, or any other unbroken run of
-   text) has no natural break point, so without this it overflowed straight past the bubble's box
-   instead of wrapping to fit — same failure shape, and same fix, as `.error-banner-message` in
-   ConversationView.vue. `.message-bubble`/`.message-list` are plain block boxes here (not flex/grid
-   items), so — unlike that flex-item case — no `min-width: 0` is needed to let anything shrink;
-   `overflow-wrap` alone is what's missing, and it's inherited by every descendant (links, list
-   items, blockquotes, …) so linkify'd `<a>` text wraps too. */
-.message-text {
-  overflow-wrap: break-word;
-}
-/* Fenced code blocks: `<pre>` (and inline `<code>`) come from markdown-it with the browser's
-   default `white-space: pre` and no break points, so a long code line — or an inline code span —
-   overflowed the bubble the same way long prose did. `pre-wrap` wraps at normal break
-   opportunities first; `overflow-wrap: break-word` (also set directly on `code` for the inline
-   case) additionally breaks an unbroken run — e.g. a long hash/identifier — that has none.
-   `overflow-x: auto` is kept as a fallback so an unbreakable run still scrolls inside the code
-   block rather than escaping it. */
-.message-text :deep(pre) {
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-}
-.message-text :deep(code) {
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
+/* `.text-wrap-safe`'s shared overflow-wrap/pre/code handling now lives in style.css —
+   `.message-bubble`/`.message-list` are plain block boxes here (not flex/grid items), so no
+   `min-width: 0` is needed to let anything shrink; `overflow-wrap` alone was what was missing. */
 /* Fix 5: embedded Markdown headings (e.g. a branch-seed excerpt's own section heading) must not
    render at full document size inside a ~350px-wide chat bubble — that crowds out the message. */
 .message-text :deep(h1) {

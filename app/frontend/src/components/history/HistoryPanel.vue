@@ -93,10 +93,10 @@ async function onCopy(revision: number): Promise<void> {
             {{ entry.reconcilable ? 'Still applies' : 'No longer applies' }}
           </span>
           <template v-if="describeProposal(entry.stagedEditId)">
-            <span class="summary-text">{{ describeProposal(entry.stagedEditId)!.summary }}</span>
-            <span class="conversation-name">({{ describeProposal(entry.stagedEditId)!.conversationName }})</span>
+            <span class="summary-text text-wrap-safe">{{ describeProposal(entry.stagedEditId)!.summary }}</span>
+            <span class="conversation-name text-wrap-safe">({{ describeProposal(entry.stagedEditId)!.conversationName }})</span>
           </template>
-          <span v-else class="summary-text">Proposal {{ entry.stagedEditId.slice(0, 12) }}…</span>
+          <span v-else class="summary-text text-wrap-safe">Proposal {{ entry.stagedEditId.slice(0, 12) }}…</span>
         </li>
       </ul>
     </div>
@@ -105,10 +105,10 @@ async function onCopy(revision: number): Promise<void> {
         <div class="history-entry-header">
           <strong>v{{ rev.revision }}</strong>
           <span class="badge" :data-source="rev.source">{{ rev.source }}</span>
-          <span class="origin">{{ rev.origin }}</span>
+          <span class="origin text-wrap-safe">{{ rev.origin }}</span>
         </div>
-        <div v-if="rev.conversationName" class="conversation-name">{{ rev.conversationName }}</div>
-        <div v-if="rev.note" class="note">{{ rev.note }}</div>
+        <div v-if="rev.conversationName" class="conversation-name text-wrap-safe">{{ rev.conversationName }}</div>
+        <div v-if="rev.note" class="note text-wrap-safe">{{ rev.note }}</div>
         <time :datetime="rev.createdAt">{{ formatLocal(rev.createdAt) }}</time>
         <div class="actions">
           <button type="button" @click="onRestore(rev.revision)">Restore</button>
@@ -165,6 +165,21 @@ async function onCopy(revision: number): Promise<void> {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+/* Fix: this entire style block previously had no overflow-wrap/min-width:0 at all, so an
+   LLM-generated edit summary, a user-entered conversation name, or a `rev.note` revision note
+   could overflow this fixed-width panel. `.text-wrap-safe`'s shared overflow-wrap handling
+   (applied via the template class) now lives in style.css; `min-width: 0` is set here since
+   `.summary-text`/`.conversation-name`/`.origin` sit inside flex rows
+   (`.reconciliation-list li`/`.history-entry-header`) that would otherwise refuse to let them
+   shrink below their content's intrinsic width — harmless on `.note` and the block-level
+   `.conversation-name` div, neither of which is a flex item, since a plain block element's own
+   default min-width is already 0. */
+.summary-text,
+.conversation-name,
+.note,
+.origin {
+  min-width: 0;
 }
 .actions {
   display: flex;
