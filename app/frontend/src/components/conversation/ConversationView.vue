@@ -432,8 +432,8 @@ async function onRequestReview(): Promise<void> {
     <div v-if="conversation?.status !== 'closed'" class="input-area">
       <div v-if="!directEditHintDismissed" class="composer-hint">
         <span>
-          Tip: highlight text in the document and click "Start conversation from selection" to get
-          a reviewable edit proposal instead of a direct answer.
+          Tip: highlight text in the document and click "Branch (Main)" (Alt+Shift+S) to get a
+          reviewable edit proposal instead of a direct answer.
         </span>
         <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
           Got it

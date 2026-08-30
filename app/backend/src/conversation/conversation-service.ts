@@ -137,6 +137,7 @@ export class ConversationService {
       contextRevision: document.currentRevision,
       branchDepth: 0,
       seedSelection: null,
+      forkedFromMessageId: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -201,7 +202,9 @@ export class ConversationService {
     const page = this.storage.listConversations(documentId, options);
     return {
       currentRevision: document.currentRevision,
-      conversations: page.items.map((row) => toConversationDto(this.storage, row, document.currentRevision)),
+      conversations: page.items.map((row) =>
+        toConversationDto(this.storage, row, document.currentRevision, this.automerge.get().getContent()),
+      ),
       nextCursor: page.nextCursor,
     };
   }
@@ -211,7 +214,7 @@ export class ConversationService {
     const document = this.storage.getDocument();
     if (!document) throw new DocumentNotFoundError('Document not found');
     return {
-      conversation: toConversationDto(this.storage, conversation, document.currentRevision),
+      conversation: toConversationDto(this.storage, conversation, document.currentRevision, this.automerge.get().getContent()),
       messages: this.buildMessages(conversationId),
       stagedEdits: this.storage.listStagedEditsByConversation(conversationId).map(toStagedEditDto),
     };
@@ -219,12 +222,25 @@ export class ConversationService {
 
   /**
    * Branches a new conversation from a document selection or from another conversation
-   * (FR-011/FR-013). The branch seed message — the full document plus the highlighted selection
-   * (FR-012), built by `buildBranchSeedMessage` — is delivered as the branch's first message via
-   * the ordinary `send()` path — it appears in the transcript and can be folded into a parent's
-   * summary later (FR-034) — rather than as a system prompt or a side-channel into Pi.
-   * `extractSeedExcerpt` is still used below, but only to derive the branch's name (the nearest
-   * enclosing section heading), not to build the seed message itself.
+   * (FR-011/FR-013). Unlike `ensureMain`'s/`review()`'s seed messages, a branch defaults to never
+   * auto-sending anything and never starting an agent turn (005-canvas-conversation-threads): it
+   * persists with zero messages, a truly empty placeholder, and it is up to the user to send its
+   * first message. `extractSeedExcerpt` is still used below, but only to derive the branch's name
+   * (the nearest enclosing section heading).
+   *
+   * `request.includeSeedMessage` (the toolbar's second "Branch + seed text" button/Alt+Shift+S,
+   * distinct from the default "Branch"/Alt+Shift+C path) opts back into the pre-canvas behavior for
+   * a selection-anchored branch only: `buildBranchSeedMessage`'s full-document-plus-highlight
+   * excerpt is delivered as the branch's first message via the ordinary `send()` path, exactly as
+   * it used to be delivered unconditionally before this flag existed. It is meaningless (and
+   * ignored) without a `selection` — the message-context "Branch this conversation" path never sets
+   * it.
+   *
+   * Instead of a seed message, a branch created from within a conversation (no `selection` given)
+   * carries `forkedFromMessageId`: the id of the parent's last message at the point of branching —
+   * a message-level fork anchor distinct from `seedSelection`'s document character-range anchor.
+   * A selection-anchored branch has no message context, so `forkedFromMessageId` stays `null`
+   * there.
    */
   branch(request: CreateConversationRequest): ConversationDto {
     const parent = this.getConversationOrThrow(request.parentConversationId);
@@ -263,6 +279,12 @@ export class ConversationService {
     const id = newId('conv');
     const piSessionPath = join(dirname(parent.piSessionPath), `${id}.jsonl`);
 
+    // Message-level fork anchor (005-canvas-conversation-threads): populated only when the branch
+    // was created from within a conversation (no `selection` given) — the id of the parent's last
+    // message at the point of branching. A selection-anchored branch has no message context, so
+    // this stays `null` (the document excerpt in `seedSelection` is its anchor instead).
+    const forkedFromMessageId = request.selection ? null : (this.buildMessages(parent.id).at(-1)?.id ?? null);
+
     const row = this.storage.createConversation({
       id,
       documentId: document.id,
@@ -276,6 +298,7 @@ export class ConversationService {
       contextRevision: document.currentRevision,
       branchDepth,
       seedSelection,
+      forkedFromMessageId,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -289,26 +312,32 @@ export class ConversationService {
       branchDepth: row.branchDepth,
       contextRevision: row.contextRevision,
       seedSelection: row.seedSelection,
+      forkedFromMessageId: row.forkedFromMessageId,
     });
 
-    const seedMessage = seedSelection
-      ? buildBranchSeedMessage(document.currentRevision, documentContent, seedSelection.text)
-      : `This conversation was branched from "${parent.name}".`;
+    // A branch persists as a truly empty placeholder by default — zero messages, no agent turn
+    // ever started (005-canvas-conversation-threads) — unless the caller opted into
+    // `includeSeedMessage` for a selection-anchored branch (the toolbar's "Branch + seed text"
+    // button/Alt+Shift+S), in which case the pre-canvas seed message is restored below.
+    if (request.includeSeedMessage && seedSelection) {
+      const seedMessage = buildBranchSeedMessage(document.currentRevision, documentContent, seedSelection.text);
+      // Fire-and-forget: POST /api/conversations returns as soon as the conversation exists
+      // (http-api.md); the seed turn's progress/failure surfaces entirely over the event stream,
+      // same as any other send (agent-tools.md, FR-037). `publishUserMessage` inside `send()` still
+      // runs synchronously before the first `await`, so the message is already present in the
+      // conversation's history by the time this function returns.
+      void this.send(row.id, seedMessage).catch((err) => {
+        // `event: 'agent_error'` — matches the frame PiService.send() already published for this
+        // same failure via the bridge before rethrowing (FR-042); logged again here only because
+        // this call site knows it was specifically the branch seed message.
+        logger.warn(
+          { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
+          'failed to deliver branch seed message',
+        );
+      });
+    }
 
-    // Fire-and-forget: POST /api/conversations returns as soon as the conversation exists
-    // (http-api.md); the seed turn's progress/failure surfaces entirely over the event stream,
-    // same as any other send (agent-tools.md, FR-037).
-    void this.send(row.id, seedMessage).catch((err) => {
-      // `event: 'agent_error'` — matches the frame PiService.send() already published for this
-      // same failure via the bridge before rethrowing (FR-042); logged again here only because
-      // this call site knows it was specifically the branch seed message.
-      logger.warn(
-        { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
-        'failed to deliver branch seed message',
-      );
-    });
-
-    return toConversationDto(this.storage, row, document.currentRevision);
+    return toConversationDto(this.storage, row, document.currentRevision, documentContent || this.automerge.get().getContent());
   }
 
   /**
@@ -529,6 +558,7 @@ export class ConversationService {
       contextRevision: document.currentRevision,
       branchDepth: 0,
       seedSelection: null,
+      forkedFromMessageId: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -542,6 +572,7 @@ export class ConversationService {
       branchDepth: row.branchDepth,
       contextRevision: row.contextRevision,
       seedSelection: row.seedSelection,
+      forkedFromMessageId: row.forkedFromMessageId,
     });
 
     const seedMessage = [
@@ -564,7 +595,7 @@ export class ConversationService {
     });
 
     return {
-      conversation: toConversationDto(this.storage, row, document.currentRevision),
+      conversation: toConversationDto(this.storage, row, document.currentRevision, this.automerge.get().getContent()),
       reviewedConversationIds,
     };
   }

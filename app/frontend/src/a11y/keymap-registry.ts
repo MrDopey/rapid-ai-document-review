@@ -13,7 +13,7 @@ export interface KeyboardShortcut {
   keys: string;
   description: string;
   /** Where the shortcut is active. */
-  scope: 'Document editor' | 'Conversation composer' | 'Dialogs' | 'Conversation list';
+  scope: 'Document editor' | 'Conversation composer' | 'Dialogs' | 'Conversation list' | 'Global';
 }
 
 export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
@@ -24,7 +24,14 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   },
   {
     keys: 'Alt+Shift+C',
-    description: 'Start a conversation branch from the current editor selection.',
+    description: '"Branch (New)": start a conversation branch from the current editor selection, with an empty transcript.',
+    scope: 'Document editor',
+  },
+  {
+    keys: 'Alt+Shift+S',
+    description:
+      '"Branch (Main)": start a conversation branch from the current editor selection, seeded with the ' +
+      'document and the selection as its first message.',
     scope: 'Document editor',
   },
   {
@@ -84,5 +91,26 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
       'Select the previous conversation in the conversation list, within the current filter (active-only or ' +
       'all). Wraps to the last conversation from the first.',
     scope: 'Conversation list',
+  },
+  {
+    keys: 'Ctrl+Alt+P',
+    description:
+      'Dismiss the Primary conversation notice, matching the "Dismiss" button — a one-shot action, not a ' +
+      'toggle. Works from anywhere except the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
+  {
+    keys: 'Ctrl+Alt+R',
+    description:
+      'Toggle "Show reasoning" for new agent responses. Works from anywhere except the document editor, the ' +
+      'composer, or an open dialog.',
+    scope: 'Global',
+  },
+  {
+    keys: 'Ctrl+Alt+H',
+    description:
+      'Open or close the History panel. Works from anywhere except the document editor, the composer, or an ' +
+      'open dialog.',
+    scope: 'Global',
   },
 ] as const;

@@ -98,6 +98,7 @@ function createBranch(storage: StorageAdapter, documentId: string, parentId: str
     contextRevision,
     branchDepth: 1,
     seedSelection: null,
+    forkedFromMessageId: null,
     createdAt: now,
     updatedAt: now,
     closedAt: null,

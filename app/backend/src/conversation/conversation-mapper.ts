@@ -6,6 +6,7 @@ export function toConversationDto(
   storage: StorageAdapter,
   row: ConversationRow,
   currentRevision: number,
+  documentContent: string,
 ): ConversationDto {
   const settings = storage.getSettings();
   const pendingEditCount = storage
@@ -29,5 +30,8 @@ export function toConversationDto(
     createdAt: row.createdAt,
     closedAt: row.closedAt,
     readOnly: row.status === 'closed',
+    seedSelection: row.seedSelection,
+    forkedFromMessageId: row.forkedFromMessageId,
+    anchorOrphaned: row.seedSelection !== null && documentContent.slice(row.seedSelection.from, row.seedSelection.to) !== row.seedSelection.text,
   };
 }

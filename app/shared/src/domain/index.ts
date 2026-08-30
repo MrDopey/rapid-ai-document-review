@@ -44,6 +44,11 @@ export interface Conversation {
   contextRevision: number;
   branchDepth: number;
   seedSelection: ConversationSeedSelection | null;
+  /** The id of the parent conversation's last message at the point of branching, when this
+   *  branch was created from within a conversation (no `selection` given). `null` for Main, for
+   *  a review conversation, and for a branch created from a document `selection` — that anchor
+   *  mechanism is `seedSelection` instead (005-canvas-conversation-threads). */
+  forkedFromMessageId: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -54,6 +59,10 @@ export interface Conversation {
   canBranch: boolean;
   pendingEditCount: number;
   readOnly: boolean;
+  /** `false` when `seedSelection` is null; otherwise true once the document's current content at
+   *  that range no longer matches the text recorded at branch time (contracts/conversation-anchor.md,
+   *  005-canvas-conversation-threads). */
+  anchorOrphaned: boolean;
 }
 
 export type StagedEditStatus = 'pending' | 'applied' | 'dropped' | 'superseded';

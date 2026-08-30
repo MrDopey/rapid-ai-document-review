@@ -188,6 +188,7 @@ export class DocumentService {
       contextRevision: revisionRow.revision,
       branchDepth: 0,
       seedSelection: null,
+      forkedFromMessageId: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -203,7 +204,7 @@ export class DocumentService {
     return {
       document: toDocumentDto({ ...documentRow, currentRevision: revisionRow.revision }),
       content,
-      mainConversation: toConversationDto(this.storage, mainConversationRow, revisionRow.revision),
+      mainConversation: toConversationDto(this.storage, mainConversationRow, revisionRow.revision, content),
     };
   }
 

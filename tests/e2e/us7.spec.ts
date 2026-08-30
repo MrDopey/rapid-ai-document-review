@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { focusExclusively } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us5.spec.ts for the same convention. US7's fold-summary flow needs no directive of its own:
@@ -6,6 +7,12 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
 // standard deterministic echo ("Here is a fake deterministic answer to: ..."), which is what makes
 // the synopsis content assertable below without any live model.
 const BRANCH_SHORTCUT = 'Alt+Shift+C';
+// 005-canvas-conversation-threads: branching no longer sends a seed message by default (a branch
+// persists as a truly empty placeholder — see conversation-service.ts's `branch()` doc comment).
+// Alt+Shift+S (`includeSeedMessage: true`) explicitly restores the old seed-message behavior for
+// callers that still need it — used below only where a real seed message (and thus a `.seed-card`)
+// is the point of the assertion (step 2 of the first test).
+const BRANCH_WITH_SEED_SHORTCUT = 'Alt+Shift+S';
 
 const MARKERS = {
   foldTarget: 'US7-MARKER-FOLD: This sentence anchors the fold-summary branch target.',
@@ -97,10 +104,13 @@ async function waitIdle(page: Page): Promise<void> {
   );
 }
 
-/** Selects `name`'s row in the HUD, regardless of which conversation is currently open. */
+/** Selects `name`'s row in the HUD, regardless of which conversation(s) are currently open.
+ *  005-canvas-conversation-threads (multi-focus overlay): a row click now toggles that
+ *  conversation's own focus (add/remove) rather than replacing whichever one was previously open,
+ *  so this closes every other open panel first via `focusExclusively` — this file's assertions
+ *  throughout assume exactly one detail panel (`name`'s) is open afterward. */
 async function selectConversation(page: Page, name: string): Promise<void> {
-  await page.locator('.hud-panel .conversation-row', { hasText: name }).click();
-  await expect(page.locator('.conversation-header h2')).toHaveText(name);
+  await focusExclusively(page, page.locator('.hud-panel .conversation-row', { hasText: name }), name);
 }
 
 /** Branches from the line containing `markerText`, selected via the keyboard (FR-043a), and
@@ -109,8 +119,16 @@ async function selectConversation(page: Page, name: string): Promise<void> {
  *  the shared `npm run test:e2e` process), the document is long enough that CodeMirror's
  *  virtualized rendering has not put these markers — appended at the very end — into the DOM yet.
  *  `Control+End` moves the caret to the document end and scrolls it into view first, a standard
- *  keyboard-only editor command, which renders the tail lines this spec's markers live in. */
-async function branchFromMarker(page: Page, markerText: string, expectedName: string): Promise<void> {
+ *  keyboard-only editor command, which renders the tail lines this spec's markers live in.
+ *  `includeSeedMessage` (005-canvas-conversation-threads, default false, matching the empty-
+ *  placeholder branch default) selects `BRANCH_WITH_SEED_SHORTCUT` instead, for the one caller
+ *  below that specifically needs a real seed message. */
+async function branchFromMarker(
+  page: Page,
+  markerText: string,
+  expectedName: string,
+  includeSeedMessage = false,
+): Promise<void> {
   await page.locator('.editor-host').click();
   await page.keyboard.press('Control+End');
   const line = page.locator('.cm-line', { hasText: markerText });
@@ -118,7 +136,7 @@ async function branchFromMarker(page: Page, markerText: string, expectedName: st
   await line.click();
   await page.keyboard.press('Home');
   await page.keyboard.press('Shift+End');
-  await page.keyboard.press(BRANCH_SHORTCUT);
+  await page.keyboard.press(includeSeedMessage ? BRANCH_WITH_SEED_SHORTCUT : BRANCH_SHORTCUT);
 
   await expect(page.locator('.conversation-header h2')).toHaveText(expectedName, { timeout: 10_000 });
   await waitIdle(page);
@@ -136,7 +154,11 @@ test.describe('US7 — Review closed conversations', () => {
 
     await test.step('branch a conversation to close with a fold summary (FR-011)', async () => {
       branchName = 'US7 Fold Target';
-      await branchFromMarker(page, 'US7-MARKER-FOLD', branchName);
+      // `includeSeedMessage: true` (Alt+Shift+S) — step 2 below asserts the seed card survives
+      // close/reopen, which needs a real seed message to exist in the first place (the plain
+      // Alt+Shift+C default branch persists with zero messages of its own — see
+      // conversation-service.ts's `branch()`).
+      await branchFromMarker(page, 'US7-MARKER-FOLD', branchName, true);
     });
 
     await test.step('1. closing with "Fold summary" checked eventually delivers a compact summary into the parent (FR-034, FR-034a)', async () => {

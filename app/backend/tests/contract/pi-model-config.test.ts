@@ -112,6 +112,7 @@ function buildHarness(mods: Awaited<ReturnType<typeof loadFresh>>) {
     contextRevision: 1,
     branchDepth: 1,
     seedSelection: null,
+    forkedFromMessageId: null,
     createdAt: now,
     updatedAt: now,
     closedAt: null,

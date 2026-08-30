@@ -83,6 +83,9 @@ export interface ConversationRow {
   contextRevision: number;
   branchDepth: number;
   seedSelection: SeedSelection | null;
+  /** Message-level fork anchor (005-canvas-conversation-threads) — see `Conversation.forkedFromMessageId`
+   *  in the shared domain model for the full contract. */
+  forkedFromMessageId: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;

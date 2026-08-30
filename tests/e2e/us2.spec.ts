@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { focusExclusively } from './test-utils.js';
 
 // The backend runs with RADR_BE_PI_FAKE_SESSIONS=1 (playwright.config.ts) since no live model provider
 // credential is available in this environment (quickstart.md: agent scenarios otherwise fail
@@ -22,9 +23,13 @@ test.describe('US2 — ask the main conversation about the document', () => {
       await expect(page.locator('.toolbar h1')).toBeVisible();
     });
 
-    await test.step('Main is visible in the HUD and selected by default (FR-009)', async () => {
+    await test.step('Main is visible in the HUD; clicking its row focuses its detail view (FR-009)', async () => {
       await expect(page.getByRole('navigation', { name: 'Conversations' })).toBeVisible();
-      await expect(page.locator('.conversation-header h2')).toHaveText('Main', { timeout: 10_000 });
+      // 005-canvas-conversation-threads (multi-focus overlay): Main is no longer auto-focused on
+      // load — the old single-scalar `selectedConversationId` used to default to Main via a watcher
+      // that this feature removed outright with no replacement, so its detail view (and composer)
+      // doesn't exist until a HUD row is actually clicked.
+      await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }), 'Main');
     });
 
     await test.step('ask Main a question -> a streamed, grounded answer appears (FR-010, SC-001)', async () => {

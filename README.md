@@ -28,6 +28,34 @@ The application, not Pi, is authoritative for document content, revisions, and e
 
 ---
 
+## UI Layout
+
+The main screen is three columns, left to right: **Preview | Canvas | History** (History only takes
+up a column while open). The document itself renders as a floating page inside the Canvas column,
+which pans with native browser scroll (mouse wheel, trackpad, or keyboard arrow/Page Up/Page Down
+once focused) — there is no zoom in this version.
+
+Each conversation renders as a compact box colocated with the document: Main anchors to the top of
+the document, and a conversation branched from a highlighted passage anchors at that passage's
+vertical position. Branching a conversation renders the new branch one column further out from the
+document per level of branch depth, so the whole structure reads left-to-right as a tree; two
+branches off the same parent stack vertically with a visible gap rather than overlapping. Each
+message in a conversation defaults to a capped height with its own expand/collapse control, plus a
+per-conversation control to expand or collapse every message in that conversation at once. Opening
+a conversation's full detail view (composing a message, closing, requesting review, viewing
+proposed edits) is reached from its compact box and reuses the same conversation detail view as
+before this layout change.
+
+The HUD lives in the top toolbar row (document title on the left, existing undo/redo/shortcuts/help
+controls on the right), always visible, listing every conversation ordered by its anchor's distance
+from the top of the document (Main always first); clicking an entry scrolls that conversation's box
+into view.
+
+Preview's own rendering/behavior and the History panel are unchanged by this layout — only their
+column position shifted to make room for the Canvas.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Notes |

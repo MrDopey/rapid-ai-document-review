@@ -1,42 +1,60 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
-import { ApiError } from '../../transport/http-client.js';
-import type { PrimaryWhenBusy } from '@rapid-ai-document-review/shared/contracts/http';
-import { useFocusTrap } from '../../a11y/focus-manager.js';
+import { orderConversationsByAnchor } from '../canvas/conversationLayout.js';
 
-const props = defineProps<{ selectedId: string | null }>();
-const emit = defineEmits<{ (e: 'select', id: string): void }>();
+// 005-canvas-conversation-threads: the "active"/"all" filter used to be purely local to this
+// panel — now `DocumentCanvas.vue` needs the exact same filter to decide which conversations get
+// laid out on the canvas (Phase 4/US2's T023 handoff note: filtering the array that reaches
+// `computeConversationLayout` is the entire integration point for reflow-on-hide), so the filter
+// itself is lifted to `App.vue` and passed down here as a controlled prop instead of local state.
+export type ConversationFilter = 'active' | 'all';
+
+// 005-canvas-conversation-threads (multi-focus overlay): `selectedId`/`select` (a single scalar,
+// "which one conversation's detail view is open") were replaced by App.vue's
+// `focusedConversationIds: Set<string>` (which of possibly several conversations currently have an
+// open detail panel — row click is now a toggle, see `onRowClick` below) plus a separate
+// `activeId` scalar ("last-interacted" — still exactly one at a time, backing this panel's own
+// Make-Primary/Clear-Primary targeting and row highlight/`aria-current`, and driving which panel's
+// focus-trap is active in App.vue). `focusCap` is the live per-viewport cap (App.vue's
+// `useFocusCap`) purely so a row that would exceed it can render its own disabled-looking
+// affordance with the right "max N" number.
+
+const props = defineProps<{
+  activeId: string | null;
+  focusedIds: ReadonlySet<string>;
+  filter: ConversationFilter;
+  focusCap: number;
+}>();
+const emit = defineEmits<{
+  (e: 'toggle-focus', id: string): void;
+  (e: 'cycle-focus', id: string): void;
+  (e: 'update:filter', value: ConversationFilter): void;
+}>();
 const store = useConversationsStore();
 
-/** FR-029: the target/current-Primary-busy warning, offering exactly the three `whenBusy`
- *  choices — set only while a designation request is awaiting the user's decision. */
-const busyPrompt = ref<{ conversationId: string; currentPrimaryId: string | null; busyConversationId: string } | null>(
-  null,
-);
-const primaryError = ref<string | null>(null);
-const primaryBusyId = ref<string | null>(null);
-const busyDialogEl = ref<HTMLElement | null>(null);
-
-const primaryConversation = computed(() => store.conversations.find((c) => c.isPrimary) ?? null);
-const hasPrimary = computed(() => primaryConversation.value !== null);
-const busyDialogOpen = computed(() => busyPrompt.value !== null);
-
-// Conversation-list filter (new): "active" hides closed conversations, which otherwise stay in
-// `store.conversations` forever with no way to get them out of the way. Local component state per
-// the feature's own steer — nothing else in the app needs to know which mode is in effect.
-// Defaults to "all" — identical to this list's previous (unconditional) behavior — so the filter
-// is purely opt-in and nothing already relying on closed conversations staying visible/selectable
-// (e.g. tests/e2e/us7.spec.ts re-selecting a just-closed conversation from this list) changes
-// unless the user actually toggles it.
-type ConversationFilter = 'active' | 'all';
-const filter = ref<ConversationFilter>('all');
+// Conversation-list filter: "active" hides closed conversations, which otherwise stay in
+// `store.conversations` forever with no way to get them out of the way. Now a controlled prop
+// (see the `ConversationFilter` export above) rather than local state, since `DocumentCanvas.vue`
+// needs the same predicate. Defaults to "all" in `App.vue` — identical to this list's original
+// (unconditional) behavior — so the filter is purely opt-in and nothing already relying on closed
+// conversations staying visible/selectable (e.g. tests/e2e/us7.spec.ts re-selecting a just-closed
+// conversation from this list) changes unless the user actually toggles it.
 function toggleFilter(): void {
-  filter.value = filter.value === 'active' ? 'all' : 'active';
+  emit('update:filter', props.filter === 'active' ? 'all' : 'active');
 }
 const filteredConversations = computed(() =>
-  filter.value === 'active' ? store.conversations.filter((c) => c.status !== 'closed') : store.conversations,
+  props.filter === 'active' ? store.conversations.filter((c) => c.status !== 'closed') : store.conversations,
 );
+
+// 005-canvas-conversation-threads/US4 (T032, data-model.md's "HUD ordering"): shared with App.vue's
+// stack of simultaneously-focused detail panels (multi-focus overlay) via `orderConversationsByAnchor`
+// in `conversationLayout.ts` — see that function's own doc comment for the full ordering rules. Kept
+// as a single shared implementation rather than reimplemented per-caller so the two can never disagree.
+const orderedConversations = computed(() => {
+  const byId = new Map(store.conversations.map((c) => [c.id, c]));
+  return orderConversationsByAnchor(filteredConversations.value, byId);
+});
 
 // New: Alt+A/J/K conversation-list hotkeys (toggle filter, next/prev selection), operating on
 // whichever list `filteredConversations` currently is. Kept local to HudPanel — rather than a
@@ -58,14 +76,18 @@ function isEditingContext(event: KeyboardEvent): boolean {
   return target.isContentEditable;
 }
 
-/** Moves `selectedId` to the conversation `offset` positions away from the current one within
- *  `filteredConversations` (wrapping around), emitting `select` exactly as clicking a row does. */
-function selectByOffset(offset: number): void {
-  const list = filteredConversations.value;
+/** Moves `activeId` to the conversation `offset` positions away from the current one within
+ *  `orderedConversations` (wrapping around). Emits the distinct `cycle-focus` event (not
+ *  `toggle-focus`) — this is deliberately a "replace the currently-active panel with this one"
+ *  cursor move (App.vue's `replaceFocus`), not an add/remove toggle: repeatedly pressing
+ *  Ctrl+Alt+J should keep *browsing* one conversation at a time exactly as before this feature,
+ *  not pile up new focused panels until the cap is hit. */
+function cycleByOffset(offset: number): void {
+  const list = orderedConversations.value;
   if (list.length === 0) return;
-  const currentIndex = list.findIndex((c) => c.id === props.selectedId);
+  const currentIndex = list.findIndex((c) => c.id === props.activeId);
   const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + list.length) % list.length;
-  emit('select', list[nextIndex]!.id);
+  emit('cycle-focus', list[nextIndex]!.id);
 }
 
 /** Alt+A: toggle active-only/all — unchanged, and confirmed still fine (see below).
@@ -95,12 +117,12 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   }
   if (event.altKey && event.ctrlKey && event.code === 'KeyJ') {
     event.preventDefault();
-    selectByOffset(1);
+    cycleByOffset(1);
     return;
   }
   if (event.altKey && event.ctrlKey && event.code === 'KeyK') {
     event.preventDefault();
-    selectByOffset(-1);
+    cycleByOffset(-1);
   }
 }
 
@@ -109,18 +131,19 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 const PRIMARY_EXPLANATION =
   'Edits from this conversation apply to the document automatically, with no review step.';
 
-// FR-007g: a one-time, dismissible inline notice the first time a user sees a Primary badge —
-// after that it stays out of the way; the tooltip above remains available on demand.
-const PRIMARY_NOTICE_KEY = 'raidr:primaryNoticeDismissed';
-const primaryNoticeDismissed = ref(localStorage.getItem(PRIMARY_NOTICE_KEY) === '1');
-function dismissPrimaryNotice(): void {
-  primaryNoticeDismissed.value = true;
-  localStorage.setItem(PRIMARY_NOTICE_KEY, '1');
+/** 005-canvas-conversation-threads (multi-focus overlay): a row's `title` — Primary's existing
+ *  explanation stays first-class; a row that would exceed the live focus cap (not already
+ *  focused, and the set is already at `focusCap`) also names *why* clicking it won't do anything
+ *  right now, exactly like `ConversationThreadBox.vue`'s own Focus button (never a bare disabled
+ *  control with no explanation). Clicking it still emits `toggle-focus` regardless — App.vue's own
+ *  toggle guards the actual no-op, this is purely the affordance. */
+function rowTitle(conv: { id: string; isPrimary: boolean }): string | undefined {
+  const atCap = !props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap;
+  const capReason = atCap ? `Un-focus another conversation first (max ${props.focusCap})` : null;
+  const primaryReason = conv.isPrimary ? `Primary conversation — ${PRIMARY_EXPLANATION}` : null;
+  if (capReason && primaryReason) return `${capReason}. ${primaryReason}`;
+  return capReason ?? primaryReason ?? undefined;
 }
-
-// FR-043d: opening the busy-switch warning moves focus to its first choice; Escape (or Cancel)
-// returns focus to the "Make Primary" button that triggered it.
-useFocusTrap(busyDialogEl, busyDialogOpen, { onEscape: () => void resolveBusyPrompt('cancel') });
 
 onMounted(() => {
   if (!store.loaded) void store.load();
@@ -129,159 +152,47 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeydown);
 });
-
-function conversationName(id: string | null): string {
-  if (!id) return 'none';
-  return store.conversations.find((c) => c.id === id)?.name ?? id;
-}
-
-// Fix (primary-action placement): "Make Primary" used to be a per-row button next to every
-// conversation's title. Per feedback it shouldn't compete for attention on every single row — it
-// now lives colocated with "Clear Primary" in the summary/header area instead, contextually
-// targeting whichever conversation is currently *selected* (so choosing a row and then acting on
-// it reads the same way selection drives every other per-conversation action in this panel).
-const selectedConversation = computed(() => store.conversations.find((c) => c.id === props.selectedId) ?? null);
-const canMakeSelectedPrimary = computed(() => {
-  const conv = selectedConversation.value;
-  return conv !== null && !conv.isPrimary && conv.status !== 'closed';
-});
-
-// Fix (no layout jump): the "Make Primary" button used to pop in/out (`v-if="canMakeSelectedPrimary"`)
-// as the user browsed different conversations, reflowing `.primary-summary`. It now always renders
-// and is `disabled` instead — `canMakeSelectedPrimary` still drives eligibility, just repurposed to
-// feed `disabled` rather than `v-if`. A disabled button with no explanation is unhelpful, so
-// `makePrimaryTitle` below picks the single most relevant reason (unselected > already-primary >
-// closed > errored) to surface as both `title` and `aria-label`.
-const makePrimaryDisabled = computed(() => {
-  if (!canMakeSelectedPrimary.value) return true;
-  const conv = selectedConversation.value!;
-  return primaryBusyId.value === conv.id || conv.status === 'errored';
-});
-const makePrimaryTitle = computed(() => {
-  const conv = selectedConversation.value;
-  if (!conv) return 'Select a conversation to make it Primary';
-  if (conv.isPrimary) return 'This conversation is already Primary';
-  if (conv.status === 'closed') return "Closed conversations can't be made Primary";
-  if (conv.status === 'errored') return 'An errored conversation cannot be designated Primary';
-  return `Make Primary — ${PRIMARY_EXPLANATION}`;
-});
-
-// Fix (redundant text): the "Primary: {{ name }}" text line was removed from `.primary-summary` —
-// Primary is now indicated on the row itself (accent border/tint + ★ icon). "Clear Primary" stays
-// (there's genuinely nothing to clear when there's no Primary, unlike Make-primary's per-selection
-// reflow issue above — this only changes on the rarer event of Primary itself changing), but with
-// the conversation's name gone from the visible text, its `title`/`aria-label` now name which
-// conversation it targets so that context isn't lost.
-const clearPrimaryTitle = computed(() => {
-  const conv = primaryConversation.value;
-  return conv ? `Clear Primary (${conv.name}) — ${PRIMARY_EXPLANATION}` : undefined;
-});
-
-/** Issues (or re-issues, with an explicit choice) a designation request. On `409
- *  PRIMARY_TARGET_BUSY`, opens the three-choice warning instead of surfacing an error. */
-async function makePrimary(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<void> {
-  primaryError.value = null;
-  primaryBusyId.value = conversationId;
-  try {
-    const result = await store.designatePrimary(conversationId, whenBusy);
-    if (result.applied !== 'cancelled') busyPrompt.value = null;
-  } catch (err) {
-    if (err instanceof ApiError && err.code === 'PRIMARY_TARGET_BUSY') {
-      const details = (err.details ?? {}) as { currentPrimaryId?: string | null; busyConversationId?: string };
-      busyPrompt.value = {
-        conversationId,
-        currentPrimaryId: details.currentPrimaryId ?? null,
-        busyConversationId: details.busyConversationId ?? conversationId,
-      };
-    } else {
-      primaryError.value = err instanceof Error ? err.message : 'Failed to designate Primary.';
-    }
-  } finally {
-    primaryBusyId.value = null;
-  }
-}
-
-async function resolveBusyPrompt(whenBusy: PrimaryWhenBusy): Promise<void> {
-  if (!busyPrompt.value) return;
-  const { conversationId } = busyPrompt.value;
-  if (whenBusy === 'cancel') {
-    busyPrompt.value = null;
-  }
-  await makePrimary(conversationId, whenBusy);
-}
-
-async function clearPrimary(): Promise<void> {
-  const current = store.conversations.find((c) => c.isPrimary);
-  if (!current) return;
-  primaryError.value = null;
-  try {
-    await store.clearPrimary(current.id);
-  } catch (err) {
-    primaryError.value = err instanceof Error ? err.message : 'Failed to clear Primary.';
-  }
-}
 </script>
 
 <template>
   <nav class="hud-panel" aria-label="Conversations">
     <div class="hud-header">
       <h2>Conversations</h2>
-      <!-- Fix (filter label): the toggle's own text ("Active only"/"All") changes with its state,
-           but nothing said what the control *was* to a first-time user — a visible "Show:" prefix
-           makes it read as a filter rather than an ambiguous standalone button. -->
+      <!-- 006-toolbar-reorg (confirmed layout): compacted per the confirmed design — the separate
+           "Show:" label is dropped (the small funnel icon now signals "this is a filter" instead),
+           and the button's own text is shortened to "Active"/"All" (was "Active only"/"All").
+           Purely visual/text trim: same single button, same click-to-toggle `toggleFilter()`
+           handler, same `aria-pressed`, and the full explanatory meaning (plus the Alt+A hotkey)
+           still lives in `title`/`aria-label` — just no longer spelled out in the visible label. -->
       <div class="filter-control">
-        <span class="filter-label">Show:</span>
         <button
           type="button"
           class="filter-toggle-button"
-          :aria-pressed="filter === 'all'"
-          :title="`Show ${filter === 'active' ? 'all conversations, including closed ones' : 'active conversations only'} (Alt+A)`"
+          :aria-pressed="props.filter === 'all'"
+          :title="`Show ${props.filter === 'active' ? 'all conversations, including closed ones' : 'active conversations only'} (Alt+A)`"
+          :aria-label="`Show ${props.filter === 'active' ? 'all conversations, including closed ones' : 'active conversations only'} (Alt+A)`"
           @click="toggleFilter"
         >
-          {{ filter === 'active' ? 'Active only' : 'All' }}
+          <svg class="filter-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+            <path
+              d="M3.5 5h17L14 12.5V19l-4 2v-8.5L3.5 5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            />
+          </svg>
+          {{ props.filter === 'active' ? 'Active' : 'All' }}
         </button>
       </div>
     </div>
-    <div v-if="hasPrimary && !primaryNoticeDismissed" class="primary-notice" role="note">
-      <span><strong>Primary</strong>: {{ PRIMARY_EXPLANATION }}</span>
-      <button type="button" class="dismiss-notice-button" aria-label="Dismiss Primary notice" @click="dismissPrimaryNotice">
-        Dismiss
-      </button>
-    </div>
-    <p class="primary-summary">
-      <!-- Fix (redundant text): "Primary: {{ name }}" used to duplicate what the row itself now
-           shows (accent border/tint + ★ icon) — dropped. "Clear Primary" stays, contextual to
-           whichever conversation currently holds it, so `clearPrimaryTitle` above now carries
-           that name that's no longer in the visible text. -->
-      <button v-if="hasPrimary" type="button" class="clear-primary-button" :title="clearPrimaryTitle" :aria-label="clearPrimaryTitle" @click="clearPrimary">
-        Clear Primary
-      </button>
-      <span v-else class="badge no-primary-badge">No Primary — every conversation stages its edits</span>
-      <!-- Fix (primary-action placement): colocated with Clear Primary above, rather than a
-           button on every row — contextual to the currently *selected* conversation.
-           Fix (no layout jump): always rendered (no `v-if`) so `.primary-summary` doesn't
-           reflow as the user browses conversations — `disabled` + a reason-specific
-           title/aria-label communicate eligibility instead. -->
-      <button
-        type="button"
-        class="make-primary-button"
-        :disabled="makePrimaryDisabled"
-        :title="makePrimaryTitle"
-        :aria-label="makePrimaryTitle"
-        @click="selectedConversation && makePrimary(selectedConversation.id)"
-      >
-        Make primary
-      </button>
-    </p>
-    <div v-if="primaryError" class="error-banner" role="alert">{{ primaryError }}</div>
 
     <ul>
       <!-- UI convention: every conversation row is a 2-section layout — title | status (see
            .specify/memory/constitution.md "UI Conventions"). Previously a 3rd, middle section
            held a per-row "Make Primary" button; per feedback that action shouldn't sit next to
-           every row's title, so it moved to the panel's summary/header area (see
-           `.primary-summary` above, always rendered there and gated on `canMakeSelectedPrimary`
-           via `disabled` rather than `v-if`) and this middle slot was removed outright.
+           every row's title, so it moved to the "Primary" box (`PrimaryPanel.vue`, in App.vue's
+           toolbar right column) and this middle slot was removed outright.
            `.conversation-row` is the flex/grid container (not a button, so the
            title can still be a true nested control); its own @click reproduces the previous
            click-anywhere-in-the-row selection behavior via ordinary event bubbling from its
@@ -298,17 +209,25 @@ async function clearPrimary(): Promise<void> {
            implied, not new information — so it was removed (see ConversationView.vue's
            `.readonly-banner` for the one spot that still earns its keep, since it explains *why*
            editing is disabled rather than just re-labelling the status). -->
-      <li v-for="conv in filteredConversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.75}rem` }">
+      <li v-for="conv in orderedConversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.3}rem` }">
         <div
           class="conversation-row"
-          :class="{ selected: conv.id === props.selectedId, 'is-primary': conv.isPrimary }"
-          :title="conv.isPrimary ? `Primary conversation — ${PRIMARY_EXPLANATION}` : undefined"
-          @click="emit('select', conv.id)"
+          :class="{
+            selected: conv.id === props.activeId,
+            'is-primary': conv.isPrimary,
+            'is-focused': props.focusedIds.has(conv.id),
+            'focus-disabled': !props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap,
+          }"
+          :data-conversation-id="conv.id"
+          :aria-disabled="!props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap"
+          :title="rowTitle(conv)"
+          @click="emit('toggle-focus', conv.id)"
         >
           <button
             type="button"
             class="conversation-title"
-            :aria-current="conv.id === props.selectedId ? 'true' : undefined"
+            :aria-current="conv.id === props.activeId ? 'true' : undefined"
+            :aria-pressed="props.focusedIds.has(conv.id)"
           >
             <span v-if="conv.isPrimary" class="primary-icon" aria-hidden="true">★</span>
             <span v-if="conv.isPrimary" class="visually-hidden">Primary conversation. </span>
@@ -330,40 +249,28 @@ async function clearPrimary(): Promise<void> {
         </div>
       </li>
     </ul>
-
-    <div v-if="busyPrompt" class="modal-overlay primary-busy-dialog-overlay">
-      <div
-        ref="busyDialogEl"
-        class="primary-busy-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Primary conversation is busy"
-      >
-        <p>
-          {{ conversationName(busyPrompt.busyConversationId) }} is still working. What should happen to the Primary
-          designation?
-        </p>
-        <div class="primary-busy-choices">
-          <button type="button" @click="resolveBusyPrompt('switch_now')">Switch now</button>
-          <button type="button" @click="resolveBusyPrompt('switch_when_idle')">Switch when idle</button>
-          <button type="button" @click="resolveBusyPrompt('cancel')">Cancel</button>
-        </div>
-      </div>
-    </div>
   </nav>
 </template>
 
 <style scoped>
+/* 005-canvas-conversation-threads/US4 (T031), reflowed again by 006-toolbar-reorg: this panel used
+   to be a full-height vertical sidebar, then moved inline into `App.vue`'s toolbar row; it now
+   lives in the toolbar's left column (title above it, both sharing the same left edge/width) as
+   its own "Conversations (HUD)" box, with Primary/error content pulled out entirely (see
+   `PrimaryPanel.vue`) — every class/element the existing e2e suite selects on (`.hud-panel`,
+   `.conversation-row`, `.status-badge`, `.stale-badge`, `.hud-panel li`) is unchanged, only how
+   they're arranged is. */
 .hud-panel {
-  overflow-y: auto;
-  height: 100%;
-  padding: 0.5rem;
+  overflow: visible;
+  padding: 0;
   text-align: left;
-  border-right: 1px solid var(--border-color, #ddd);
-  /* Fix 2: a physically distinct surface (not just the page background) so this HUD zone reads
-     as a separate region from the transcript below it in the conversation sidebar. */
-  background: var(--panel-bg, #f7f7f8);
-  border-bottom: 2px solid var(--border-color, #ccc);
+  border: none;
+  background: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 .hud-header {
   display: flex;
@@ -371,33 +278,42 @@ async function clearPrimary(): Promise<void> {
   justify-content: space-between;
   gap: 0.5rem;
 }
+.hud-header h2 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neutral-muted-color, #4b5563);
+}
 .filter-control {
   display: flex;
   align-items: center;
   gap: 0.3rem;
   flex: 0 0 auto;
 }
-.filter-label {
-  font-size: 0.7rem;
-  color: var(--neutral-muted-color, #4b5563);
-}
 .filter-toggle-button {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;
+}
+.filter-icon {
+  flex: 0 0 auto;
 }
 .hud-panel ul {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  max-height: 4.5rem;
+  overflow-y: auto;
 }
 .hud-panel li {
-  padding-bottom: 0.3rem;
-  margin-bottom: 0.3rem;
-  border-bottom: 1px solid var(--border-color, #ddd);
-}
-.hud-panel li:last-child {
-  border-bottom: none;
+  flex: 0 0 auto;
 }
 /* UI convention: title | status, laid out as 2 side-by-side sections in one row (see
    .specify/memory/constitution.md "UI Conventions"). A <div>, not a <button>, so the title can
@@ -405,11 +321,11 @@ async function clearPrimary(): Promise<void> {
    exactly as before) still selects the conversation — see the template comment above for how. */
 .conversation-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, auto) minmax(0, auto);
   align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-  padding: 0.4rem 0.5rem;
+  gap: 0.3rem;
+  max-width: 15rem;
+  padding: 0.25rem 0.45rem;
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
@@ -429,6 +345,21 @@ async function clearPrimary(): Promise<void> {
   box-shadow:
     inset 3px 0 0 0 var(--accent-color, #2563eb),
     inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
+}
+/* 005-canvas-conversation-threads (multi-focus overlay): a small, non-color-alone cue (a bottom
+   border, distinct from `.selected`'s full border and `.is-primary`'s box-shadow) marking every
+   conversation that currently has an open detail panel — there can be several at once now, unlike
+   the single always-exclusive `.selected` state. */
+.conversation-row.is-focused {
+  border-bottom: 2px solid var(--accent-color, #2563eb);
+}
+/* Dim (never hide) a row that would exceed the live focus cap if clicked — `rowTitle()` above
+   supplies the reason as both the row's `title` and (via the title button's own accessible name)
+   effectively its explanation; `aria-disabled` (not the native `disabled` attribute) keeps it
+   keyboard-reachable so that explanation is actually discoverable, since clicking it is a real,
+   if inert, no-op rather than truly unclickable. */
+.conversation-row.focus-disabled {
+  opacity: 0.55;
 }
 /* Reset the title's native button chrome — visually it's just the row's left-hand label, styled
    identically to how `.name` looked when it lived inside the old single-button row. */
@@ -452,6 +383,7 @@ async function clearPrimary(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 8rem;
 }
 .primary-icon {
   flex: 0 0 auto;
@@ -492,64 +424,8 @@ async function clearPrimary(): Promise<void> {
 .status-badge[data-status='closed'] {
   color: var(--status-closed-color, #374151);
 }
-.primary-summary {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  margin: 0 0 0.5rem;
-}
-.primary-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  margin-bottom: 0.5rem;
-  background: var(--info-bg, #eff6ff);
-  color: var(--info-color, #1e3a8a);
-  border: 1px solid var(--info-border, #bfdbfe);
-  border-radius: 4px;
-  font-size: 0.75rem;
-}
-.dismiss-notice-button {
-  flex: 0 0 auto;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-}
-.no-primary-badge {
-  /* Fix: #6b7280 was a razor-thin 4.52:1 against the plain panel background and an outright
-     failing 4.06:1 against the darkened `.selected` row tint (same fix as `.stale-badge` above). */
-  color: var(--neutral-muted-color, #4b5563);
-}
-.clear-primary-button,
-.make-primary-button {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  margin-left: 0.35rem;
-}
-.error-banner {
-  padding: 0.4rem 0.5rem;
-  margin-bottom: 0.5rem;
-  background: var(--danger-bg, #fee2e2);
-  color: var(--danger-color, #991b1b);
-  font-size: 0.8rem;
-}
-.primary-busy-dialog-overlay {
-  z-index: 60;
-}
-.primary-busy-dialog {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
-  padding: 1rem;
-  max-width: 22rem;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-}
-.primary-busy-choices {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  flex-wrap: wrap;
-}
+/* 006-toolbar-reorg: Primary's notice/summary and the busy-switch dialog moved to
+   `PrimaryPanel.vue` (its own visually-boxed section in App.vue's toolbar), and the primary-error
+   banner moved to App.vue as a full-width strip beneath both toolbar columns — none of it lives
+   in this panel any more. */
 </style>

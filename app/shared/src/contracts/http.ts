@@ -69,6 +69,9 @@ export const DocumentDto = z.object({
 });
 export type DocumentDto = z.infer<typeof DocumentDto>;
 
+export const ConversationSeedSelectionDto = z.object({ from: z.number().int(), to: z.number().int(), text: z.string() });
+export type ConversationSeedSelectionDto = z.infer<typeof ConversationSeedSelectionDto>;
+
 export const ConversationDto = z.object({
   id: z.string(),
   name: z.string(),
@@ -86,6 +89,20 @@ export const ConversationDto = z.object({
   createdAt: z.string(),
   closedAt: z.string().nullable(),
   readOnly: z.boolean().optional(),
+  // Spatial canvas (005-canvas-conversation-threads): the frontend needs the anchor position of
+  // every conversation it ever receives (list/get/branch/review), not just the one-time
+  // `conversation_started` WS event fired at creation — a reloading client never sees that event
+  // for a pre-existing conversation. `null` means anchored to the top of the document (Main, or
+  // any conversation created without a selection).
+  seedSelection: ConversationSeedSelectionDto.nullable(),
+  // `false` when `seedSelection` is null; otherwise true once the document's current content at
+  // that range no longer matches the text recorded at branch time (contracts/conversation-anchor.md).
+  anchorOrphaned: z.boolean(),
+  // Message-level fork anchor (005-canvas-conversation-threads): the id of the parent
+  // conversation's last message at the point of branching, when this branch was created from
+  // within a conversation (no `selection` given). `null` for Main, for a review conversation, and
+  // for a branch created from a document `selection` (that anchor is `seedSelection` instead).
+  forkedFromMessageId: z.string().nullable(),
 });
 export type ConversationDto = z.infer<typeof ConversationDto>;
 
@@ -245,6 +262,12 @@ export const CreateConversationRequest = z.object({
   parentConversationId: z.string(),
   name: z.string().min(1).optional(),
   selection: z.object({ from: z.number().int(), to: z.number().int() }).optional(),
+  // 005-canvas-conversation-threads: opt-in seed message. A branch persists as a truly empty
+  // placeholder by default (no auto-sent message) — passing `true` here (only meaningful alongside
+  // `selection`; the "Branch this conversation" message-context path never sets it) restores the
+  // pre-canvas behavior of delivering `buildBranchSeedMessage`'s excerpt as the branch's first
+  // message via the ordinary send() path.
+  includeSeedMessage: z.boolean().optional(),
 });
 export type CreateConversationRequest = z.infer<typeof CreateConversationRequest>;
 

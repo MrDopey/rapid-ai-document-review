@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { closeAllFocusedPanels, focusExclusively } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us4.spec.ts for the same convention. PROPOSE_EDIT_DIRECTIVE drives the real propose_document_edit
@@ -123,6 +124,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
 
     await test.step('2. Main auto-applies an edit immediately, with no pending proposal left behind (FR-027)', async () => {
+      // 005-canvas-conversation-threads (multi-focus overlay): Main is no longer auto-focused on
+      // load (see us2.spec.ts's own note) — its detail view/composer must be opened explicitly.
+      await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }), 'Main');
       const composer = page.getByLabel('Message Main');
       await composer.fill(
         proposeEdit('Improve the Primary sentence', [
@@ -144,6 +148,11 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
 
     await test.step('branch a conversation to switch Primary onto (FR-011)', async () => {
+      // Branching auto-focuses the new branch (a plain add to `focusedConversationIds`, never a
+      // replace) — close Main's panel (still open from the previous step) first so the branch ends
+      // up the only one open, matching the single-header assertion below.
+      await closeAllFocusedPanels(page);
+
       // Branch name is derived from the enclosing "## US5 Body" heading (seed-excerpt.ts's
       // deriveBranchName), same convention as us3.spec.ts/us4.spec.ts.
       const stageLine = page.locator('.cm-line', { hasText: 'US5-MARKER-STAGE' });
@@ -159,10 +168,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
 
     await test.step('3. making the branch Primary while Main is busy shows the three-choice warning (FR-029)', async () => {
-      // Branching (above) auto-selected the new branch in the HUD, so Main's composer is not
-      // currently rendered (ConversationView shows only the selected conversation) — reselect it.
-      await page.locator('.conversation-row', { hasText: 'Main' }).click();
-      await expect(page.locator('.conversation-header h2')).toHaveText('Main');
+      // Branching (above) auto-focused the new branch, and it's still the only one open — reopen
+      // Main's own panel (closing the branch's) so Main's composer is rendered again.
+      await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }), 'Main');
 
       // A long message keeps FakeAgentSession streaming for long enough to attempt the switch
       // mid-turn (same technique as us3.spec.ts's "act while active" step). A generous length
@@ -221,6 +229,11 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
 
     await test.step('5. non-Primary conversations keep staging their proposals (FR-021)', async () => {
+      // Step 3 toggled the branch row on (adding it alongside Main, both now possibly open) —
+      // reset to exactly Main's panel open so its composer is mounted, regardless of whatever
+      // combination of panels the previous steps left focused.
+      await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }), 'Main');
+
       const mainComposer = page.getByLabel('Message Main');
       await mainComposer.fill(
         proposeEdit('Stage this now that Main is not Primary', [
@@ -242,9 +255,10 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
 
     await test.step('6. Primary conflict: a stale anchor is superseded, and its replacement is presented as a pending proposal for review (FR-027)', async () => {
-      // Select the (now-Primary) branch conversation.
-      await page.locator('.conversation-row', { hasText: branchName }).click();
-      await expect(page.locator('.conversation-header h2')).toHaveText(branchName);
+      // Select the (now-Primary) branch conversation exclusively — Main's panel from the previous
+      // step is still open otherwise, and a plain toggle-click here would only add the branch
+      // alongside it rather than replacing it.
+      await focusExclusively(page, page.locator('.conversation-row', { hasText: branchName }), branchName);
       await waitIdle(page);
 
       // "Edit the document manually mid-run": mutate a word inside the anchor text (rather than

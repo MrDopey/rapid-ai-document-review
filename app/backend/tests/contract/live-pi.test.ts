@@ -111,6 +111,7 @@ function createConversationRow(storage: SqliteStorageAdapter, documentId: string
     contextRevision: 1,
     branchDepth: 1,
     seedSelection: null,
+    forkedFromMessageId: null,
     createdAt: now,
     updatedAt: now,
     closedAt: null,

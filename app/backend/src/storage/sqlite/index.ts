@@ -93,6 +93,7 @@ interface ConversationDbRow {
   context_revision: number;
   branch_depth: number;
   seed_selection: string | null;
+  forked_from_message_id: string | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -112,6 +113,7 @@ function mapConversation(row: ConversationDbRow): ConversationRow {
     contextRevision: row.context_revision,
     branchDepth: row.branch_depth,
     seedSelection: row.seed_selection ? JSON.parse(row.seed_selection) : null,
+    forkedFromMessageId: row.forked_from_message_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     closedAt: row.closed_at,
@@ -389,8 +391,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
       .prepare(
         `INSERT INTO conversation
            (id, document_id, parent_id, name, kind, pi_session_path, status, error_message,
-            is_primary, context_revision, branch_depth, seed_selection, created_at, updated_at, closed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            is_primary, context_revision, branch_depth, seed_selection, forked_from_message_id,
+            created_at, updated_at, closed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -405,6 +408,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         row.contextRevision,
         row.branchDepth,
         row.seedSelection ? JSON.stringify(row.seedSelection) : null,
+        row.forkedFromMessageId,
         row.createdAt,
         row.updatedAt,
         row.closedAt,
@@ -495,7 +499,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         `UPDATE conversation SET
            parent_id = ?, name = ?, kind = ?, pi_session_path = ?, status = ?, error_message = ?,
            is_primary = ?, context_revision = ?, branch_depth = ?, seed_selection = ?,
-           updated_at = ?, closed_at = ?
+           forked_from_message_id = ?, updated_at = ?, closed_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -509,6 +513,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         merged.contextRevision,
         merged.branchDepth,
         merged.seedSelection ? JSON.stringify(merged.seedSelection) : null,
+        merged.forkedFromMessageId,
         merged.updatedAt,
         merged.closedAt,
         id,

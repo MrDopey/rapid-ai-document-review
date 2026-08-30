@@ -13,10 +13,10 @@ export default defineConfig({
   },
   // All specs share one backend/database for the whole run (see env.ts). us1's "no document
   // yet" scenario must run before any other spec creates a document, so the story specs
-  // (us1-us7, in that file order) are a separate project that the a11y project depends on —
+  // (us1-us8+, in that file order) are a separate project that the a11y project depends on —
   // Playwright runs a dependency project to completion before the dependent project starts.
   projects: [
-    { name: 'stories', testMatch: /us[1-7]\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'stories', testMatch: /us\d+\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
     {
       name: 'a11y',
       testMatch: /a11y\.spec\.ts/,

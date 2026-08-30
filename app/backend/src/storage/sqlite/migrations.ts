@@ -71,6 +71,7 @@ const STATEMENTS: string[] = [
     branch_depth       INTEGER NOT NULL DEFAULT 0,
 
     seed_selection     TEXT,
+    forked_from_message_id TEXT,
 
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,

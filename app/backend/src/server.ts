@@ -47,7 +47,7 @@ export function buildApp() {
     const content = automergeHolder.isSet() ? automergeHolder.get().getContent() : '';
     const conversations = storage
       .listAllConversations(documentId)
-      .map((c) => toConversationDto(storage, c, doc?.currentRevision ?? 0));
+      .map((c) => toConversationDto(storage, c, doc?.currentRevision ?? 0, content));
     return {
       document: {
         id: doc?.id ?? documentId,

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
+import { focusExclusively } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directives (see us3/us5.spec.ts for the
 // same convention) — deterministic, credential-free ways to drive a proposed edit or a failed turn
@@ -498,6 +499,13 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       expect(res.ok()).toBe(true);
       await waitIdleApi(page, main.id);
 
+      // 005-canvas-conversation-threads: `EditsList.vue` (and its `.edit-row`s) only renders
+      // inside `ConversationView.vue`, which — since the canvas restructure replaced the old
+      // always-mounted sidebar — is only mounted once a conversation's detail view is explicitly
+      // opened (`App.vue`'s `selectedConversationId`). Opening Main's HUD entry does that, exactly
+      // like a real user reviewing the edit would.
+      await page.locator('.hud-panel .conversation-row', { hasText: 'Main' }).click();
+
       const row = page.locator('.edit-row', { hasText: 'A11y audit fixture proposal' });
       await expect(row).toBeVisible({ timeout: 10_000 });
     });
@@ -517,8 +525,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       // not Main, so the diff-preview step's Main-only edit row is never found. Return to Main
       // explicitly at the top of every iteration rather than relying on leftover selection state.
       await test.step(`select Main [${scheme}]`, async () => {
-        await page.locator('.conversation-row', { hasText: 'Main' }).first().click();
-        await expect(page.locator('.conversation-header h2')).toHaveText('Main');
+        await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }).first(), 'Main');
       });
 
       await test.step(`main editor + HUD + conversation view [${scheme}]`, async () => {
@@ -549,8 +556,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
 
       await test.step(`close-confirmation dialog [${scheme}]`, async () => {
         const branchRow = page.locator('.conversation-row', { hasText: 'A11y Fixture Document' });
-        await branchRow.click();
-        await expect(page.locator('.conversation-header h2')).toHaveText('A11y Fixture Document');
+        await focusExclusively(page, branchRow, 'A11y Fixture Document');
         await page.getByRole('button', { name: 'Close', exact: true }).click();
         const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
         await expect(dialog).toBeVisible();
@@ -559,5 +565,65 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         await expect(dialog).not.toBeVisible();
       });
     }
+  });
+
+  // 005-canvas-conversation-threads/T037: the canvas/thread-box/HUD markup predates this file, so
+  // it gets its own dedicated coverage here rather than being folded into the audit above (which
+  // already exercises Main's conversation-detail overlay, not the canvas or HUD surfaces).
+  test('canvas/HUD accessibility: manual audit, keyboard-only panning, and keyboard HUD navigation (005-canvas-conversation-threads)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
+    if (await pasteHeading.isVisible().catch(() => false)) {
+      // Mirrors the fallback in the first test above — this test can run standalone (no document
+      // yet) or after earlier specs in the same shared-backend e2e run (document already exists).
+      await page.getByLabel('Document content').fill('# A11y Canvas Fixture\n\nA11Y-CANVAS-FIXTURE-INTRO');
+      await page.getByRole('button', { name: 'Start reviewing' }).click();
+    }
+    await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+
+    await test.step('manual WCAG audit of the canvas surface (roles/names + contrast)', async () => {
+      const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);
+      expect(roleViolations, 'canvas view: role/name violations').toEqual([]);
+      expect(contrastViolations, 'canvas view: contrast violations').toEqual([]);
+    });
+
+    await test.step('keyboard-only panning: Tab into the canvas, then arrow keys/Page Down move its scroll position (research.md §3)', async () => {
+      const canvas = page.locator('.document-canvas');
+      // The canvas has no content taller than the viewport by default — pad it so there is
+      // somewhere for keyboard panning to actually move to.
+      const docRes = await page.request.get('/api/document');
+      const docBody = (await docRes.json()) as { document: { currentRevision: number }; content: string };
+      const filler = Array(60).fill('A11Y-CANVAS-PAN-FILLER line of text to force real scroll height.').join('\n\n');
+      await page.request.patch('/api/document', {
+        data: {
+          baseRevision: docBody.document.currentRevision,
+          changes: [{ from: docBody.content.length, to: docBody.content.length, insert: `\n\n${filler}` }],
+        },
+      });
+      await expect(page.locator('.editor-host')).toContainText('A11Y-CANVAS-PAN-FILLER', { timeout: 10_000 });
+
+      await canvas.click(); // establishes real DOM focus on the focusable, tabindex="0" container
+      await expect(canvas).toBeFocused();
+      const before = await canvas.evaluate((el) => el.scrollTop);
+      await page.keyboard.press('PageDown');
+      await expect
+        .poll(async () => canvas.evaluate((el) => el.scrollTop), { timeout: 5_000 })
+        .toBeGreaterThan(before);
+    });
+
+    await test.step('keyboard HUD navigation reaches a conversation without a pointer', async () => {
+      const main = (await getConversations(page)).find((c) => c.kind === 'main');
+      if (!main) throw new Error('expected a Main conversation to already exist');
+      const titleButton = page.locator(`.hud-panel .conversation-row[data-conversation-id="${main.id}"] .conversation-title`);
+      await titleButton.focus();
+      await expect(titleButton).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.conversation-detail-overlay')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.conversation-detail-dialog')).toHaveAttribute('aria-label', `${main.name} — full view`);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.conversation-detail-overlay')).toHaveCount(0);
+    });
   });
 });

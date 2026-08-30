@@ -9,10 +9,17 @@ const props = defineProps<{ modelValue: string }>();
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
   (e: 'selection', range: { from: number; to: number } | null): void;
-  (e: 'branch-from-selection', range: { from: number; to: number }): void;
+  (e: 'branch-from-selection', range: { from: number; to: number }, includeSeedMessage: boolean): void;
 }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
+// 005-canvas-conversation-threads: the root of this whole component (toolbar + host), not
+// `hostRef` alone — `anchorTop` below needs an origin that starts flush with `DocumentCanvas.vue`'s
+// `.canvas-content` (this component's parent there), which `.editor-pane` is (the first flex
+// child, no margin) but `.editor-host` is not (it sits below `.editor-toolbar` inside
+// `.editor-pane`). Using `.editor-host` alone would silently drop the toolbar's height from every
+// anchor position, misaligning every conversation box by that amount.
+const paneRef = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
 let applyingRemote = false;
 
@@ -41,13 +48,19 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(flush, CLIENT_BATCH_DEBOUNCE_MS);
 }
 
-/** FR-011/FR-043a: branching from a selection is reachable both by this focus-reachable toolbar
- * button and by a keyboard shortcut bound directly in the editor's own keymap below — neither
- * requires a pointer-triggered context menu, and CodeMirror's own Shift+Arrow/Shift+Ctrl+Arrow
- * selection extension already makes the selection itself fully keyboard-operable. */
-function requestBranch(): boolean {
+/** FR-011/FR-043a: branching from a selection is reachable both by these two focus-reachable
+ * toolbar buttons and by a keyboard shortcut each bound directly in the editor's own keymap below
+ * — neither requires a pointer-triggered context menu, and CodeMirror's own
+ * Shift+Arrow/Shift+Ctrl+Arrow selection extension already makes the selection itself fully
+ * keyboard-operable.
+ *
+ * `includeSeedMessage` (005-canvas-conversation-threads) distinguishes the two: `false` (the
+ * "Branch (New)"/Alt+Shift+C path) keeps the empty-placeholder-conversation default; `true` (the
+ * "Branch (Main)"/Alt+Shift+S path) asks the backend to also deliver the selection excerpt as
+ * the branch's first message (`ConversationService.branch`'s `buildBranchSeedMessage` call). */
+function requestBranch(includeSeedMessage: boolean): boolean {
   if (!selection.value) return false;
-  emit('branch-from-selection', selection.value);
+  emit('branch-from-selection', selection.value, includeSeedMessage);
   return true;
 }
 
@@ -62,7 +75,10 @@ onMounted(() => {
       // A plain `key` binding (not `mac`-qualified `Mod-`) so this is the same physical shortcut
       // on every platform and deliberately avoids reserved browser chrome combos like
       // Ctrl/Cmd+Shift+B (bookmarks bar).
-      { key: 'Alt-Shift-c', run: () => requestBranch() },
+      { key: 'Alt-Shift-c', run: () => requestBranch(false) },
+      // Same physical-key rationale as Alt-Shift-c above; "s" for "seed" mirrors the second
+      // toolbar button's "Branch (Main)" label (keymap-registry.ts).
+      { key: 'Alt-Shift-s', run: () => requestBranch(true) },
       ...defaultKeymap,
       ...historyKeymap,
     ]),
@@ -76,6 +92,15 @@ onMounted(() => {
     // as the text around it in both schemes.
     EditorView.theme({
       '.cm-content': { caretColor: 'var(--text-color, #111)' },
+      // research.md §2/FR-015: CodeMirror's own baseTheme unconditionally sets `.cm-scroller {
+      // overflow: auto}` — that's a real, separately-injected stylesheet, so a plain scoped Vue
+      // `<style>` rule targeting the same selector does not reliably win against it (confirmed by
+      // an e2e assertion actually failing here: removing our own now-redundant copy of that rule
+      // had no visible effect, because CodeMirror's own default was the one actually in force).
+      // Overriding it through `EditorView.theme()` — the same mechanism CodeMirror itself uses —
+      // is what actually defeats it, letting the document lay out at full content height with the
+      // canvas's own native scroll (DocumentCanvas.vue) as the only way to move through it.
+      '.cm-scroller': { overflow: 'visible' },
     }),
     // The actual focusable/editable node CodeMirror creates is `.cm-content`, a descendant of
     // `hostRef` — labelling `hostRef` itself (a plain, non-interactive wrapper div) would leave
@@ -127,22 +152,45 @@ watch(
 defineExpose({
   undo: () => view && undo(view),
   redo: () => view && redo(view),
+  /** 005-canvas-conversation-threads: pixel Y of document offset `pos`, relative to this
+   *  component's own host element's top edge (not the viewport) — `coordsAtPos` itself returns
+   *  viewport-relative coordinates, which shift as the canvas scrolls, so both rects are read at
+   *  the same instant and subtracted to get a value that stays valid regardless of scroll
+   *  position. Used by `DocumentCanvas.vue`/`anchorY.ts` to colocate conversation boxes with
+   *  their highlighted anchor. */
+  anchorTop: (pos: number): number | null => {
+    if (!view || !paneRef.value) return null;
+    const coords = view.coordsAtPos(pos);
+    if (!coords) return null;
+    return coords.top - paneRef.value.getBoundingClientRect().top;
+  },
 });
 </script>
 
 <template>
-  <div class="editor-pane">
+  <div ref="paneRef" class="editor-pane">
     <div class="editor-toolbar">
       <span class="pane-eyebrow">Editor</span>
-      <button
-        type="button"
-        class="branch-button"
-        :disabled="!selection"
-        title="Highlight text in the editor, then click here to start a focused conversation about just that passage. Keyboard shortcut: Alt+Shift+C"
-        @click="requestBranch"
-      >
-        Start conversation from selection
-      </button>
+      <div class="branch-buttons">
+        <button
+          type="button"
+          class="branch-button"
+          :disabled="!selection"
+          title="Highlight text in the editor, then click here to start a focused conversation about just that passage, with an empty transcript. Keyboard shortcut: Alt+Shift+C"
+          @click="requestBranch(false)"
+        >
+          Branch (New)
+        </button>
+        <button
+          type="button"
+          class="branch-button"
+          :disabled="!selection"
+          title="Highlight text in the editor, then click here to start a focused conversation about just that passage, seeded with the document and your selection as its first message. Keyboard shortcut: Alt+Shift+S"
+          @click="requestBranch(true)"
+        >
+          Branch (Main)
+        </button>
+      </div>
     </div>
     <div ref="hostRef" class="editor-host"></div>
   </div>
@@ -152,8 +200,9 @@ defineExpose({
 .editor-pane {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  /* No forced height: this pane now lives inside DocumentCanvas.vue's natively-scrolling canvas
+     (research.md §1/§2) and must size to its own full content height — a floating page, not a
+     viewport-bounded box with its own internal scrollbar. */
   border-right: 1px solid var(--border-color, #ccc);
 }
 .editor-toolbar {
@@ -168,23 +217,20 @@ defineExpose({
   background: var(--panel-bg, #f7f7f8);
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
+.branch-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 .branch-button {
   font-size: 0.8rem;
 }
 .editor-host {
-  flex: 1;
-  min-height: 0;
   text-align: left;
 }
 
-/* Without this, CodeMirror's internal .cm-editor sizes to its content, leaving the empty
-   remainder of the pane unclickable — clicking there does nothing instead of placing the
-   cursor at the nearest position, as most text editors do. */
-.editor-host :deep(.cm-editor) {
-  height: 100%;
-}
-
-.editor-host :deep(.cm-scroller) {
-  overflow: auto;
-}
+/* research.md §2: no inner `.cm-scroller` overflow — the document lays out at full content
+   height (a floating page) inside the canvas's own native scroll (DocumentCanvas.vue), avoiding
+   wheel-event scroll-chaining between a second, competing scroll container and the outer canvas
+   (FR-015). */
 </style>

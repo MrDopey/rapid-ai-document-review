@@ -98,6 +98,7 @@ function createBranchConversation(storage: StorageAdapter, documentId: string, c
     contextRevision,
     branchDepth: 1,
     seedSelection: null,
+    forkedFromMessageId: null,
     createdAt: now,
     updatedAt: now,
     closedAt: null,

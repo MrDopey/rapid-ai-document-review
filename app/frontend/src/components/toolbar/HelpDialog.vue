@@ -27,10 +27,11 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
             Type a message to a conversation to ask questions or request changes to the document.
           </li>
           <li>
-            Highlight text in the document and click "Start conversation from selection" to get a
-            reviewable edit proposal instead of a direct answer — the proposal shows up under
+            Highlight text in the document and click "Branch (Main)" (or press Alt+Shift+S) to get
+            a reviewable edit proposal instead of a direct answer — the proposal shows up under
             "Proposed edits", where you can preview it and choose to accept or drop it before
-            anything changes in the document.
+            anything changes in the document. "Branch (New)" (Alt+Shift+C) starts the same focused
+            conversation with an empty transcript instead.
           </li>
         </ul>
       </section>
@@ -47,6 +48,17 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
           it and explicitly choose <strong>Accept</strong> (to apply it) or <strong>Drop</strong>
           (to discard it). A Primary conversation skips that review step entirely, so only make a
           conversation Primary once you trust its edits to land without a second look.
+        </p>
+      </section>
+
+      <section class="help-section">
+        <h3>What does "branching" mean?</h3>
+        <p>
+          Branching creates a new conversation that continues from the <strong>current</strong>
+          point in an existing conversation, as its own separate thread — so you can explore a
+          different direction without altering the original. When branching from a text selection
+          in the document, "Branch (New)" (Alt+Shift+C) starts that thread empty, while "Branch
+          (Main)" (Alt+Shift+S) also sends the selection as its first message to restore context.
         </p>
       </section>
     </div>

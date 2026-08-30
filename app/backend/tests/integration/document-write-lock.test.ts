@@ -81,6 +81,7 @@ function createConversation(storage: StorageAdapter, documentId: string, context
     contextRevision,
     branchDepth: 0,
     seedSelection: null,
+    forkedFromMessageId: null,
     createdAt: now,
     updatedAt: now,
     closedAt: null,

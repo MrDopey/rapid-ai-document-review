@@ -1,4 +1,8 @@
 :root {
+  /* Decorative divider only — measures ~1.5-1.7:1 against --panel-bg/--bg-color in both schemes,
+     below the 3:1 WCAG 1.4.11 non-text threshold. Do NOT use it as the sole cue for a UI control
+     boundary (button/input outline, etc); for that, verify a real ratio against the actual
+     background and use/add a token that clears 3:1 there instead. */
   --border-color: #ccc;
   /* Distinct panel surfaces so adjacent regions (HUD, transcript, editor, preview, history) read
      as physically separate zones rather than blending into one continuous background. */
@@ -15,6 +19,10 @@
      used against, including the darkened `.conversation-row.selected` tint and the browser's
      native button-face color, not just the lightest literal `--panel-bg`. */
   --warning-color: #92400e;
+  /* Validated against flat panel/page surfaces only (--panel-bg/--bg-color etc). Do NOT use as
+     text color on translucent/tinted backgrounds (alpha-blended bubble fills, opacity-reduced
+     containers) without independently verifying contrast against the actual composited
+     background — compositing can push effective contrast below what this token's value implies. */
   --neutral-muted-color: #4b5563;
   --success-color: #1a7f37;
   --danger-color: #b3261e;
@@ -57,6 +65,10 @@
     --text-color: #e8e8e8;
     --bg-color: #14161b;
     --warning-color: #fbbf24;
+    /* Validated against flat panel/page surfaces only (--panel-bg/--bg-color etc). Do NOT use as
+       text color on translucent/tinted backgrounds (alpha-blended bubble fills, opacity-reduced
+       containers) without independently verifying contrast against the actual composited
+       background — compositing can push effective contrast below what this token's value implies. */
     --neutral-muted-color: #9aa3af;
     --success-color: #4ade80;
     --danger-color: #f87171;

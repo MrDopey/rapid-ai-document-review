@@ -42,3 +42,43 @@ export function persistPaneSizes(values: PaneSizesRecord): void {
     // Best-effort persistence only.
   }
 }
+
+/**
+ * 005-canvas-conversation-threads/T034 (data-model.md's `CanvasScrollPosition`, research.md §8):
+ * the canvas's native scroll offsets — a distinct key from `PANE_SIZES_KEY` above since this is a
+ * single `{ scrollLeft, scrollTop }` pair, not an extensible `defaults`-shaped record of named
+ * `fr`/pixel splits. Same per-viewer, best-effort, non-throwing convention as the rest of this file.
+ */
+const CANVAS_SCROLL_KEY = 'raidr:canvasScrollPosition';
+
+export interface CanvasScrollPosition {
+  scrollLeft: number;
+  scrollTop: number;
+}
+
+export function loadCanvasScrollPosition(): CanvasScrollPosition | null {
+  try {
+    const raw = localStorage.getItem(CANVAS_SCROLL_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      typeof (parsed as CanvasScrollPosition).scrollLeft === 'number' &&
+      typeof (parsed as CanvasScrollPosition).scrollTop === 'number'
+    ) {
+      return parsed as CanvasScrollPosition;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistCanvasScrollPosition(position: CanvasScrollPosition): void {
+  try {
+    localStorage.setItem(CANVAS_SCROLL_KEY, JSON.stringify(position));
+  } catch {
+    // Best-effort persistence only.
+  }
+}
