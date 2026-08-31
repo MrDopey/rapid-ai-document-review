@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBranchSeedMessage,
   buildMainSeedMessage,
+  buildSelectionOnlySeedMessage,
   deriveBranchName,
   extractSeedExcerpt,
   wrapDocumentRevision,
@@ -129,22 +130,35 @@ describe('buildMainSeedMessage', () => {
     expect(message).toContain('<document-revision-3>');
     expect(message).toContain('</document-revision-3>');
     expect(message).toContain(content);
-    // Content itself is nested inside the tag, not merely present somewhere in the message.
-    expect(message).toContain(`<document-revision-3>\n${content}\n</document-revision-3>`);
+    // Content itself is nested inside the tag, not merely present somewhere in the message, with
+    // a full blank line (not just a single newline) on each side so a downstream markdown
+    // renderer never collapses the closing tag onto the content's last line.
+    expect(message).toContain(`<document-revision-3>\n\n${content}\n\n</document-revision-3>`);
+  });
+
+  it('primes the agent to expect revision/edit requests and clarifying questions about the document', () => {
+    const message = buildMainSeedMessage('Quarterly Strategy', 3, 'Some content.');
+    const leadIn = message.slice(0, message.indexOf('<document-revision-3>'));
+
+    // Names the tool the agent should use to make changes.
+    expect(leadIn).toContain('propose_document_edit');
+    // Primes for both edit requests and clarification/discussion, not just passive receipt.
+    expect(leadIn).toMatch(/revise|editing|edit/i);
+    expect(leadIn).toMatch(/clarif|discuss/i);
   });
 });
 
 describe('wrapDocumentRevision', () => {
-  it('wraps content in matching opening/closing tags naming the revision', () => {
+  it('wraps content in matching opening/closing tags naming the revision, with a blank line on each side', () => {
     const wrapped = wrapDocumentRevision(7, 'Some document content.');
-    expect(wrapped).toBe('<document-revision-7>\nSome document content.\n</document-revision-7>');
+    expect(wrapped).toBe('<document-revision-7>\n\nSome document content.\n\n</document-revision-7>');
   });
 });
 
 describe('wrapHighlightedSelection', () => {
-  it('wraps content in matching opening/closing <highlighted-selection> tags', () => {
+  it('wraps content in matching opening/closing <highlighted-selection> tags, with a blank line on each side', () => {
     const wrapped = wrapHighlightedSelection('Some selected text.');
-    expect(wrapped).toBe('<highlighted-selection>\nSome selected text.\n</highlighted-selection>');
+    expect(wrapped).toBe('<highlighted-selection>\n\nSome selected text.\n\n</highlighted-selection>');
   });
 });
 
@@ -154,10 +168,11 @@ describe('buildBranchSeedMessage', () => {
     const selectionText = 'The specific highlighted passage.';
     const message = buildBranchSeedMessage(4, documentContent, selectionText);
 
-    // Full document, wrapped in the matching <document-revision-N> tag (constitution convention).
-    expect(message).toContain('<document-revision-4>\n' + documentContent + '\n</document-revision-4>');
-    // Highlighted selection, wrapped in its own distinctly-named matching tag.
-    expect(message).toContain('<highlighted-selection>\n' + selectionText + '\n</highlighted-selection>');
+    // Full document, wrapped in the matching <document-revision-N> tag (constitution convention),
+    // with a blank line on each side of the content.
+    expect(message).toContain('<document-revision-4>\n\n' + documentContent + '\n\n</document-revision-4>');
+    // Highlighted selection, wrapped in its own distinctly-named matching tag, same blank-line spacing.
+    expect(message).toContain('<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>');
 
     // Ordering: full document block precedes the highlighted-selection block.
     expect(message.indexOf('<document-revision-4>')).toBeLessThan(message.indexOf('<highlighted-selection>'));
@@ -168,5 +183,21 @@ describe('buildBranchSeedMessage', () => {
     expect(closingProse).toMatch(/next message/i);
     expect(closingProse).toMatch(/highlighted passage/i);
     expect(closingProse).not.toContain(documentContent);
+  });
+});
+
+describe('buildSelectionOnlySeedMessage', () => {
+  it('embeds only the highlighted selection, XML-wrapped, with no document-revision block at all', () => {
+    const selectionText = 'The specific highlighted passage.';
+    const message = buildSelectionOnlySeedMessage(selectionText);
+
+    expect(message).toContain('<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>');
+    expect(message).not.toContain('<document-revision-');
+
+    // Same closing-prose convention as buildSeedMessage's selection block: primes the agent for a
+    // follow-up about the highlighted passage specifically.
+    const closingProse = message.slice(message.indexOf('</highlighted-selection>'));
+    expect(closingProse).toMatch(/next message/i);
+    expect(closingProse).toMatch(/highlighted passage/i);
   });
 });

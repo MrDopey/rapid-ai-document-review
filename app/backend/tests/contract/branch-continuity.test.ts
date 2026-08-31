@@ -3,45 +3,46 @@ import type { FastifyInstance } from 'fastify';
 import { CreateDocumentResponse, GetConversationResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { createTestApp, sleep, waitFor } from './test-app.js';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
+import type { PiService } from '../../src/pi/pi-service.js';
+import type { FakeAgentSession } from '../../src/pi/fake-agent-session.js';
 
 /**
- * Spec: specs/005-canvas-conversation-threads — NEW desired behavior for branch creation, not yet
- * implemented. Confirmed via reading conversation-service.ts's `branch()` (and its doc comment)
- * plus http.test.ts's own `branchAndSettle` helper/comment: today, every branch —
- * `selection`-anchored *and* the message-context "Branch this conversation" button alike — fires a
- * fire-and-forget seed message on its own brand-new session the instant it's created
- * (`buildBranchSeedMessage` when a `selection` was given, else a generic
- * `"This conversation was branched from \"<parent>\"."` line), recorded synchronously via
- * `ConversationService.send`'s `publishUserMessage` before any `await` is ever reached. There is
- * also no field anywhere in the domain model naming which specific parent message a branch forked
- * from — only `seedSelection` (a *document* character-range anchor) exists, and it's `null` for a
- * message-context branch entirely.
+ * Spec: specs/005-canvas-conversation-threads, branch seed-message rework. Three branch-creation
+ * paths, each with its own seed-message/continuity shape (`ConversationService.branch`,
+ * seed-excerpt.ts):
  *
- * This suite encodes three NEW requirements instead:
- *   1. A branch gains `forkedFromMessageId` — populated with the id of the parent's last message
- *      at the point of branching when the branch was created *from within a conversation* (no
- *      `selection` in the request), and `null` when created from a document selection (no message
- *      context).
- *   2. Branch creation never auto-sends any seed message — the new conversation starts as a truly
- *      empty placeholder (zero messages), for either creation path.
+ *  - "Branch (New)" (`selection` given, `includeSeedMessage` omitted/false): auto-sends a seed
+ *    message with BOTH the full document (`<document-revision-N>`) and the highlighted selection
+ *    (`<highlighted-selection>`) — `buildBranchSeedMessage`. `forkedFromMessageId` stays `null`:
+ *    not a fork, no continuity snippet.
+ *  - "Branch (Main)" (`selection` given, `includeSeedMessage: true`): auto-sends a seed message
+ *    with ONLY the highlighted selection, no document — `buildSelectionOnlySeedMessage`.
+ *    `forkedFromMessageId` is populated with the parent's last message id: continuity snippet
+ *    renders, so the document doesn't need to be resent.
+ *  - Sidebar "Branch this conversation" (no `selection`): no seed message at all.
+ *    `forkedFromMessageId` is populated (same as Branch (Main)): continuity snippet renders.
+ *
+ * Every seed message is delivered fire-and-forget through the ordinary `send()` path, marked
+ * `isSeed: true`. That flag does double duty:
+ *  - `discardIfEmpty`'s "empty" check ignores it, so an auto-injected seed must never by itself
+ *    prevent an otherwise-untouched branch from being discarded — only a message the *user*
+ *    actually sends keeps the branch alive.
+ *  - `send()` itself skips triggering any agent turn for it (branches are transient/inert until
+ *    the user sends their own first message): the seed is stored as context only, so a freshly
+ *    created branch never fires a request on its own and its status never leaves `idle`.
  *
  * Same black-box harness as http.test.ts (`createTestApp`: in-memory SQLite,
- * `RADR_BE_PI_FAKE_SESSIONS=1` so any agent turn that *did* fire would run deterministically rather
- * than requiring a live model).
+ * `RADR_BE_PI_FAKE_SESSIONS=1` for the non-seed sends this file does make, via `sendAndSettle`).
  */
 
 interface Ctx {
   app: FastifyInstance;
   storage: StorageAdapter;
+  piService: PiService;
 }
 
-/**
- * `ConversationDto` (contracts/http.ts) doesn't carry `forkedFromMessageId` yet — this local type
- * documents the shape these tests expect once a separate implementation pass adds it. Responses
- * are read as raw JSON (never round-tripped through `ConversationDto.parse`, which would silently
- * strip an as-yet-undeclared field) so the field's actual presence/absence is what these
- * assertions see.
- */
+/** `ConversationDto` carries `forkedFromMessageId`; this local type just narrows the raw JSON
+ *  response for direct assertions without round-tripping every field through `ConversationDto.parse`. */
 interface ConversationDtoWithFork {
   id: string;
   parentId: string | null;
@@ -88,14 +89,22 @@ async function getDetail(app: FastifyInstance, conversationId: string): Promise<
   return GetConversationResponse.parse(res.json);
 }
 
-describe('Branch creation: message-level fork anchor + no auto-sent seed message (canvas-conversation-threads, NEW behavior)', () => {
+/** A seed message never triggers an agent turn (see the file-level doc comment above), so a
+ *  freshly created branch's status is already `idle` by the time `branch()`'s HTTP response
+ *  returns — this is a no-op settle wait, kept only so call sites read the same as
+ *  http.test.ts's `branchAndSettle` and stay correct if that ever changes. */
+async function waitForBranchSettle(storage: StorageAdapter, conversationId: string): Promise<void> {
+  await waitFor(() => storage.getConversation(conversationId)?.status === 'idle');
+}
+
+describe('Branch creation: message-level fork anchor (forkedFromMessageId)', () => {
   let ctx: Ctx;
 
   beforeEach(async () => {
     ctx = await createTestApp();
   });
 
-  it("a branch created from within a conversation (no `selection`) records forkedFromMessageId as the id of the parent's last message at the point of branching", async () => {
+  it("sidebar branch (no `selection`) records forkedFromMessageId as the id of the parent's last message, and sends no seed message", async () => {
     const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
     const mainId = created.mainConversation.id;
 
@@ -109,9 +118,16 @@ describe('Branch creation: message-level fork anchor + no auto-sent seed message
     const branchDto = branchRes.json as ConversationDtoWithFork;
 
     expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
+
+    // No seed message: nothing was ever queued to send, so this is already true without a wait —
+    // generous settle window included anyway to prove no turn was fired at all.
+    await sleep(200);
+    expect(ctx.storage.getConversation(branchDto.id)?.status).toBe('idle');
+    const detail = await getDetail(ctx.app, branchDto.id);
+    expect(detail.messages).toEqual([]);
   });
 
-  it('a branch created from a document selection (no message context) records forkedFromMessageId as null, even though the parent has real message history', async () => {
+  it('"Branch (New)" (selection, no includeSeedMessage) records forkedFromMessageId as null, even though the parent has real message history', async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
@@ -132,77 +148,7 @@ describe('Branch creation: message-level fork anchor + no auto-sent seed message
     expect(branchDto.forkedFromMessageId).toBeNull();
   });
 
-  it('a branch created from within a conversation starts as a truly empty placeholder — zero messages, no auto-sent seed comment', async () => {
-    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
-    const mainId = created.mainConversation.id;
-
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
-    expect(branchRes.status).toBe(201);
-    const branchId = (branchRes.json as { id: string }).id;
-
-    // No wait/poll here on purpose: the requirement is that nothing is ever queued to send a seed
-    // message in the first place, so the branch's own message list must already be empty the
-    // instant it exists. Today's `branch()` fails this immediately (not via a timeout) because its
-    // seed message is recorded synchronously, before `branch()` even returns (see the suite's doc
-    // comment above).
-    const detail = await getDetail(ctx.app, branchId);
-    expect(detail.messages).toEqual([]);
-  });
-
-  it('a branch created from a document selection also starts as a truly empty placeholder — zero messages, no auto-sent seed comment', async () => {
-    const content = '# Doc\n\nHighlight this passage please, it matters.';
-    const created = await createDoc(ctx.app, ctx.storage, content);
-    const mainId = created.mainConversation.id;
-
-    const from = created.content.indexOf('Highlight this passage');
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
-      parentConversationId: mainId,
-      selection: { from, to: from + 'Highlight this passage'.length },
-    });
-    expect(branchRes.status).toBe(201);
-    const branchId = (branchRes.json as { id: string }).id;
-
-    const detail = await getDetail(ctx.app, branchId);
-    expect(detail.messages).toEqual([]);
-  });
-
-  it('never starts an agent turn for a freshly-created branch, even after a short settle window', async () => {
-    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
-    const mainId = created.mainConversation.id;
-
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
-    const branchId = (branchRes.json as { id: string }).id;
-
-    // Generous settle window for a fire-and-forget seed turn, if one were (wrongly) still fired —
-    // mirrors http.test.ts's own `branchAndSettle` wait, just asserting the opposite outcome.
-    await sleep(200);
-
-    expect(ctx.storage.getConversation(branchId)?.status).toBe('idle');
-    const detail = await getDetail(ctx.app, branchId);
-    expect(detail.messages).toEqual([]);
-  });
-});
-
-/**
- * `includeSeedMessage` (005-canvas-conversation-threads): originally opted a selection-anchored
- * branch back into the pre-canvas behavior of delivering `buildBranchSeedMessage`'s excerpt as the
- * branch's first message. User-confirmed decision superseded that: the flag no longer resends
- * anything as a chat message — instead it populates `forkedFromMessageId` with the parent's last
- * message id, same as the message-context "Branch this conversation" path always does, so the
- * branch's continuity-snippet UI (`ConversationThreadBox.vue`'s `continuityMessages`) renders the
- * parent's last exchange. `includeSeedMessage: false`/omitted on a selection-anchored branch keeps
- * `forkedFromMessageId` null — the clean/empty placeholder fork with no continuity ("Branch
- * (New)"). Every branch, regardless of this flag, still never auto-sends a seed message (the
- * suite above covers that generally).
- */
-describe('Branch creation: includeSeedMessage now opts a selection-anchored branch into continuity, not a seed message', () => {
-  let ctx: Ctx;
-
-  beforeEach(async () => {
-    ctx = await createTestApp();
-  });
-
-  it("includeSeedMessage: true on a selection-anchored branch populates forkedFromMessageId with the parent's last message id, and sends no seed message", async () => {
+  it('"Branch (Main)" (selection + includeSeedMessage: true) records forkedFromMessageId as the parent\'s last message id', async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
@@ -220,50 +166,306 @@ describe('Branch creation: includeSeedMessage now opts a selection-anchored bran
     });
     expect(branchRes.status).toBe(201);
     const branchDto = branchRes.json as ConversationDtoWithFork;
-    expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
 
-    // No seed message: `publishUserMessage` would have run synchronously before any `await` (as it
-    // did pre-decision), so the absence is already observable without a wait/poll.
-    const detail = await getDetail(ctx.app, branchDto.id);
-    expect(detail.messages).toEqual([]);
+    expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
+  });
+});
+
+describe('Branch creation: seed message content per path', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
   });
 
-  it('includeSeedMessage: false on a selection-anchored branch keeps forkedFromMessageId null and starts as a truly empty placeholder (explicit false, not just omitted)', async () => {
+  it('"Branch (New)" seeds the branch with BOTH the full document and the highlighted selection, XML-wrapped', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+    });
+    expect(branchRes.status).toBe(201);
+    const branchId = (branchRes.json as { id: string }).id;
+
+    await waitForBranchSettle(ctx.storage, branchId);
+    const detail = await getDetail(ctx.app, branchId);
+
+    // First message is the auto-seed, sent as if from the user.
+    const seed = detail.messages[0];
+    expect(seed?.role).toBe('user');
+    expect(seed?.text).toContain('<document-revision-1>');
+    expect(seed?.text).toContain(content);
+    expect(seed?.text).toContain('</document-revision-1>');
+    expect(seed?.text).toContain('<highlighted-selection>');
+    expect(seed?.text).toContain(selectionText);
+    expect(seed?.text).toContain('</highlighted-selection>');
+
+    // The seed message never triggers an agent turn (bug fix: branches are transient/inert until
+    // the user sends their own first message), so this is exactly the one auto-seed message —
+    // not something the *user* sent (covered by the discard-rule suite below).
+    expect(detail.messages.length).toBe(1);
+  });
+
+  it('"Branch (Main)" seeds the branch with ONLY the highlighted selection — no full document', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    await sendAndSettle(ctx.app, ctx.storage, mainId, 'Some context-setting question first.');
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+      includeSeedMessage: true,
+    });
+    expect(branchRes.status).toBe(201);
+    const branchId = (branchRes.json as { id: string }).id;
+
+    await waitForBranchSettle(ctx.storage, branchId);
+    const detail = await getDetail(ctx.app, branchId);
+
+    const seed = detail.messages[0];
+    expect(seed?.role).toBe('user');
+    expect(seed?.text).toContain('<highlighted-selection>');
+    expect(seed?.text).toContain(selectionText);
+    expect(seed?.text).toContain('</highlighted-selection>');
+    // No full-document tag or raw document content this time — the continuity snippet already
+    // supplies prior context.
+    expect(seed?.text).not.toContain('<document-revision-');
+    expect(seed?.text).not.toContain('Some trailing content, unrelated.');
+  });
+
+  it('sidebar branch (no selection) never sends a seed message, even after a settle window', async () => {
+    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
+    const mainId = created.mainConversation.id;
+
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchId = (branchRes.json as { id: string }).id;
+
+    await sleep(200);
+
+    expect(ctx.storage.getConversation(branchId)?.status).toBe('idle');
+    const detail = await getDetail(ctx.app, branchId);
+    expect(detail.messages).toEqual([]);
+  });
+});
+
+describe('Branch creation: the seed message reaches the underlying Pi session\'s own context, not just the app event log', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  /** Polls until `PiService`'s cached (fake) session for `conversationId` exists AND has recorded
+   *  at least one seeded entry — the seed is delivered by `ConversationService.send()`'s `isSeed`
+   *  branch awaiting `piService.seedSession(...)`, but `branch()`/`sendBranchSeedMessage` itself
+   *  is fire-and-forget, so the branch's own HTTP response can return before that completes. */
+  async function waitForSeededSession(piService: PiService, conversationId: string): Promise<FakeAgentSession> {
+    await waitFor(
+      () => {
+        const session = piService.getSessionForTesting(conversationId) as FakeAgentSession | undefined;
+        return (session?.getSeededHistory().length ?? 0) > 0;
+      },
+      { message: `expected a seeded Pi session for conversation ${conversationId}` },
+    );
+    return piService.getSessionForTesting(conversationId) as FakeAgentSession;
+  }
+
+  it('"Branch (New)" eagerly creates the branch\'s Pi session and seeds it with the full document + selection, without starting a turn', async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
 
-    const from = created.content.indexOf('Highlight this passage');
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
     const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
       parentConversationId: mainId,
-      selection: { from, to: from + 'Highlight this passage'.length },
-      includeSeedMessage: false,
+      selection: { from, to: from + selectionText.length },
     });
     expect(branchRes.status).toBe(201);
-    const branchDto = branchRes.json as ConversationDtoWithFork;
-    expect(branchDto.forkedFromMessageId).toBeNull();
+    const branchId = (branchRes.json as { id: string }).id;
 
-    const detail = await getDetail(ctx.app, branchDto.id);
-    expect(detail.messages).toEqual([]);
+    const session = await waitForSeededSession(ctx.piService, branchId);
+    const seeded = session.getSeededHistory();
+
+    // Reached the session's own context — the actual gap this test guards against: previously
+    // the seed only ever landed in the app's own event log, never in the Pi session at all.
+    expect(seeded).toHaveLength(1);
+    expect(seeded[0]).toContain('<document-revision-1>');
+    expect(seeded[0]).toContain(content);
+    expect(seeded[0]).toContain('<highlighted-selection>');
+    expect(seeded[0]).toContain(selectionText);
+
+    // ...but no turn was ever triggered by it: the fake session never entered a streaming turn,
+    // and the branch's own status/message history show no agent activity at all (already covered
+    // from the app-event-log side by the "seed never triggers a turn" tests above).
+    expect(session.isStreaming).toBe(false);
+    expect(ctx.storage.getConversation(branchId)?.status).toBe('idle');
+    const detail = await getDetail(ctx.app, branchId);
+    expect(detail.messages.length).toBe(1);
+    expect(detail.messages[0]?.role).toBe('user');
   });
 
-  it('includeSeedMessage: true without a selection (message-context branch) changes nothing — forkedFromMessageId is already populated on that path regardless of the flag', async () => {
-    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
+  it('"Branch (Main)" (selection only, includeSeedMessage: true) also seeds the underlying Pi session, without starting a turn', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
-    const mainDetailBeforeBranch = await getDetail(ctx.app, mainId);
-    const lastParentMessageId = mainDetailBeforeBranch.messages.at(-1)?.id;
-    expect(lastParentMessageId).toBeTruthy();
 
+    await sendAndSettle(ctx.app, ctx.storage, mainId, 'Some context-setting question first.');
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
     const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
       parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
       includeSeedMessage: true,
     });
     expect(branchRes.status).toBe(201);
-    const branchDto = branchRes.json as ConversationDtoWithFork;
-    expect(branchDto.forkedFromMessageId).toBe(lastParentMessageId);
+    const branchId = (branchRes.json as { id: string }).id;
 
+    const session = await waitForSeededSession(ctx.piService, branchId);
+    const seeded = session.getSeededHistory();
+
+    expect(seeded).toHaveLength(1);
+    expect(seeded[0]).toContain('<highlighted-selection>');
+    expect(seeded[0]).toContain(selectionText);
+    expect(seeded[0]).not.toContain('<document-revision-');
+    expect(session.isStreaming).toBe(false);
+  });
+
+  it('a sidebar branch (no selection, no seed message) never creates a Pi session at all until the user sends a real message', async () => {
+    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
+    const mainId = created.mainConversation.id;
+
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    expect(branchRes.status).toBe(201);
+    const branchId = (branchRes.json as { id: string }).id;
+
+    // Generous settle window: nothing was ever queued to seed a session for, so this should stay
+    // true well before any timeout would matter.
     await sleep(200);
-    const detail = await getDetail(ctx.app, branchDto.id);
-    expect(detail.messages).toEqual([]);
+    expect(ctx.piService.getSessionForTesting(branchId)).toBeUndefined();
+  });
+
+  it('the branch\'s own real turn still works normally once the user replies, reusing the exact session the seed already created', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+    });
+    const branchId = (branchRes.json as { id: string }).id;
+
+    const seededSession = await waitForSeededSession(ctx.piService, branchId);
+
+    await sendAndSettle(ctx.app, ctx.storage, branchId, 'Please tighten this passage up.');
+
+    // Same session instance — the seed's eager `getOrCreateSession` call is what the user's real
+    // first message goes on to reuse, not a second, freshly-forked one.
+    expect(ctx.piService.getSessionForTesting(branchId)).toBe(seededSession);
+
+    const detail = await getDetail(ctx.app, branchId);
+    // seed (user, isSeed) + the user's real message + the assistant's reply.
+    expect(detail.messages.length).toBe(3);
+    expect(detail.messages[1]?.role).toBe('user');
+    expect(detail.messages[2]?.role).toBe('assistant');
+  });
+});
+
+describe('Empty-branch auto-discard: an auto-sent seed message does not count as user activity', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  it('a "Branch (New)" branch with only its auto-seed message still discards as empty', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+    });
+    const branchId = (branchRes.json as { id: string }).id;
+    await waitForBranchSettle(ctx.storage, branchId);
+
+    // Sanity: the seed message really is present (stored, even though it never triggered an
+    // agent turn) — proving the discard below is exercising the *new* "no user message" rule,
+    // not the old "zero messages" one.
+    const detail = await getDetail(ctx.app, branchId);
+    expect(detail.messages.length).toBe(1);
+
+    const discardRes = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+    expect(discardRes.status).toBe(200);
+    expect(ctx.storage.getConversation(branchId)).toBeNull();
+  });
+
+  it('a "Branch (Main)" branch with only its auto-seed message still discards as empty', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+      includeSeedMessage: true,
+    });
+    const branchId = (branchRes.json as { id: string }).id;
+    await waitForBranchSettle(ctx.storage, branchId);
+
+    const discardRes = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+    expect(discardRes.status).toBe(200);
+    expect(ctx.storage.getConversation(branchId)).toBeNull();
+  });
+
+  it('a "Branch (New)" branch survives discard once the user sends their own message after the seed', async () => {
+    const content = '# Doc\n\nHighlight this passage please, it matters.';
+    const created = await createDoc(ctx.app, ctx.storage, content);
+    const mainId = created.mainConversation.id;
+
+    const selectionText = 'Highlight this passage please, it matters.';
+    const from = created.content.indexOf(selectionText);
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+      selection: { from, to: from + selectionText.length },
+    });
+    const branchId = (branchRes.json as { id: string }).id;
+    await waitForBranchSettle(ctx.storage, branchId);
+
+    await sendAndSettle(ctx.app, ctx.storage, branchId, 'Please tighten this passage up.');
+
+    const discardRes = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+    expect(discardRes.status).toBe(409);
+    expect(ctx.storage.getConversation(branchId)).not.toBeNull();
+  });
+
+  it('a sidebar branch (no seed at all) still discards as empty with zero messages', async () => {
+    const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
+    const mainId = created.mainConversation.id;
+
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchId = (branchRes.json as { id: string }).id;
+
+    const discardRes = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
+    expect(discardRes.status).toBe(200);
+    expect(ctx.storage.getConversation(branchId)).toBeNull();
   });
 });

@@ -35,3 +35,15 @@ export const maxFocusedConversationsFromEnv = resolveMaxFocusedConversations(
 export function useFocusCap(viewportFitCount: Ref<number>) {
   return computed(() => Math.max(1, Math.min(maxFocusedConversationsFromEnv, viewportFitCount.value)));
 }
+
+/**
+ * Shared disabled-reason tooltip for every "branch (and auto-focus the result)" entry point —
+ * toolbar "Branch (New)"/"Branch (Main)" (EditorComponent.vue), the sidebar "Branch this
+ * conversation" (ConversationThreadBox.vue), and the focus-view "Branch" (ConversationView.vue) —
+ * once the live focus cap is reached with no free slot to auto-focus the new branch into. Wording
+ * adapted from ConversationThreadBox.vue's own pre-existing Focus-button cap tooltip ("Un-focus
+ * another conversation first (max N)") so the two related messages read as one system.
+ */
+export function focusCapBranchTooltip(maxFocused: number): string {
+  return `Un-focus another conversation first (max ${maxFocused}) to branch`;
+}

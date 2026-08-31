@@ -16,7 +16,7 @@ Every conversation's `AgentSession` is created with **all built-in tools disable
 
 ```ts
 createAgentSession({
-  noTools: "all",                                  // disables read, bash, edit, write
+  noTools: "builtin",                              // disables read, bash, edit, write; keeps customTools active
   customTools: [readDocumentTool, proposeDocumentEditTool],
   sessionManager,                                  // per-conversation JSONL file
   resourceLoader,                                  // carries the system prompt
@@ -24,10 +24,15 @@ createAgentSession({
 })
 ```
 
-`noTools: "all"` is not a convenience — it is a requirement. The built-in `edit`/`write` tools mutate
-real files, which would be a document mutation outside the proposal pipeline; `bash` would be an
-arbitrary-code escape from a localhost service. The agent's entire capability surface is the two
+`noTools: "builtin"` is not a convenience — it is a requirement. The built-in `edit`/`write` tools
+mutate real files, which would be a document mutation outside the proposal pipeline; `bash` would be
+an arbitrary-code escape from a localhost service. The agent's entire capability surface is the two
 tools below, and v1 adds no others (constitution v1 non-goals).
+
+Note: `noTools: "all"` is a *different*, stronger mode in the vendor SDK — it sets
+`allowedToolNames` to an empty allowlist, which rejects every tool name, including `customTools`.
+`"builtin"` is the value that disables only the SDK's own built-in tools while leaving
+`customTools` active; using `"all"` here would silently leave the agent with zero usable tools.
 
 ---
 

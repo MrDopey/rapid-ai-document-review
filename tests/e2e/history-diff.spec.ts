@@ -65,6 +65,14 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
       const diffDialog = page.getByRole('dialog', { name: 'Compare revisions' });
       await expect(diffDialog).toBeVisible();
 
+      // Regression guard: the dialog previously had no `max-height`, so inside
+      // `.modal-overlay`'s viewport-centering flexbox a long document's diff could grow far
+      // taller than the viewport and push the header/Close button off-screen with no scrollbar
+      // to reach it. `.toBeVisible()` alone doesn't catch this (it doesn't require the element to
+      // be within the viewport) — `.toBeInViewport()` does.
+      await expect(diffDialog).toBeInViewport();
+      await expect(diffDialog.getByRole('button', { name: 'Close' })).toBeInViewport();
+
       const added = diffDialog.locator('.added, ins');
       const removed = diffDialog.locator('.removed, del');
       await expect(added.first()).toBeVisible();

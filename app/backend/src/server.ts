@@ -157,7 +157,12 @@ export function buildApp() {
     registerWsRoutes(instance, { eventHub, storage });
   });
 
-  return { app, storage };
+  // `piService` is returned alongside `app`/`storage` solely for black-box contract tests
+  // (test-app.ts's `TestApp`) that need to reach into a conversation's underlying (fake, under
+  // `RADR_BE_PI_FAKE_SESSIONS=1`) Pi session for introspection — e.g. asserting a branch's seed
+  // message actually reached the session's own context, not just the application's event log
+  // (branch-continuity.test.ts). Production code (`main()` below) only ever destructures `app`.
+  return { app, storage, piService };
 }
 
 async function main() {

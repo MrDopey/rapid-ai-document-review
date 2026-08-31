@@ -151,7 +151,11 @@ export function extractSeedExcerpt(content: string, from: number, to: number): s
  */
 export function wrapDocumentRevision(revision: number, content: string): string {
   const tag = `document-revision-${revision}`;
-  return [`<${tag}>`, content, `</${tag}>`].join('\n');
+  // Blank line (not just a single '\n') on both sides of `content`: this string is rendered
+  // through a markdown renderer downstream, which collapses a single newline inside a paragraph
+  // into a plain space — without a full blank line here, the closing tag would visually run onto
+  // the same line as the content's last line instead of starting its own.
+  return [`<${tag}>`, '', content, '', `</${tag}>`].join('\n');
 }
 
 /**
@@ -162,7 +166,8 @@ export function wrapDocumentRevision(revision: number, content: string): string 
  */
 export function wrapHighlightedSelection(content: string): string {
   const tag = 'highlighted-selection';
-  return [`<${tag}>`, content, `</${tag}>`].join('\n');
+  // Same blank-line-on-both-sides reasoning as `wrapDocumentRevision` above.
+  return [`<${tag}>`, '', content, '', `</${tag}>`].join('\n');
 }
 
 /**
@@ -180,19 +185,28 @@ function buildSeedMessage(leadIn: string, revision: number, documentContent: str
   const lines = [leadIn, '', wrapDocumentRevision(revision, documentContent)];
 
   if (selectionText !== undefined) {
-    lines.push(
-      '',
-      'The user highlighted the following passage to start this conversation:',
-      '',
-      wrapHighlightedSelection(selectionText),
-      '',
-      "The next message you receive will be the user's request — an edit, or a clarification or " +
-        'discussion — about that highlighted passage specifically, not the document as a whole. ' +
-        'Wait for that message before proposing or making any changes.',
-    );
+    lines.push('', ...buildSelectionBlock(selectionText));
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Shared block naming the highlighted passage and priming the agent that the *next* user message
+ * will concern it specifically — factored out of `buildSeedMessage` so `buildSelectionOnlySeedMessage`
+ * below (Branch (Main): selection only, no document) can reuse the exact same wording/tagging
+ * convention without a document section in front of it.
+ */
+function buildSelectionBlock(selectionText: string): string[] {
+  return [
+    'The user highlighted the following passage to start this conversation:',
+    '',
+    wrapHighlightedSelection(selectionText),
+    '',
+    "The next message you receive will be the user's request — an edit, or a clarification or " +
+      'discussion — about that highlighted passage specifically, not the document as a whole. ' +
+      'Wait for that message before proposing or making any changes.',
+  ];
 }
 
 /**
@@ -202,9 +216,22 @@ function buildSeedMessage(leadIn: string, revision: number, documentContent: str
  * Unlike a branch excerpt, this is never capped/trimmed — Main's seed is meant to give the agent
  * the whole document up front, the same content `read_document` (document-tools.ts) would
  * otherwise serve on demand.
+ *
+ * The lead-in's second sentence primes the agent for the turns to come — Main has no
+ * selection-specific closing prose the way `buildSelectionBlock` gives a branch, so this is the
+ * only place to set that expectation: the user's messages here will ask it to revise or edit the
+ * document (via `propose_document_edit`) as well as to clarify or discuss it, not just to
+ * passively acknowledge receipt of the content above.
  */
 export function buildMainSeedMessage(title: string, revision: number, content: string): string {
-  return buildSeedMessage(`Here is the document under review, "${title}" (revision ${revision}):`, revision, content);
+  return buildSeedMessage(
+    `Here is the document under review, "${title}" (revision ${revision}):\n\n` +
+      "Expect the user's messages in this conversation to ask you to revise or edit the document — " +
+      'propose changes with `propose_document_edit` — as well as to ask clarifying questions or ' +
+      'discuss it; both are ordinary, expected parts of this conversation.',
+    revision,
+    content,
+  );
 }
 
 /**
@@ -219,6 +246,17 @@ export function buildBranchSeedMessage(revision: number, documentContent: string
     documentContent,
     selectionText,
   );
+}
+
+/**
+ * Seeds a "Branch (Main)" branch (selection-anchored, `includeSeedMessage: true`) with *only* the
+ * highlighted selection — no full document. Unlike "Branch (New)" (`buildBranchSeedMessage`
+ * above), this path also populates `forkedFromMessageId`, so the continuity snippet
+ * (`ConversationThreadBox.vue`) already gives the agent's session the parent conversation's prior
+ * context; re-sending the whole document here would just be redundant with that.
+ */
+export function buildSelectionOnlySeedMessage(selectionText: string): string {
+  return buildSelectionBlock(selectionText).join('\n');
 }
 
 /** Generates a conversation name from the selection's first heading or leading words (FR-014). */

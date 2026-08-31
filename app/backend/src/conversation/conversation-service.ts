@@ -10,6 +10,7 @@ import type {
   ReviewConversationResponse,
   SendMessageResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
+import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
 import { DocumentNotFoundError } from '../document/document-service.ts';
 import { logger } from '../logging.ts';
@@ -23,7 +24,13 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
-import { buildMainSeedMessage, deriveBranchName, extractSeedExcerpt } from './seed-excerpt.ts';
+import {
+  buildBranchSeedMessage,
+  buildMainSeedMessage,
+  buildSelectionOnlySeedMessage,
+  deriveBranchName,
+  extractSeedExcerpt,
+} from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
 
@@ -69,6 +76,16 @@ interface UserMessageEventData {
   role: 'user' | 'assistant';
   text: string;
   reasoning: string | null;
+  /**
+   * True only for a `role: 'user'` message this service injected itself (a branch's auto-seed
+   * message on the "Branch (New)"/"Branch (Main)" paths — see `branch()` below), as opposed to one
+   * the user genuinely typed and sent. Absent/false/undefined on every other message, including
+   * every `role: 'assistant'` one. Exists solely so `discardIfEmpty`'s "empty" check
+   * (`hasUserSentMessage`) can tell an auto-injected seed apart from a real user reply that reads
+   * identically otherwise (same `role: 'user'` shape) — it is never surfaced in `MessageDto`/the
+   * HTTP contract, since the UI has no reason to render a seed message any differently.
+   */
+  isSeed?: boolean;
 }
 
 /**
@@ -245,26 +262,26 @@ export class ConversationService {
 
   /**
    * Branches a new conversation from a document selection or from another conversation
-   * (FR-011/FR-013). Unlike `ensureMain`'s/`review()`'s seed messages, a branch defaults to never
-   * auto-sending anything and never starting an agent turn (005-canvas-conversation-threads): it
-   * persists with zero messages, a truly empty placeholder, and it is up to the user to send its
-   * first message. `extractSeedExcerpt` is still used below, but only to derive the branch's name
-   * (the nearest enclosing section heading).
+   * (FR-011/FR-013). Three creation paths, each with its own seed-message/continuity shape:
    *
-   * `request.includeSeedMessage` (the toolbar's "Branch (Main)" button/Alt+Shift+S, distinct from
-   * the default "Branch (New)"/Alt+Shift+C path) no longer resends anything as a chat message —
-   * that pre-canvas "restore context" behavior is gone. Instead it opts a selection-anchored branch
-   * into the same message-level continuity a message-context branch already gets: `forkedFromMessageId`
-   * is populated with the parent's last message id, which `ConversationThreadBox.vue`'s
-   * `continuityMessages` renders as a read-only snippet of the parent's last exchange. Omitted/false
-   * on a selection-anchored branch keeps `forkedFromMessageId` null — the clean/empty placeholder
-   * fork with no continuity ("Branch (New)").
+   *  - "Branch (New)" (`selection` given, `includeSeedMessage` omitted/false): seeded with the
+   *    *full document* plus the highlighted selection (`buildBranchSeedMessage`), and
+   *    `forkedFromMessageId` stays `null` — not a fork, no parent message context, no continuity
+   *    snippet. The seed message stands in for the missing continuity: the agent gets the whole
+   *    document on its own, fresh session.
+   *  - "Branch (Main)" (`selection` given, `includeSeedMessage: true`): seeded with *only* the
+   *    highlighted selection (`buildSelectionOnlySeedMessage`) — no full document, since
+   *    `forkedFromMessageId` is populated here (the parent's last message id) and the resulting
+   *    continuity snippet (`ConversationThreadBox.vue`'s `continuityMessages`) already gives the
+   *    agent the prior context a full document resend would duplicate.
+   *  - Sidebar "Branch this conversation" (no `selection`): no seed message at all — there's no
+   *    selection to seed with — but `forkedFromMessageId` is still populated (same as Branch
+   *    (Main)), so the continuity snippet renders.
    *
-   * A branch created from within a conversation (no `selection` given — the sidebar's "Branch this
-   * conversation" button) always gets `forkedFromMessageId` populated, regardless of
-   * `includeSeedMessage` (which is meaningless there — there's no selection to opt in from): it's
-   * the id of the parent's last message at the point of branching, a message-level fork anchor
-   * distinct from `seedSelection`'s document character-range anchor.
+   * Every seed message above is sent fire-and-forget via `sendBranchSeedMessage` (same
+   * non-blocking convention as `seedMain`/`review()`), marked `isSeed: true` so it's excluded from
+   * `discardIfEmpty`'s "has the user sent anything" check below — an auto-injected seed must never
+   * by itself keep an otherwise-untouched branch from being discarded.
    */
   branch(request: CreateConversationRequest): ConversationDto {
     const parent = this.getConversationOrThrow(request.parentConversationId);
@@ -293,8 +310,8 @@ export class ConversationService {
       const { from, to } = request.selection;
       const text = documentContent.slice(from, to);
       seedSelection = { from, to, text };
-      // Used only for `deriveBranchName`'s heading search below — a branch never sends a seed
-      // message any more, so this excerpt has no other purpose.
+      // Used only for `deriveBranchName`'s heading search below — the seed *message* sent further
+      // down uses the raw selection text directly, not this derived excerpt.
       seedExcerpt = extractSeedExcerpt(documentContent, from, to);
     }
 
@@ -342,10 +359,16 @@ export class ConversationService {
       forkedFromMessageId: row.forkedFromMessageId,
     });
 
-    // A branch persists as a truly empty placeholder — zero messages, no agent turn ever started
-    // (005-canvas-conversation-threads) — for every creation path, including `includeSeedMessage:
-    // true`: that flag only affects `forkedFromMessageId` above now, it never resends the document
-    // as a chat message (see this method's doc comment).
+    // Seed message, per path (see this method's doc comment above):
+    //  - selection given, no includeSeedMessage opt-in ("Branch (New)"): full document + selection.
+    //  - selection given, includeSeedMessage: true ("Branch (Main)"): selection only.
+    //  - no selection (sidebar "Branch this conversation"): nothing to send.
+    if (seedSelection) {
+      const seedMessage = request.includeSeedMessage
+        ? buildSelectionOnlySeedMessage(seedSelection.text)
+        : buildBranchSeedMessage(document.currentRevision, documentContent, seedSelection.text);
+      this.sendBranchSeedMessage(row.id, seedMessage);
+    }
 
     return toConversationDto(this.storage, row, document.currentRevision, documentContent || this.automerge.get().getContent());
   }
@@ -447,10 +470,13 @@ export class ConversationService {
    *
    * Requires every one of:
    *  - `kind === 'branch'` — Main (`ensureMain`'s single per-document row) and `review`
-   *    conversations (which always start with a real seed message, so they could never satisfy
-   *    the next condition anyway) are never discarded this way.
-   *  - Zero real messages (`buildMessages`) — a fresh branch's own `conversation_started` event
-   *    carries no `message_completed` row, so this stays true right up until the first `send()`.
+   *    conversations (which always start with a real, non-seed-marked seed message, so they could
+   *    never satisfy the next condition anyway) are never discarded this way.
+   *  - No message the *user* has sent yet (`hasUserSentMessage`) — "empty" no longer means zero
+   *    stored messages: `branch()` above now auto-sends its own seed message (`isSeed: true`) on
+   *    both the "Branch (New)" and "Branch (Main)" paths, and that alone must not count as activity
+   *    that keeps the placeholder around. Only once the user sends their own first message (real
+   *    `role: 'user'`, `isSeed` false/absent) does the branch survive a close.
    *  - No other conversation has since branched off *it* — deleting this row would either orphan
    *    that child's `parent_id` or simply be refused outright by the FK on `conversation.parent_id`.
    *
@@ -463,7 +489,7 @@ export class ConversationService {
     if (conversation.kind !== 'branch') {
       throw new ConversationNotEmptyError('Only a branch conversation can be discarded this way');
     }
-    if (this.buildMessages(conversationId).length > 0) {
+    if (this.hasUserSentMessage(conversationId)) {
       throw new ConversationNotEmptyError('Conversation has messages and cannot be discarded');
     }
     const hasChildren = this.storage
@@ -698,7 +724,7 @@ export class ConversationService {
     return lines;
   }
 
-  async send(conversationId: string, message: string): Promise<SendMessageResponse> {
+  async send(conversationId: string, message: string, options: { isSeed?: boolean } = {}): Promise<SendMessageResponse> {
     const conversation = this.getConversationOrThrow(conversationId);
     if (conversation.status === 'closed') {
       throw new ConversationClosedError('Conversation is closed');
@@ -707,7 +733,30 @@ export class ConversationService {
     // Recorded directly (rather than relying on Pi to report the user's own message back
     // through its event stream) so message history and retry are well-defined regardless of
     // exactly which lifecycle events a given Pi SDK version emits for the prompt it was given.
-    this.publishUserMessage(conversation.documentId, conversationId, message);
+    this.publishUserMessage(conversation.documentId, conversationId, message, options.isSeed ?? false);
+
+    // A seed message (branch's/Main's auto-injected document/selection context, `isSeed: true`)
+    // is stored above so it's part of the app's own event log for whenever the user's own first
+    // message arrives, but must never itself trigger an agent turn — branches are transient/inert
+    // until the user sends a real message of their own. Everything below this point
+    // (concurrency-limiter admission -> `piService.send`) is what actually starts the model
+    // generating a response, so a seed message never falls through into it.
+    //
+    // It must, however, still reach the underlying Pi session's OWN context — otherwise the
+    // model never actually sees the document/selection excerpt the UI displays as if it were part
+    // of the conversation (previously-confirmed gap: the branch's real Pi session was only ever
+    // created lazily on the user's first genuine message, forked from the parent, with the seed
+    // content nowhere in it). `piService.seedSession` creates/forks that session right now and
+    // hands it the content through a vendor SDK path that persists it into session history
+    // without ever calling `session.prompt()` — see its doc comment in pi-service.ts for exactly
+    // why that mechanism (not `deliverAs: 'nextTurn'`, used by the fold-summary path) is the right
+    // one here. Any failure here is surfaced to this method's caller exactly like a failed
+    // `piService.send()` would be — `sendBranchSeedMessage`'s existing fire-and-forget
+    // `.catch(...)` (and `seedMain`'s) already logs and swallows it the same way.
+    if (options.isSeed) {
+      await this.piService.seedSession(conversation, message);
+      return { accepted: true, queued: false, contextRevision: conversation.contextRevision };
+    }
 
     const turnId = newId('turn');
     const bridge = new EventBridge(
@@ -836,6 +885,7 @@ export class ConversationService {
           role: data.role,
           text: data.text,
           reasoning: data.reasoning,
+          isToolCallCarrier: computeIsToolCallCarrier(data),
           toolCalls: [],
           createdAt: row.createdAt,
         };
@@ -847,6 +897,24 @@ export class ConversationService {
       // row — dropping it here is strictly better than surfacing a response the client can't
       // parse at all.
       .filter((message) => Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string');
+  }
+
+  /**
+   * `discardIfEmpty`'s "empty" test: whether the *user* has genuinely sent a message in this
+   * conversation, as opposed to only having received a branch's own auto-injected seed message
+   * (`role: 'user'`, `isSeed: true` — see `sendBranchSeedMessage`/`branch()`). Reads the raw event
+   * log directly rather than `buildMessages` (whose `MessageDto` mapping doesn't carry `isSeed` —
+   * that flag is intentionally never surfaced over the HTTP contract) so a seed message is filtered
+   * out here without needing to expose it to the client at all.
+   */
+  private hasUserSentMessage(conversationId: string): boolean {
+    return this.storage
+      .listEventsByConversation(conversationId)
+      .filter((row) => row.eventType === 'message_completed')
+      .some((row) => {
+        const data = row.data as UserMessageEventData;
+        return data.role === 'user' && !data.isSeed;
+      });
   }
 
   private getLastUserMessageText(conversationId: string): string {
@@ -864,11 +932,28 @@ export class ConversationService {
     this.publisher.publish(documentId, conversationId, type, data);
   }
 
-  private publishUserMessage(documentId: string, conversationId: string, text: string): void {
-    const data: UserMessageEventData = { messageId: newId('msg'), role: 'user', text, reasoning: null };
+  private publishUserMessage(documentId: string, conversationId: string, text: string, isSeed = false): void {
+    const data: UserMessageEventData = { messageId: newId('msg'), role: 'user', text, reasoning: null, isSeed };
     // No separate log here: `EventPublisher.publish` -> `eventService.append` already emits the
     // compliant `{ event: 'message_completed', documentId, conversationId, sequence }` record
     // (FR-042) — a second one under a name outside the closed vocabulary would be pure duplication.
     this.publisher.publish(documentId, conversationId, 'message_completed', data);
+  }
+
+  /**
+   * Fire-and-forget delivery of a branch's auto-seed message (`branch()` below), through the
+   * ordinary `send()` path with `isSeed: true` so `discardIfEmpty` can later tell it apart from a
+   * genuine user reply. Same non-blocking/log-and-swallow convention as `seedMain`'s and
+   * `review()`'s own seed sends: the branch already exists and its own HTTP response has already
+   * returned by the time this settles or fails.
+   */
+  private sendBranchSeedMessage(conversationId: string, message: string): void {
+    void this.send(conversationId, message, { isSeed: true }).catch((err) => {
+      // `event: 'agent_error'` — same reasoning as seedMain's/review()'s seed-message catch blocks.
+      logger.warn(
+        { event: 'agent_error', conversationId, err: err instanceof Error ? err.message : String(err) },
+        'failed to deliver branch seed message',
+      );
+    });
   }
 }

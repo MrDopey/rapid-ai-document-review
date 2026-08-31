@@ -10,10 +10,13 @@ import { httpClient } from '../../src/transport/http-client.js';
 // Rename UI (title edit) below drives `useConversationsStore().rename()`, which calls through to
 // `httpClient.renameConversation` — mocked here (same convention as App.spec.ts) so these tests
 // never hit a real network call.
+// Branch-cap parity fix below also drives `useConversationsStore().branch()`, which calls through
+// to `httpClient.branchConversation` — mocked here alongside the pre-existing rename mock.
 vi.mock('../../src/transport/http-client.js', () => ({
   httpClient: {
     getConversation: vi.fn(),
     renameConversation: vi.fn(),
+    branchConversation: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status = 0;
@@ -138,6 +141,71 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
     expect(focusButton.classes()).toContain('focus-disabled');
     expect(focusButton.attributes('aria-disabled')).toBe('true');
     expect(focusButton.attributes('title')).toMatch(/max 2/);
+  });
+});
+
+// Branch-cap parity fix (005-canvas-conversation-threads follow-up): the sidebar's "Branch this
+// conversation" button is now disabled — with the shared focus-limit tooltip — whenever
+// `atFocusCap`, and auto-focuses the newly created branch (via `branch-created`) on every success,
+// mirroring `ConversationView.vue`'s focus-view Branch button and `EditorComponent.vue`'s toolbar
+// buttons.
+describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.branchConversation).mockReset();
+  });
+
+  function mountBox(props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {}) {
+    const store = useConversationsStore();
+    store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One', canBranch: props.canBranch ?? true })];
+    store.messagesByConversation['conv-1'] = [];
+    return mount(ConversationThreadBox, {
+      props: { conversationId: 'conv-1', atFocusCap: props.atFocusCap, maxFocused: props.maxFocused },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('is enabled, with the plain "Branch this conversation" tooltip, when under the cap', () => {
+    const wrapper = mountBox({ atFocusCap: false, maxFocused: 3 });
+    const branchButton = wrapper.find('.branch-button');
+    expect(branchButton.attributes('disabled')).toBeUndefined();
+    expect(branchButton.attributes('title')).toBe('Branch this conversation');
+  });
+
+  it('is disabled, with a focus-limit tooltip naming the max, once at the cap', () => {
+    const wrapper = mountBox({ atFocusCap: true, maxFocused: 2 });
+    const branchButton = wrapper.find('.branch-button');
+    expect(branchButton.attributes('disabled')).toBeDefined();
+    expect(branchButton.attributes('title')).toMatch(/max 2/);
+    expect(branchButton.attributes('aria-label')).toMatch(/max 2/);
+  });
+
+  it('prioritizes the existing "max depth reached" reason over the cap tooltip when both apply', () => {
+    const wrapper = mountBox({ atFocusCap: true, maxFocused: 2, canBranch: false });
+    const branchButton = wrapper.find('.branch-button');
+    expect(branchButton.attributes('disabled')).toBeDefined();
+    expect(branchButton.attributes('title')).toBe('Maximum conversation depth reached');
+    expect(branchButton.attributes('title')).not.toMatch(/max 2/);
+  });
+
+  it('clicking while at the cap never calls the API and emits nothing', async () => {
+    const wrapper = mountBox({ atFocusCap: true, maxFocused: 2 });
+    await wrapper.find('.branch-button').trigger('click');
+    expect(httpClient.branchConversation).not.toHaveBeenCalled();
+    expect(wrapper.emitted('branch-created')).toBeUndefined();
+  });
+
+  it('branches successfully and emits branch-created with the new id when under the cap', async () => {
+    vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
+    const wrapper = mountBox({ atFocusCap: false });
+    await wrapper.find('.branch-button').trigger('click');
+    await flushPromises();
+
+    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv-1' });
+    expect(wrapper.emitted('branch-created')?.[0]).toEqual(['branch-9']);
   });
 });
 

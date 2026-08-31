@@ -13,7 +13,15 @@ import ConversationView from './ConversationView.vue';
 // Escape on for *this* instance; every other simultaneously-open panel renders with its trap
 // inactive. This reuses `focus-manager.ts`'s existing `activeTraps` LIFO stack as-is (no new stack
 // semantics needed) since App.vue guarantees at most one panel ever has `active: true` at once.
-const props = defineProps<{ conversationId: string; active: boolean }>();
+// `atFocusCap`/`maxFocused` (005-canvas-conversation-threads, branch-cap parity): App.vue's own
+// live focus-cap state, passed straight through to `ConversationView.vue`'s "Branch" button — this
+// panel is purely a pass-through here, same as its `select`/`branch-created` emit relays below.
+// Defaults match `ConversationView.vue`'s own (never at cap) so existing tests that mount this
+// panel directly without them (e.g. MessageBubble.spec.ts) are unaffected.
+const props = withDefaults(
+  defineProps<{ conversationId: string; active: boolean; atFocusCap?: boolean; maxFocused?: number }>(),
+  { atFocusCap: false, maxFocused: 3 },
+);
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'interact'): void;
@@ -22,6 +30,10 @@ const emit = defineEmits<{
   // panel's own slot from `conversationId` to the new id (a `replaceFocus`, not a plain add), so a
   // panel that navigates internally doesn't need a free focus slot to keep showing something.
   (e: 'select', conversationId: string): void;
+  // Passes through `ConversationView.vue`'s "Branch" button result — App.vue's handler adds the
+  // new branch to the focus set (never replacing this panel's own conversation) only if there's a
+  // free slot under the live focus cap; see `ConversationView.vue`'s `branch-created` doc comment.
+  (e: 'branch-created', conversationId: string): void;
 }>();
 
 const store = useConversationsStore();
@@ -47,7 +59,13 @@ const name = computed(() => store.conversations.find((c) => c.id === props.conve
     <button type="button" class="close-detail-button" aria-label="Close full view" @click="emit('close')">×</button>
     <!-- `ConversationView.vue`'s own `select` emit must still reach App.vue — see the `select`
          emit's doc comment above. -->
-    <ConversationView :conversation-id="conversationId" @select="emit('select', $event)" />
+    <ConversationView
+      :conversation-id="conversationId"
+      :at-focus-cap="atFocusCap"
+      :max-focused="maxFocused"
+      @select="emit('select', $event)"
+      @branch-created="emit('branch-created', $event)"
+    />
   </div>
 </template>
 

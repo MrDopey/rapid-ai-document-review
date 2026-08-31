@@ -40,7 +40,7 @@ import type { AgentSessionEventLike } from '../../src/pi/agent-session-port.js';
  * Deliberately bypasses `PiService`/`ConversationService`/HTTP entirely and constructs a real
  * `AgentSession` inline, mirroring `pi-service.ts`'s own construction code path exactly (same
  * `ModelRuntime.create`, `SessionManager.create`, `DefaultResourceLoader`, `createAgentSession`
- * call with `noTools: 'all'` and the two custom tools) — so this test observes the SDK's raw event
+ * call with `noTools: 'builtin'` and the two custom tools) — so this test observes the SDK's raw event
  * stream directly, independent of `EventBridge`'s translation/filtering (e.g. `thinkingVisible`
  * gating, ephemeral-vs-persisted routing), which is exactly what "the double cannot drift silently"
  * requires: this test must fail on its own if the real SDK stops emitting an event type the bridge
@@ -163,7 +163,7 @@ async function createRealSession(
     cwd,
     agentDir: config.piCodingAgentDir,
     modelRuntime,
-    noTools: 'all', // Principle III, agent-tools.md — the load-bearing assertion this test makes.
+    noTools: 'builtin', // Principle III, agent-tools.md — the load-bearing assertion this test makes.
     customTools: tools,
     resourceLoader,
     sessionManager,
@@ -175,7 +175,7 @@ async function createRealSession(
 
 describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge contract, opt-in)', () => {
   it(
-    'noTools: "all" leaves session.getActiveToolNames() empty of every Pi built-in tool',
+    'noTools: "builtin" leaves session.getActiveToolNames() with the custom tools but no Pi built-in tool',
     async () => {
       const h = buildLiveHarness();
       const doc = h.storage.getDocument()!;

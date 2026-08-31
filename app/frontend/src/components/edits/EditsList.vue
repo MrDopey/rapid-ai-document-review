@@ -12,7 +12,14 @@ const store = useEditsStore();
 const previewingEditId = ref<string | null>(null);
 const { busyId: busyEditId, run: runBusy } = useBusyId<string>();
 
-const edits = computed(() => store.editsFor(props.conversationId));
+// Oldest-first (top) to newest-last (bottom), by actual proposal creation time. The store's
+// underlying array is newest-first (matches GET /conversations/:id/edits' `created_at DESC`,
+// which several other backend call sites rely on for their own re-sort-to-ascending — see
+// edit-service.ts's acceptRemaining) — sorted here rather than in the store since this display
+// order is specific to this list, not to every consumer of `editsFor`/`pendingFor`.
+const edits = computed(() =>
+  [...store.editsFor(props.conversationId)].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+);
 const pendingCount = computed(() => edits.value.filter((e) => e.status === 'pending').length);
 const exhausted = computed(() => store.exhausted[props.conversationId] === true);
 
@@ -96,7 +103,12 @@ function closePreview(): void {
       </li>
     </ul>
 
-    <div v-if="previewingEditId" class="modal-overlay preview-overlay">
+    <!-- Click-outside-to-dismiss: a click landing on the backdrop itself (not bubbled up from the
+         DiffViewer dialog nested inside it) closes the preview. `@click.self` (the same pattern
+         App.vue uses for `.conversation-detail-overlay`) only fires when the click originates on
+         this exact element, so a click on the DiffViewer content never triggers it. The explicit
+         "Close" button and Escape (via `useFocusTrap`'s `onEscape`) stay untouched alongside this. -->
+    <div v-if="previewingEditId" class="modal-overlay preview-overlay" @click.self="closePreview">
       <DiffViewer :edit-id="previewingEditId" @close="closePreview" />
     </div>
   </section>
@@ -148,6 +160,12 @@ function closePreview(): void {
 .edit-summary {
   display: flex;
   justify-content: space-between;
+  /* Fix: flex's default `align-items: stretch` was letting `.status-badge` grow tall/thin
+     (its 1px `currentColor` border stretching into a distorted pill) to match `.summary-text`'s
+     height whenever a long summary wrapped to multiple lines — i.e. the badge's height tracked
+     its sibling's content height instead of staying fixed to its own text. `flex-start` pins it
+     to a fixed, content-sized height regardless of how tall the summary next to it grows. */
+  align-items: flex-start;
   gap: 0.5rem;
   font-weight: 600;
 }

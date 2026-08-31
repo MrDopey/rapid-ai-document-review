@@ -5,7 +5,13 @@ import ConversationThreadBox from '../conversation/ConversationThreadBox.vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import type { AnchorPositionSource } from './anchorY.js';
 import { computeConversationLayout, resolveBaseAnchorY, type ConversationLayoutInput } from './conversationLayout.js';
-import { loadCanvasScrollPosition, persistCanvasScrollPosition } from '../../composables/panePersistence.js';
+import {
+  loadCanvasScrollPosition,
+  persistCanvasScrollPosition,
+  loadEditorSplit,
+  persistEditorSplit,
+} from '../../composables/panePersistence.js';
+import { clamp, useResizeHandle } from '../../composables/useResizeHandle.js';
 
 // 005-canvas-conversation-threads/US4 (T023's handoff, fulfilled here): `filter` is lifted state
 // owned by `App.vue` (shared with `HudPanel.vue`'s "Active only"/"All" toggle) rather than local —
@@ -16,16 +22,31 @@ import { loadCanvasScrollPosition, persistCanvasScrollPosition } from '../../com
 // conversations currently shown in an open detail panel — its header's "Close" action only renders
 // while that's true (see that component's `isFocused` prop doc comment). `maxFocusedConversations`
 // (the live, viewport-aware cap) lets each box compute its own Focus-button disabled affordance.
-const props = defineProps<{
-  modelValue: string;
-  filter: 'active' | 'all';
-  focusedConversationIds: ReadonlySet<string>;
-  maxFocusedConversations: number;
-}>();
+// Bug-fix (editor-vs-canvas scope fix): `editorVisible` gates *only* `EditorComponent` below
+// (`v-show`, so CodeMirror's mounted state and the scroll-sync `anchorTop` ref survive being
+// hidden) — `.thread-columns` always renders regardless, since hiding the editor must never hide
+// the conversation sidebar. This replaced `App.vue`'s own `v-show="canvasVisible"` on the whole
+// `<DocumentCanvas>` element, which used to hide both at once. Defaulted to `true` so every
+// existing test/usage that doesn't pass it (there is none left after this fix, but keeps the prop
+// optional/non-breaking for any future direct mount) behaves exactly as before this prop existed.
+const props = withDefaults(
+  defineProps<{
+    modelValue: string;
+    filter: 'active' | 'all';
+    focusedConversationIds: ReadonlySet<string>;
+    maxFocusedConversations: number;
+    editorVisible?: boolean;
+  }>(),
+  { editorVisible: true },
+);
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
   (e: 'branch-from-selection', range: { from: number; to: number }, includeSeedMessage: boolean): void;
   (e: 'toggle-focus', conversationId: string): void;
+  // Relays `ConversationThreadBox.vue`'s sidebar "Branch this conversation" result up to App.vue,
+  // same auto-focus-on-success convention as `ConversationDetailPanel.vue`'s own `branch-created`
+  // (focus-view "Branch" button) — see App.vue's consolidated `onBranchCreated` handler.
+  (e: 'branch-created', conversationId: string): void;
 }>();
 
 const conversationsStore = useConversationsStore();
@@ -50,8 +71,15 @@ function onEditorRef(instance: unknown): void {
 // Goals: bounded by `maxConversationDepth`, default 3) where the extra bookkeeping of a per-box
 // observer buys nothing a shared one doesn't already give for free.
 const ESTIMATED_BOX_HEIGHT_PX = 160; // before a box has ever reported its own measured height
-const COLUMN_WIDTH_PX = 340; // ConversationThreadBox is ~320px wide + a visible inter-column gap
-const MIN_STACK_GAP_PX = 16; // consistent with the app's existing 1rem-ish spacing scale
+// ConversationThreadBox is a fixed 320px wide (see that component's own `.conversation-thread-box`
+// CSS) plus a visible inter-column gap — this constant is that box width *plus* the gap, since it
+// doubles as the horizontal pitch used for each `.thread-column`'s `left` offset below. The gap
+// portion was 340 - 320 = 20px; bumped here to 20 * 1.5 = 30px (340 -> 350) per an explicit request
+// to widen the horizontal gap *between depth columns* by 1.5x. Distinct from `MIN_STACK_GAP_PX`
+// below, which (per `conversationLayout.ts`'s own JSDoc) only governs the *vertical* gap between
+// boxes stacked within one column — that constant is untouched by this change.
+const COLUMN_WIDTH_PX = 350;
+const MIN_STACK_GAP_PX = 24; // 1.5x the previous 16px, for clearer visual separation between stacked boxes
 
 const boxHeights = ref(new Map<string, number>());
 const observedEls = new Map<string, HTMLElement>();
@@ -121,6 +149,79 @@ function onCanvasScroll(): void {
   }, SCROLL_PERSIST_DEBOUNCE_MS);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Second, independent drag-to-resize splitter (Editor | Conversation sidebar), one level down
+// from App.vue's own Preview|Canvas splitter (`editorPreviewResize` there) — mirrors that one's
+// naming/clamp/persistence conventions (a fraction of the container's own measured width,
+// drag-clamped to `MIN_PANE_FRACTION`, persisted per-viewer via panePersistence.ts) but is
+// entirely local to this component: its own ref, its own localStorage key
+// (`loadEditorSplit`/`persistEditorSplit`), and its own `useResizeHandle` instance — dragging this
+// handle never touches `previewFr`/`canvasFr` (App.vue's `.panes` grid) and vice versa. Just this
+// one clamp constant is duplicated locally rather than shared/extracted — `useResizeHandle`
+// already factors out the actual drag/keyboard mechanics both splitters reuse, and a single
+// `const` isn't worth a shared composable on its own.
+//
+// Unlike Preview|Canvas (a CSS Grid `fr` split, computed natively by the grid algorithm),
+// `.editor-pane`/`.thread-columns` are flex children — `editorFraction` here is rendered as an
+// explicit CSS `width` percentage of `.canvas-content`'s own box (see the template), with
+// `.thread-columns` keeping its pre-existing `min-width: threadColumnsWidth` floor (FR-006: the
+// scroll extent needed to reach the deepest branch column) untouched, so this splitter can never
+// crush it below whatever that already-required minimum is — the browser enforces `min-width` as
+// an absolute floor over a smaller `width` regardless of this splitter's own clamp.
+const MIN_PANE_FRACTION = 0.3; // mirrors App.vue's own Preview|Canvas splitter clamp
+const DEFAULT_EDITOR_FRACTION = 0.6;
+const EDITOR_THREAD_HANDLE_SPACE_PX = 6; // one 6px handle between the editor and the sidebar
+
+const editorFraction = ref(loadEditorSplit(DEFAULT_EDITOR_FRACTION));
+
+function persistCurrentEditorSplit(): void {
+  persistEditorSplit(editorFraction.value);
+}
+
+// Slide-transition support (Editor visibility toggle — see the `<Transition name="editor-slide">`
+// wrapping `<EditorComponent>` and `.thread-columns`' own inline `transition` below): tracks
+// whether the Editor|sidebar splitter itself is being dragged, so `.thread-columns`' width
+// transition can be suppressed for the drag's own live, pointer-1:1 width changes — only an
+// `editorVisible` toggle should ever animate. (`.editor-pane`'s own width transition doesn't need
+// this guard: it's scoped to the Vue `<Transition>`'s enter/leave-active classes below, which only
+// ever apply while `editorVisible` itself is changing — a drag never touches that prop, so it
+// never enters/leaves the Transition in the first place.)
+const editorSplitDragging = ref(false);
+
+// `containerEl: canvasEl` — `.document-canvas`, not `.canvas-content` — deliberately: it's the
+// actual scrolling *viewport* (a stable width even while `.thread-columns` pushes `.canvas-content`
+// wider than it, per FR-006's horizontal-pan case), exactly the same "measure the visible
+// container, not the content" choice App.vue's `editorPreviewResize` makes against `.panes`.
+const editorThreadResize = useResizeHandle({
+  axis: 'horizontal',
+  containerEl: canvasEl,
+  beginGesture: (containerRect) => {
+    // Same approximation App.vue's own `editorPreviewResize` makes: `MIN_PANE_FRACTION` is a
+    // fraction of the container's *total* width (handle included) per the spec, while the editor's
+    // own px math is computed over `remainingPx` (handle excluded) — the two are close enough (the
+    // handle is `EDITOR_THREAD_HANDLE_SPACE_PX`, a few px) that this distinction rarely matters.
+    const remainingPx = containerRect.width - EDITOR_THREAD_HANDLE_SPACE_PX;
+    const startEditorPx = remainingPx * editorFraction.value;
+    const minPx = containerRect.width * MIN_PANE_FRACTION;
+    return (deltaPx) => {
+      const nextEditorPx = clamp(startEditorPx + deltaPx, minPx, Math.max(minPx, remainingPx - minPx));
+      editorFraction.value = nextEditorPx / remainingPx;
+    };
+  },
+  onSettle: () => {
+    persistCurrentEditorSplit();
+    editorSplitDragging.value = false;
+  },
+});
+
+/** Wraps `editorThreadResize.startDrag` only to flag the drag's own duration
+ *  (`editorSplitDragging`, reset by `onSettle` above) so `.thread-columns`' width transition never
+ *  applies to this splitter's live pointer-driven width changes — see that ref's own doc comment. */
+function onEditorHandlePointerDown(event: PointerEvent): void {
+  editorSplitDragging.value = true;
+  editorThreadResize.startDrag(event);
+}
+
 function heightOf(conversationId: string): number {
   return boxHeights.value.get(conversationId) ?? ESTIMATED_BOX_HEIGHT_PX;
 }
@@ -168,6 +269,15 @@ const threadColumnsWidth = computed(() => {
   const maxColumn = columns.value.reduce((max, [column]) => Math.max(max, column), 0);
   return (maxColumn + 1) * COLUMN_WIDTH_PX;
 });
+// Bug-fix (editor-vs-canvas scope fix): the template only uses this exact `${threadColumnsWidth}px`
+// value while `editorVisible` is true (`.editor-pane`, `flex: 1 1 0`, is still in the flex row and
+// competing for space) — once the editor is hidden, `v-show`'s `display: none` drops it out of
+// `.canvas-content`'s flex layout entirely (same rule as a grid item — see `panesStyle`'s doc
+// comment in App.vue), so `.thread-columns` becomes the row's only flex item and is given
+// `width: 100%` instead, letting it (and its `.canvas-content` row) expand to fill the space the
+// editor used to occupy rather than leaving it as dead space. `min-width` stays pinned to this
+// computed value either way, so the horizontal scroll extent needed to reach the deepest branch
+// column (FR-006) is never lost.
 
 // Coordinator follow-up (parent/child branch lineage): a lightweight visual connector between a
 // branch and the conversation it was branched from, drawn on the canvas alongside the existing
@@ -247,13 +357,54 @@ defineExpose({
 <template>
   <div class="document-canvas" tabindex="0" :ref="onCanvasRootRef" @scroll="onCanvasScroll">
     <div class="canvas-content">
-      <EditorComponent
-        :ref="onEditorRef"
-        :model-value="modelValue"
-        @change="emit('change', $event)"
-        @branch-from-selection="(range, includeSeedMessage) => emit('branch-from-selection', range, includeSeedMessage)"
-      />
-      <div class="thread-columns" :style="{ width: `${threadColumnsWidth}px`, minWidth: `${threadColumnsWidth}px` }">
+      <!-- Slide transition (hide/show toggle only — see the `:deep(.editor-slide-*)` rules in
+           <style> below): wrapping the `v-show`-toggled `EditorComponent` in a Vue `<Transition>`
+           defers `display: none` until the leave animation finishes (and restores `display` up
+           front, before the reverse transition starts, on enter), so this reads as `.editor-pane`
+           sliding its width to/from zero rather than instantly vanishing/popping in. -->
+      <Transition name="editor-slide">
+        <EditorComponent
+          v-show="editorVisible"
+          :ref="onEditorRef"
+          :model-value="modelValue"
+          :focused-conversation-ids="focusedConversationIds"
+          :max-focused-conversations="maxFocusedConversations"
+          :style="{ flex: '0 0 auto', width: `${editorFraction * 100}%` }"
+          @change="emit('change', $event)"
+          @branch-from-selection="(range, includeSeedMessage) => emit('branch-from-selection', range, includeSeedMessage)"
+        />
+      </Transition>
+      <!-- Editor|Conversation-sidebar resize handle: independent of App.vue's own Preview|Canvas
+           handle (different container, different persisted fraction — see `editorThreadResize`
+           above). Only rendered while the editor is actually visible — with nothing on its left to
+           resize against once `editorVisible` is false, there's nothing for it to do (`.thread-
+           columns` already expands to fill the freed width on its own, unconditionally). -->
+      <div
+        v-if="editorVisible"
+        class="resize-handle resize-handle--horizontal editor-thread-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize Editor and conversation sidebar panes"
+        tabindex="0"
+        @pointerdown="onEditorHandlePointerDown($event)"
+        @keydown="editorThreadResize.onKeydown($event)"
+      ></div>
+      <div
+        class="thread-columns"
+        :style="{
+          width: editorVisible ? `${(1 - editorFraction) * 100}%` : '100%',
+          minWidth: `${threadColumnsWidth}px`,
+          // Slide transition (Editor hide/show toggle, kept in sync with `.editor-pane`'s own
+          // Transition above): a plain inline `transition: width` rather than a Vue `<Transition>`
+          // — `.thread-columns` never toggles v-show/v-if, it just reactively resizes — suppressed
+          // to `none` while the Editor|sidebar splitter itself is being dragged
+          // (`editorSplitDragging`), same reasoning as App.vue's own
+          // `previewSplitDragging`/`panesStyle`. `prefers-reduced-motion: reduce` is handled in
+          // <style> below (a `!important` media-query override, since it must win over this inline
+          // value).
+          transition: editorSplitDragging ? 'none' : 'width 220ms ease',
+        }"
+      >
         <!-- Branch-lineage connectors: drawn once, behind every `.thread-column` (source order,
              no z-index needed), spanning the full laid-out canvas area so a connector can run
              between any two columns regardless of which one is on top. -->
@@ -280,9 +431,11 @@ defineExpose({
             :conversation-id="entry.id"
             :is-focused="focusedConversationIds.has(entry.id)"
             :focus-disabled="!focusedConversationIds.has(entry.id) && focusedConversationIds.size >= maxFocusedConversations"
+            :at-focus-cap="focusedConversationIds.size >= maxFocusedConversations"
             :max-focused="maxFocusedConversations"
             :style="{ top: `${entry.top}px` }"
             @toggle-focus="emit('toggle-focus', $event)"
+            @branch-created="emit('branch-created', $event)"
           />
         </div>
       </div>
@@ -297,6 +450,12 @@ defineExpose({
   height: 100%;
   min-height: 0;
   overflow: auto;
+  /* Coordinator follow-up (scroll jiggle) defense-in-depth: reserves the scrollbar's width
+     up front so its appearance/disappearance (e.g. vertical scroll extent changing as
+     CodeMirror mounts/unmounts virtualized lines) can't itself shift `.canvas-content`'s
+     available width. No direct evidence this was the active driver, but it's a cheap guard
+     alongside the `.editor-pane` flex-basis fix below. */
+  scrollbar-gutter: stable;
   background: var(--panel-bg-alt, #eef0f3);
 }
 .canvas-content {
@@ -320,8 +479,76 @@ defineExpose({
 .thread-column {
   position: absolute;
   top: 0;
-  width: 340px;
+  width: 350px; /* mirrors COLUMN_WIDTH_PX in the script (the horizontal column pitch/gap) */
   padding: 0 12px;
+}
+/* Editor|Conversation-sidebar resize handle: same look/feel/cursor convention as App.vue's own
+   Preview|Canvas `.resize-handle`/`.resize-handle--horizontal` (duplicated here since `<style
+   scoped>` doesn't cross component boundaries) — a vertical dividing line dragged left/right.
+   `.editor-thread-handle` adds this component's own layout specifics: a fixed 6px flex-basis
+   (`EDITOR_THREAD_HANDLE_SPACE_PX` in the script) and `align-self: stretch` so it spans the full
+   height of whichever sibling pane (`.editor-pane`/`.thread-columns`) is currently tallest, rather
+   than collapsing to zero height (its own default flex-start alignment) since it has no content of
+   its own. */
+.resize-handle {
+  position: relative;
+  touch-action: none;
+  background: transparent;
+}
+.resize-handle--horizontal {
+  cursor: col-resize;
+}
+.resize-handle--horizontal::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border-color, #ccc);
+}
+.resize-handle--horizontal:hover::after,
+.resize-handle--horizontal:focus-visible::after {
+  background: var(--accent-color, #2563eb);
+  width: 4px;
+}
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent-color, #2563eb);
+  outline-offset: -2px;
+}
+.editor-thread-handle {
+  flex: 0 0 6px; /* mirrors EDITOR_THREAD_HANDLE_SPACE_PX in the script */
+  align-self: stretch;
+}
+/* Slide transition (Editor hide/show toggle — see `<Transition name="editor-slide">` wrapping
+   `EditorComponent` in the template above): scoped to the Vue-generated `-active`/`-from`/`-to`
+   phase classes only — never a permanent `transition`/forced `width` on `.editor-pane` itself
+   (EditorComponent.vue's own root) — so this can never fire for an ordinary reactive width change,
+   in particular the Editor|sidebar splitter drag, which stays 1:1 with pointer movement and never
+   touches `editorVisible` in the first place (so it never enters/leaves this Transition at all).
+   `:deep()` is required since these Vue-generated classes land on `EditorComponent`'s own root
+   element, a different component's scoped context. `overflow: hidden` is scoped the same way, only
+   clipping the pane's content while it's actually animating past its normal bounds. The forced
+   `width: 0% !important` on `-from`/`-to` is needed to win over `.editor-pane`'s own
+   higher-specificity inline `width` (its current split fraction, unchanged by this transition). */
+:deep(.editor-slide-enter-active),
+:deep(.editor-slide-leave-active) {
+  transition: width 220ms ease;
+  overflow: hidden;
+}
+:deep(.editor-slide-enter-from),
+:deep(.editor-slide-leave-to) {
+  width: 0% !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :deep(.editor-slide-enter-active),
+  :deep(.editor-slide-leave-active) {
+    transition: none !important;
+  }
+  .thread-columns {
+    transition: none !important;
+  }
 }
 /* Branch-lineage connectors (coordinator follow-up): decorative only — never intercepts clicks —
    and rendered before every `.thread-column` in source order so it always paints behind the boxes

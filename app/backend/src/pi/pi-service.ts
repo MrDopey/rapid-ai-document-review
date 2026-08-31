@@ -225,7 +225,7 @@ export class PiService {
       cwd,
       agentDir: config.piCodingAgentDir,
       modelRuntime,
-      noTools: 'all', // disables built-in read/bash/edit/write (Principle III, agent-tools.md)
+      noTools: 'builtin', // disables built-in read/bash/edit/write while keeping customTools active (Principle III, agent-tools.md)
       customTools: tools as unknown as ToolDefinition[],
       resourceLoader,
       sessionManager,
@@ -290,6 +290,56 @@ export class PiService {
       this.evictSession(conversation.id);
       throw err;
     }
+  }
+
+  /**
+   * Delivers a branch's auto-seed message (the document/selection excerpt built by
+   * `seed-excerpt.ts`, sent by `ConversationService.sendBranchSeedMessage`) into the underlying
+   * Pi session's OWN history at branch-creation time, without ever triggering a turn. This is the
+   * fix for the previously-confirmed gap: `ConversationService.send()` returns early for
+   * `isSeed: true` before ever calling `PiService.send()`/`session.prompt()` (branches must stay
+   * transient/inert until the user's own first real message — a prior, deliberate fix for "branch
+   * new and main both immediately triggered a request as soon as i branched"), which meant the
+   * branch's real Pi session was never even created at seed time, let alone shown the seed
+   * content — the model had no idea the excerpt the UI displays ever existed until forking lazily
+   * off the parent on the user's first genuine message.
+   *
+   * `getOrCreateSession` here creates/forks the session exactly as a real `send()` eventually
+   * would (so the *same* cached session is reused for the user's first real message afterward —
+   * no double session-creation). The content is then handed to `sendCustomMessage()` with neither
+   * `triggerTurn` nor `deliverAs` set: the vendor SDK's own non-streaming/no-trigger branch
+   * (`agent-session.js`'s `sendCustomMessage`) appends the message directly to the session's
+   * in-memory `state.messages` AND persists it to the on-disk session file
+   * (`appendCustomMessageEntry`) immediately — `session.prompt()` is never called anywhere in this
+   * path, so no completion is requested and no `agent_*` event is ever produced for it. The stored
+   * `role: "custom"` entry is translated to an ordinary `role: "user"` turn by the SDK's own
+   * `convertToLlm` the next time this session's `prompt()` actually runs (the user's first real
+   * message), so the model sees the seed content as normal prior context at that point.
+   *
+   * Deliberately NOT `sendCustomMessage(..., { deliverAs: 'nextTurn' })` — the mechanism
+   * `deliverFoldSummary` below uses for the same "no turn, but in context next time" requirement.
+   * That mode only holds the message in an in-memory queue (`_pendingNextTurnMessages`), spliced
+   * into the messages array at the moment `prompt()` is next called; it is never persisted to the
+   * session file on its own, so it would silently vanish if the process restarted before the
+   * branch's first real message ever arrived. A branch can sit untouched far longer than a
+   * fold-summary delivery ever would, so the seed needs to survive that.
+   */
+  async seedSession(conversation: ConversationRow, seedMessage: string): Promise<void> {
+    const session = await this.getOrCreateSession(conversation);
+    await session.sendCustomMessage({
+      customType: 'branch_seed',
+      content: seedMessage,
+      display: true,
+    });
+  }
+
+  /** Test-only accessor: the cached session for `conversationId`, if one has been created —
+   *  lets contract tests reach into `FakeAgentSession`'s own test-only introspection methods
+   *  (e.g. `getSeededHistory()`) to assert that seed content actually reached the underlying Pi
+   *  session's context, not just the application's own event log, without exposing the whole
+   *  `sessions` map. */
+  getSessionForTesting(conversationId: string): AgentSessionLike | undefined {
+    return this.sessions.get(conversationId);
   }
 
   /**

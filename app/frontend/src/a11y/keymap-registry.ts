@@ -35,6 +35,11 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
     scope: 'Document editor',
   },
   {
+    keys: 'Ctrl/Cmd+F',
+    description: 'Open the in-editor find/replace panel (via @codemirror/search\'s searchKeymap), instead of the browser\'s native find-in-page.',
+    scope: 'Document editor',
+  },
+  {
     keys: 'Ctrl/Cmd+Z',
     description: 'Undo the last editor change.',
     scope: 'Document editor',
@@ -118,6 +123,23 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
     description:
       'Toggle "Sync scroll" — scrolling either the Editor or Preview pane also scrolls the other to the ' +
       'matching position. Works from anywhere except the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
+  {
+    keys: 'Ctrl+Alt+1',
+    description:
+      'Show or hide the Preview pane. The Canvas pane expands to use the freed space. No-op if the document ' +
+      'editor is already hidden (at least one of Preview/Editor must stay visible). Works from anywhere except ' +
+      'the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
+  {
+    keys: 'Ctrl+Alt+2',
+    description:
+      'Show or hide the document editor within the Canvas pane. The conversation sidebar stays visible and ' +
+      'expands to use the freed space. No-op if the Preview pane is already hidden (at least one of ' +
+      'Preview/Editor must stay visible). Works from anywhere except the document editor, the composer, or an ' +
+      'open dialog.',
     scope: 'Global',
   },
 ] as const;

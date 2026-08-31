@@ -126,3 +126,25 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   maxReplacementAttempts: 2,
   softWordCountThreshold: 20_000,
 };
+
+/**
+ * True for an assistant message segment with no visible text and no reasoning — the real Pi SDK's
+ * tool-call-carrier segment (backend `event-bridge.ts`'s `message_end` handling) reads this way,
+ * so the UI treats it the same as reasoning content: hidden by default, revealed by the "Show
+ * reasoning" toggle, instead of always rendering as a blank "Assistant" bubble.
+ *
+ * The single source of truth for `MessageDto.isToolCallCarrier` (contracts/http.ts): computed
+ * fresh from the stored/broadcast `text`/`reasoning` facts (no separate persisted
+ * `isToolCallCarrier`/`hasToolCall` field) per this app's event-sourcing architecture — events
+ * store raw facts, and this interpretation is derived at read time instead, so a future change to
+ * it applies retroactively with no backfill/migration. The persisted `message_completed` event's
+ * `data` (shared/contracts/events.ts's `MessageCompletedEvent`) never carries this field either,
+ * so BOTH the backend's REST path (`conversation-service.ts`'s `buildMessages`, for
+ * `GET /conversations/:id`) and the frontend's own WS live-broadcast handler
+ * (`stores/conversations.ts`'s `message_completed` case, which sees the exact same raw
+ * `text`/`reasoning` over the wire) call this one function, so a live-streamed update and a page
+ * reload can never classify the same message differently.
+ */
+export function computeIsToolCallCarrier(data: { text: string; reasoning: string | null | undefined }): boolean {
+  return data.text === '' && !data.reasoning;
+}

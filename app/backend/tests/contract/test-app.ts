@@ -1,10 +1,15 @@
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
+import type { PiService } from '../../src/pi/pi-service.js';
 
 export interface TestApp {
   app: FastifyInstance;
   storage: StorageAdapter;
+  /** Test-only introspection hook (`PiService.getSessionForTesting`) — lets a contract test
+   *  assert against a conversation's underlying (fake, under `RADR_BE_PI_FAKE_SESSIONS=1`) Pi
+   *  session directly, e.g. `branch-continuity.test.ts`'s seed-reaches-session-context coverage. */
+  piService: PiService;
 }
 
 /**

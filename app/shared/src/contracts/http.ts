@@ -287,6 +287,12 @@ export const MessageDto = z.object({
   role: z.enum(['user', 'assistant']),
   text: z.string(),
   reasoning: z.string().nullable().optional(),
+  // Server-computed (conversation-service.ts's `buildMessages`) from the stored event's
+  // `text`/`reasoning` fields — not itself persisted anywhere (see `MessageCompletedEvent`,
+  // shared/contracts/events.ts). True only for a tool-call-carrier assistant segment with no
+  // visible text/reasoning. The UI hides these by default, revealing them only when "Show
+  // reasoning" is on.
+  isToolCallCarrier: z.boolean().optional(),
   toolCalls: z
     .array(
       z.object({

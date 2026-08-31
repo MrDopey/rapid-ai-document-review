@@ -13,6 +13,7 @@
   "dependencies": {
     "@codemirror/commands": "^6.8.0",
     "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.35.0",
     "@rapid-ai-document-review/shared": "*",

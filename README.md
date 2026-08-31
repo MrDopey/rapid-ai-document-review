@@ -93,8 +93,10 @@ The backend reads the following environment variables (`app/backend/src/config.t
 | `RADR_BE_PI_AGENT_MODEL` | **Yes** | none | Pins every new agent conversation to a specific model, in `provider/model` or `provider/model:thinkingLevel` format (e.g. `anthropic/claude-opus-4-5` or `anthropic/claude-opus-4-5:high`). The backend fails fast at startup if this is unset or blank. See precedence note below. |
 | `RADR_BE_LOG_LEVEL` | No | `info` | Pino log level. |
 | `RADR_BE_PI_FAKE_SESSIONS` | No | unset (disabled) | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite. |
+| `RADR_BE_HUNK_CONTEXT_LINES` | No | `3` | Lines of surrounding document context shown around a proposed-edit hunk in the diff preview. |
 | `RADR_FE_BACKEND_PORT` | No | `3000` | Vite dev-server proxy target — must match `RADR_BE_PORT`. |
 | `RADR_FE_HOST` | No | `127.0.0.1` | Vite dev-server bind host. |
+| `RADR_FE_PORT` | No | `3001` | Vite dev-server port. |
 | `ANTHROPIC_API_KEY` | Only for live agent use | none | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable. |
 
 ### Model configuration precedence
@@ -103,8 +105,6 @@ The backend reads the following environment variables (`app/backend/src/config.t
 
 1. `RADR_BE_PI_AGENT_MODEL` wins for every newly created agent session in the process.
 2. `models.json` custom model definitions (in `RADR_BE_PI_CODING_AGENT_DIR`) are the lookup table that `RADR_BE_PI_AGENT_MODEL`'s `provider/model` value resolves against.
-
-Secrets and credentials must never be committed to version control.
 
 ---
 
@@ -116,9 +116,12 @@ Without the devcontainer, ensure Node 26.1.0 is installed locally instead.
 
 ```bash
 export GEMINI_API_KEY=
-export RADR_BE_PI_AGENT_MODEL=google/gemini-3.6-flash
+export RADR_BE_PI_AGENT_MODEL=google/gemini-3.5-flash-lite
 export RADR_BE_HOST=0.0.0.0
 export RADR_FE_HOST=0.0.0.0
+export RADR_BE_PORT=4000
+export RADR_FE_BACKEND_PORT=4000
+export RADR_FE_PORT=4001
 
 # 1. Install dependencies
 npm install

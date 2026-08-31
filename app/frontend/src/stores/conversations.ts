@@ -6,6 +6,7 @@ import type {
   PrimaryWhenBusy,
   ReviewConversationResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
+import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame } from '../transport/ws-client.js';
 import {
@@ -21,6 +22,11 @@ export interface ConversationMessageState {
   role: 'user' | 'assistant';
   text: string;
   reasoning: string | null;
+  /** True only for a real-SDK tool-call-carrier assistant segment (event-bridge.ts's `message_end`
+   *  handling) — an internal artifact of the tool-calling protocol with no visible reply text.
+   *  `MessageBubble.vue` gates its visibility on the "Show reasoning" toggle, same as reasoning
+   *  content, instead of always rendering it as a blank "Assistant" bubble. */
+  isToolCallCarrier: boolean;
   streaming: boolean;
   createdAt: string;
 }
@@ -85,6 +91,7 @@ export const useConversationsStore = defineStore('conversations', {
         role: m.role,
         text: m.text,
         reasoning: m.reasoning ?? null,
+        isToolCallCarrier: m.isToolCallCarrier ?? false,
         streaming: false,
         createdAt: m.createdAt,
       }));
@@ -331,6 +338,7 @@ export const useConversationsStore = defineStore('conversations', {
             role: event.data.role,
             text: '',
             reasoning: null,
+            isToolCallCarrier: false,
             streaming: true,
             createdAt: event.at,
           });
@@ -349,6 +357,7 @@ export const useConversationsStore = defineStore('conversations', {
               role: 'assistant',
               text: event.data.delta,
               reasoning: null,
+              isToolCallCarrier: false,
               streaming: true,
               createdAt: event.at,
             });
@@ -368,6 +377,7 @@ export const useConversationsStore = defineStore('conversations', {
               role: 'assistant',
               text: '',
               reasoning: event.data.delta,
+              isToolCallCarrier: false,
               streaming: true,
               createdAt: event.at,
             });
@@ -378,10 +388,17 @@ export const useConversationsStore = defineStore('conversations', {
         case 'message_completed': {
           if (!conversationId) break;
           const list = ensureArray(this.messagesByConversation, conversationId);
+          // `isToolCallCarrier` isn't part of the persisted/broadcast event's data (event-sourcing:
+          // the event stores the raw `text`/`reasoning` facts, not this derived interpretation) —
+          // computed here via the same shared `computeIsToolCallCarrier` the HTTP `MessageDto` path
+          // uses server-side (conversation-service.ts's `buildMessages`), so a live WS update and a
+          // page reload always agree on the same message's tagging with no duplicated logic.
+          const isToolCallCarrier = computeIsToolCallCarrier(event.data);
           const existing = list.find((m) => m.id === event.data.messageId);
           if (existing) {
             existing.text = event.data.text;
             existing.reasoning = event.data.reasoning;
+            existing.isToolCallCarrier = isToolCallCarrier;
             existing.streaming = false;
           } else {
             list.push({
@@ -389,6 +406,7 @@ export const useConversationsStore = defineStore('conversations', {
               role: event.data.role,
               text: event.data.text,
               reasoning: event.data.reasoning,
+              isToolCallCarrier,
               streaming: false,
               createdAt: event.at,
             });

@@ -27,7 +27,7 @@ were verified against the npm registry and, for Pi, against the published type d
 | Tool lifecycle | events `tool_execution_start` / `_update` / `_end` |
 | Agent lifecycle | events `agent_start`, `turn_start`, `turn_end`, `agent_end`, `agent_settled` |
 | Tool-call id for idempotency (FR-040) | `defineTool({ execute: async (toolCallId, params) => … })` — the id is the first argument |
-| Custom document tools | `createAgentSession({ noTools: "all", customTools: [...] })` |
+| Custom document tools | `createAgentSession({ noTools: "builtin", customTools: [...] })` |
 | Configurable session storage (design §34) | `SessionManager.create(cwd, sessionDir)`, `SessionManager.open(path, sessionDir)` |
 | Branch a conversation | `SessionManager.forkFrom(sourcePath, targetCwd, sessionDir)`, `sm.createBranchedSession(leafId)` |
 | Read a closed conversation (FR-035/036) | `SessionManager.open(path)` → `getEntries()`, `getTree()`, `buildContextEntries()` |
@@ -85,17 +85,19 @@ own `conversation` row and never parses JSONL itself. What changes is a factual 
 
 ## R3. Can the agent be confined to the document without a Pi extension?
 
-**Decision**: Yes. Create every session with `noTools: "all"` plus exactly two `customTools`:
+**Decision**: Yes. Create every session with `noTools: "builtin"` plus exactly two `customTools`:
 `read_document` and `propose_document_edit`. Supply agent instructions through
 `new DefaultResourceLoader({ …, systemPrompt })`.
 
 **Rationale**: Two independent confirmations from the type declarations:
-`CreateAgentSessionOptions.noTools?: "all" | "builtin"` disables the built-in `read`/`bash`/`edit`/
-`write` tools (which would otherwise let an agent touch the real filesystem and bypass the edit
-pipeline, violating Principle III), and `DefaultResourceLoaderOptions` accepts `systemPrompt` and
-`appendSystemPrompt`. Together these give full control of tools and instructions through the SDK,
-so Principle VII's "no Pi extension without demonstrated necessity" is satisfied — necessity is
-**not** demonstrated, and the plan introduces no extension.
+`CreateAgentSessionOptions.noTools?: "all" | "builtin"` — `"builtin"` disables only the SDK's own
+built-in `read`/`bash`/`edit`/`write` tools (which would otherwise let an agent touch the real
+filesystem and bypass the edit pipeline, violating Principle III) while leaving `customTools`
+active; `"all"` is a stronger, different mode that sets an empty tool allowlist and disables
+*every* tool, `customTools` included, so it must not be used here. `DefaultResourceLoaderOptions`
+separately accepts `systemPrompt` and `appendSystemPrompt`. Together these give full control of
+tools and instructions through the SDK, so Principle VII's "no Pi extension without demonstrated
+necessity" is satisfied — necessity is **not** demonstrated, and the plan introduces no extension.
 
 **Alternatives considered**: Keeping the built-in `edit`/`write` tools pointed at a scratch file and
 diffing it (rejected — an agent writing to a file is a direct mutation outside the edit pipeline,

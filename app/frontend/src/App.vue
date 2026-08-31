@@ -16,7 +16,16 @@ import ConversationDetailPanel from './components/conversation/ConversationDetai
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
 import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
-import { loadPaneSizes, persistPaneSizes, loadSyncScrollEnabled, persistSyncScrollEnabled } from './composables/panePersistence.js';
+import {
+  loadPaneSizes,
+  persistPaneSizes,
+  loadSyncScrollEnabled,
+  persistSyncScrollEnabled,
+  loadPreviewVisible,
+  persistPreviewVisible,
+  loadEditorVisible,
+  persistEditorVisible,
+} from './composables/panePersistence.js';
 import { attachScrollSync } from './composables/scrollSync.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { orderConversationsByAnchor } from './components/canvas/conversationLayout.js';
@@ -64,6 +73,14 @@ const viewportFitCount = computed(() =>
     : Math.max(1, Math.floor((panesWidth.value + FOCUSED_PANEL_GAP_PX) / (MIN_FOCUSED_PANEL_WIDTH_PX + FOCUSED_PANEL_GAP_PX))),
 );
 const focusCap = useFocusCap(viewportFitCount);
+
+// Branch-cap parity fix (005-canvas-conversation-threads follow-up): whether there's a free slot
+// left to auto-focus a newly created branch into — shared by every one of the four branch entry
+// points' own disabled-state (each computes its own local copy of this same comparison from the
+// `focusedConversationIds`/`maxFocusedConversations` props threaded down to it; this is App.vue's
+// own copy, used to gate the toolbar path directly and threaded down to the focus-view path via
+// `ConversationDetailPanel.vue`).
+const atFocusCap = computed(() => focusedConversationIds.value.size >= focusCap.value);
 
 function isFocused(id: string): boolean {
   return focusedConversationIds.value.has(id);
@@ -150,6 +167,20 @@ const orderedFocusedConversations = computed(() => {
 
 const hasDocument = computed(() => store.document !== null);
 
+// The document's title used to render in the topbar (`.toolbar-left`'s `<h1>`) — removed from
+// there to free that column's height for the HUD box; it now lives only in the browser tab, kept
+// in sync with `store.document?.title` reactively. `index.html`'s static `<title>AI Document
+// Review</title>` is this watch's own fallback/pre-load value (restored verbatim once no document
+// is loaded), so this is the only place in the app that ever writes `document.title` — no separate
+// title-management module existed to reuse (checked `main.ts`/router setup: neither sets it).
+watch(
+  () => store.document?.title,
+  (title) => {
+    document.title = title ? `${title} - AI Document Review` : 'AI Document Review';
+  },
+  { immediate: true },
+);
+
 // ---------------------------------------------------------------------------------------------
 // Fix 3 (extended by 005-canvas-conversation-threads): click-and-drag resizable panes
 // (Preview | Canvas), persisted per-viewer in localStorage. Only active at the desktop
@@ -163,7 +194,10 @@ const hasDocument = computed(() => store.document !== null);
 // ---------------------------------------------------------------------------------------------
 const DEFAULT_PREVIEW_FR = 1;
 const DEFAULT_CANVAS_FR = 1;
-const MIN_PANE_PX = 200;
+// Neither pane may be dragged below 30% of `.panes`' total measured width — a fraction of the
+// *container*, not a fixed pixel floor (this replaces an earlier fixed-`200px` minimum), so the
+// clamp scales with viewport size the same way the 30% requirement is specified against.
+const MIN_PANE_FRACTION = 0.3;
 const HANDLE_SPACE_PX = 6; // one 6px handle between Preview and Canvas
 
 const initialPaneSizes = loadPaneSizes({
@@ -178,6 +212,60 @@ function persistCurrentPaneSizes(): void {
     previewFr: previewFr.value,
     canvasFr: canvasFr.value,
   });
+}
+
+// Slide-transition support (Preview/Editor visibility toggle — see `panesStyle`'s own
+// `grid-template-columns` transition below): tracks whether the Preview|Canvas splitter is
+// actively being dragged, so that transition can be suppressed for the drag's own live,
+// pointer-1:1 track-size changes — only a visibility *toggle* (`togglePreviewVisible`/
+// `toggleEditorVisible`) should ever animate; a manual drag must stay instant.
+const previewSplitDragging = ref(false);
+
+// ---------------------------------------------------------------------------------------------
+// Independent Preview/Editor visibility toggles: either can be hidden to give the other (and,
+// since a hidden pane's grid track collapses to 0 width — see `panesStyle` below — the rest of the
+// row, e.g. the conversation-detail overlay) the freed horizontal room.
+//
+// Bug-fix (editor-vs-canvas scope fix): this used to be `canvasVisible`, hiding the *entire*
+// `DocumentCanvas` pane — editor AND the conversation sidebar/thread columns — via `v-show` on
+// `<DocumentCanvas>` itself below. That hid the sidebar along with the editor, which broke the
+// (only) use case for hiding it: keeping the conversation sidebar usable while the editor is out of
+// the way. Renamed to `editorVisible`/`toggleEditorVisible` and re-scoped to a prop
+// (`DocumentCanvas`'s new `editorVisible`) that only gates its internal `EditorComponent` — the
+// `DocumentCanvas` pane itself (and thus `.thread-columns`) now always renders; `App.vue`'s own
+// grid column for it is therefore never collapsed by this toggle (only `previewVisible` still
+// collapses a track here — see `panesStyle`).
+//
+// At least one of Preview/Editor must always stay visible — `togglePreviewVisible`/
+// `toggleEditorVisible` below silently no-op (rather than throwing or forcing the other back open)
+// if the requested toggle would hide the last visible one; the two buttons in `.actions-group`
+// mirror that with a `disabled` attribute computed from the same condition, and Ctrl+Alt+1/
+// Ctrl+Alt+2 (`onGlobalKeydown` below) share these same functions, so all three entry points
+// enforce the invariant identically.
+//
+// Judgment call: kept this "never hide both" guard even though hiding both Preview and the editor
+// no longer hides *everything* (the conversation sidebar, inside the always-rendered
+// `DocumentCanvas` pane, would still be visible and usable) — the guard's remaining purpose is
+// preserving "some view of the document's actual content" (rendered preview or raw markdown), which
+// is still a real guarantee worth keeping now that it accurately maps to just those two panes'
+// scope. Persisted the same per-viewer, best-effort way as `syncScrollEnabled` above, via
+// `panePersistence.ts`.
+// ---------------------------------------------------------------------------------------------
+const previewVisible = ref(loadPreviewVisible());
+const editorVisible = ref(loadEditorVisible());
+
+function togglePreviewVisible(): void {
+  const next = !previewVisible.value;
+  if (!next && !editorVisible.value) return; // would hide the last visible pane
+  previewVisible.value = next;
+  persistPreviewVisible(next);
+}
+
+function toggleEditorVisible(): void {
+  const next = !editorVisible.value;
+  if (!next && !previewVisible.value) return; // would hide the last visible pane
+  editorVisible.value = next;
+  persistEditorVisible(next);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -258,13 +346,49 @@ watch(
 // many actual grid children it has (previously a 4th child was inserted into a hardcoded 3-column
 // template, shoving the conversation sidebar into a second row at the wrong width).
 const HISTORY_PANEL_WIDTH_PX = 340;
-// Grid order: Preview | Canvas | History (Preview moved left of the canvas — see tasks.md's
-// scope note; History is untouched beyond this reordering).
+// Grid order: Preview | handle | Canvas | History (Preview moved left of the canvas — see
+// tasks.md's scope note; History is untouched beyond this reordering).
+//
+// Independent Preview/Editor visibility: only Preview's own track can still collapse here — the
+// Canvas track (`DocumentCanvas`, editor + conversation sidebar) is never hidden as a whole any
+// more (bug-fix, editor-vs-canvas scope fix: `editorVisible` now only hides `DocumentCanvas`'s
+// *internal* editor pane, via a prop — see that ref's own doc comment above), so its own grid
+// track always gets its full `canvasFr` share. The resize handle collapses to `0px` (and is
+// un-rendered — see the template's `v-if` below) whenever Preview is hidden, since there's nothing
+// left to drag between two panes when the Canvas pane is the entire row.
 const panesStyle = computed(() => {
   if (!isDesktop.value) return undefined;
-  const base = `${previewFr.value}fr 6px ${canvasFr.value}fr`;
-  return { gridTemplateColumns: historyOpen.value ? `${base} ${HISTORY_PANEL_WIDTH_PX}px` : base };
+  const previewTrack = previewVisible.value ? `${previewFr.value}fr` : '0fr';
+  const base = `${previewTrack} ${previewVisible.value ? '6px' : '0px'} ${canvasFr.value}fr`;
+  return {
+    gridTemplateColumns: historyOpen.value ? `${base} ${HISTORY_PANEL_WIDTH_PX}px` : base,
+    // Slide transition (Preview hide/show toggle only): CSS Grid track sizes are transitionable
+    // in modern browsers via `transition: grid-template-columns`, so animating this one property
+    // smoothly covers both the Preview track's own 1fr/0fr (and its handle's 6px/0px) collapse
+    // *and* the neighboring Canvas track visibly growing into the freed space, since both are
+    // driven by this single value. Suppressed to `none` while the Preview|Canvas splitter itself
+    // is being dragged (`previewSplitDragging`) — a live, 1:1-with-pointer drag must never lag
+    // behind a transition's easing curve. `@media (prefers-reduced-motion: reduce)` in <style>
+    // below `!important`-overrides this inline value for users who've asked for reduced motion.
+    transition: previewSplitDragging.value ? 'none' : 'grid-template-columns 220ms ease',
+  };
 });
+
+// Bug 2 root-cause fix: CSS grid auto-placement assigns any item without an explicit
+// `grid-column`/`grid-row` to a track by DOM order, counting only items that actually generate a
+// box — an item hidden via `v-show` (`display: none`) generates none at all and is skipped
+// entirely from that count (the same rule that applies to a `v-if`-removed element). So whenever
+// Preview was hidden, `DocumentCanvas` — the next real grid item in source order — was silently
+// auto-placed into column 1 (Preview's own, now-empty `0fr` track) instead of column 3, collapsing
+// Canvas to zero width while the real, `1fr`-wide column 3 sat empty: exactly "hiding preview hides
+// everything". Pinning every pane's `grid-column` explicitly (matching the fixed track order
+// `panesStyle` above assumes: Preview=1, handle=2, Canvas=3, [History]=4 — the same order
+// `conversationOverlayStyle` below already relies on for Canvas) makes each one's column
+// assignment independent of which of its siblings currently exist as boxes.
+const previewGridColumn = computed(() => (isDesktop.value ? '1 / 2' : undefined));
+const resizeHandleGridColumn = computed(() => (isDesktop.value ? '2 / 3' : undefined));
+const canvasGridColumn = computed(() => (isDesktop.value ? '3 / 4' : undefined));
+const historyGridColumn = computed(() => (isDesktop.value ? '4 / 5' : undefined));
 
 // Fix (coordinator follow-up, 005-canvas-conversation-threads): `.conversation-detail-overlay`
 // below is `position: absolute` with no explicit `grid-column` of its own, so per the CSS Grid
@@ -304,14 +428,31 @@ const editorPreviewResize = useResizeHandle({
     const totalFr = startPreviewFr + canvasFr.value;
     const remainingPx = containerRect.width - HANDLE_SPACE_PX;
     const startPreviewPx = remainingPx * (startPreviewFr / totalFr);
+    // 30% minimum is a fraction of `.panes`' *total* width (`containerRect.width`, handle included)
+    // per the spec, not of `remainingPx` (the handle-excluded space the fr split is computed over)
+    // — the two are close enough in practice (the handle is 6px) that this distinction rarely
+    // matters, but `containerRect.width` is the literal "total available `.panes` width".
+    const minPx = containerRect.width * MIN_PANE_FRACTION;
     return (deltaPx) => {
-      const nextPreviewPx = clamp(startPreviewPx + deltaPx, MIN_PANE_PX, Math.max(MIN_PANE_PX, remainingPx - MIN_PANE_PX));
+      const nextPreviewPx = clamp(startPreviewPx + deltaPx, minPx, Math.max(minPx, remainingPx - minPx));
       previewFr.value = (nextPreviewPx / remainingPx) * totalFr;
       canvasFr.value = totalFr - previewFr.value;
     };
   },
-  onSettle: persistCurrentPaneSizes,
+  onSettle: () => {
+    persistCurrentPaneSizes();
+    previewSplitDragging.value = false;
+  },
 });
+
+/** Wraps `editorPreviewResize.startDrag` only to flag the drag's own duration
+ *  (`previewSplitDragging`, reset by `onSettle` above) so `panesStyle`'s `grid-template-columns`
+ *  transition never applies to this splitter's live pointer-driven track changes — see that
+ *  computed's own doc comment. */
+function onPreviewHandlePointerDown(event: PointerEvent): void {
+  previewSplitDragging.value = true;
+  editorPreviewResize.startDrag(event);
+}
 
 // 006-toolbar-reorg: three new app-level hotkeys, none of which belong to the conversation list
 // (HudPanel.vue's own Alt+A/Ctrl+Alt+J/K) or any single dialog — they're global controls that now
@@ -328,9 +469,12 @@ function isEditingContext(event: KeyboardEvent): boolean {
   return target.isContentEditable;
 }
 
-/** Ctrl+Alt+P/R/H/Y — see the doc comment above for why these (and only these) live here rather
- *  than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global Actions"
- *  box for the same reason: a global, toolbar-level toggle, not owned by any single pane. */
+/** Ctrl+Alt+P/R/H/Y/1/2 — see the doc comment above for why these (and only these) live here
+ *  rather than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global
+ *  Actions" box for the same reason: a global, toolbar-level toggle, not owned by any single pane.
+ *  1/2 (Preview/Editor visibility) share `togglePreviewVisible`/`toggleEditorVisible` with the two
+ *  buttons in `.actions-group`, so the "never hide both" guard is enforced in exactly one place
+ *  regardless of entry point. */
 function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.metaKey || event.shiftKey) return;
   if (isEditingContext(event)) return;
@@ -354,6 +498,14 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.code === 'KeyY') {
     event.preventDefault();
     toggleSyncScroll();
+  }
+  if (event.code === 'Digit1') {
+    event.preventDefault();
+    togglePreviewVisible();
+  }
+  if (event.code === 'Digit2') {
+    event.preventDefault();
+    toggleEditorVisible();
   }
 }
 
@@ -411,16 +563,38 @@ function onEditorChange(changes: { from: number; to: number; insert: string }[])
 async function onBranchFromSelection(range: { from: number; to: number }, includeSeedMessage: boolean): Promise<void> {
   const main = conversationsStore.conversations.find((c) => c.kind === 'main');
   if (!main) return;
+  // Branch-cap parity fix: `EditorComponent.vue`'s own "Branch (New)"/"Branch (Main)" buttons (and
+  // their keyboard shortcuts) are already disabled/blocked whenever `atFocusCap` — this is defense
+  // in depth against a same-tick race (e.g. another panel getting focused between render and
+  // click), not the common case.
+  if (atFocusCap.value) return;
   const conversation = await conversationsStore.branch({
     parentConversationId: main.id,
     selection: range,
     includeSeedMessage,
   });
   // Matches this app's pre-canvas behavior: branching from a selection used to auto-navigate
-  // straight into the new conversation's detail view — `focusConversation` is a plain add (a
-  // no-op, silently, if the cap is already full; there's nothing to show a disabled-affordance on
-  // here, unlike the button-driven paths).
+  // straight into the new conversation's detail view. Guaranteed a free slot by the guard above, so
+  // this always succeeds — `focusConversation`'s own cap check is only ever a defense-in-depth
+  // no-op here, same as every other caller below.
   focusConversation(conversation.id);
+}
+
+/** Shared by all three non-toolbar branch entry points that report success via an event rather
+ *  than a direct return value — the sidebar's "Branch this conversation"
+ *  (`ConversationThreadBox.vue`, relayed through `DocumentCanvas.vue`'s own `branch-created`) and
+ *  the focus-view's "Branch" (`ConversationView.vue`, relayed through
+ *  `ConversationDetailPanel.vue`). (The toolbar path reports success via `onBranchFromSelection`'s
+ *  own return value above instead, since it calls `conversationsStore.branch` directly.)
+ *
+ * Branch-cap parity fix: every one of these three components' own Branch button/action is now
+ * blocked outright whenever `atFocusCap` (see each one's own `branchDisabled`/`atFocusCap`-gated
+ * click handler) — so by the time this fires, a free slot is always guaranteed, and
+ * `focusConversation`'s own cap check below is only ever defense in depth against a same-tick race,
+ * never the reason a branch fails to get auto-focused. Never evicts an existing panel to make room;
+ * whichever panel the branch came from (if any) stays open either way. */
+function onBranchCreated(id: string): void {
+  focusConversation(id);
 }
 
 function scrollBoxIntoView(id: string): void {
@@ -475,15 +649,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
 
   <div v-else class="editor-layout">
     <!-- 006-toolbar-reorg (confirmed layout): a two-column layout (~80/20) — the left column
-         stacks the document title and the "Conversations (HUD)" box (sharing one left edge/width);
-         the right column, top-aligned with the title and extending down through the bottom of the
-         HUD box (plain flex-row stretch gives this for free), stacks two visually-boxed
-         sub-sections: Primary on top, Global Actions below. The error banner is pulled out of the
-         Primary box entirely and rendered as its own full-width strip beneath both columns. -->
+         holds just the "Conversations (HUD)" box now (the document title used to stack above it
+         here — see the `document.title` watch in <script>, which moved it to the browser tab
+         instead, freeing this column's height for the HUD box); the right column, top-aligned with
+         the HUD box and extending down through its bottom (plain flex-row stretch gives this for
+         free), stacks two visually-boxed sub-sections: Primary on top, Global Actions below. The
+         error banner is pulled out of the Primary box entirely and rendered as its own full-width
+         strip beneath both columns. -->
     <header class="toolbar">
       <div class="toolbar-columns">
         <div class="toolbar-left">
-          <h1 class="text-wrap-safe">{{ store.document?.title }}</h1>
           <div class="hud-box">
             <HudPanel
               class="toolbar-hud"
@@ -498,30 +673,19 @@ async function onToggleReasoning(event: Event): Promise<void> {
           </div>
         </div>
         <div class="toolbar-right">
-          <PrimaryPanel
-            ref="primaryPanelRef"
-            class="primary-box"
-            :active-id="lastInteractedId"
-            @update:error="primaryErrorMessage = $event"
-          />
-          <div class="global-actions-box">
-            <!-- 006-toolbar-reorg (confirmed layout): Group 1 "actions" — visible-label controls,
-                 stretched across a 2-column layout so they share the box's full width. -->
-            <div class="actions-group">
-              <label class="reasoning-toggle">
-                <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
-                Show reasoning
-              </label>
-              <label class="reasoning-toggle" title="Scroll the Editor and Preview panes together. Keyboard shortcut: Ctrl+Alt+Y">
-                <input type="checkbox" :checked="syncScrollEnabled" @change="onToggleSyncScrollCheckbox" />
-                Sync scroll
-              </label>
-              <button type="button" @click="historyOpen = !historyOpen">
-                {{ historyOpen ? 'Hide history' : 'History' }}
-              </button>
-            </div>
-            <!-- Group 2 "info" — icon-only controls (labels dropped, aria-label/title kept for a11y),
-                 rendered as a tight centered cluster rather than stretched half-width cells. -->
+          <!-- Row 1: Primary controls (col 1) and the Keyboard-shortcuts/Help icon triggers
+               (col 2), side by side. `.primary-box` and `.info-group` used to live in separate
+               boxes (the latter pinned to the bottom of a since-removed `.global-actions-box`);
+               this row simply places them next to each other instead. -->
+          <div class="toolbar-right-row-1">
+            <PrimaryPanel
+              ref="primaryPanelRef"
+              class="primary-box"
+              :active-id="lastInteractedId"
+              @update:error="primaryErrorMessage = $event"
+            />
+            <!-- Icon-only controls (labels dropped, aria-label/title kept for a11y), rendered as
+                 a tight centered cluster rather than stretched half-width cells. -->
             <div class="info-group">
               <button
                 type="button"
@@ -562,6 +726,53 @@ async function onToggleReasoning(event: Event): Promise<void> {
               </button>
             </div>
           </div>
+          <!-- Rows 2 & 3: 006-toolbar-reorg (confirmed layout), extended for the Preview/Canvas
+               visibility toggles — explicit, fixed 2-row grouping: row 2 is the two checkbox
+               toggles, row 3 is the three buttons. Previously nested (alongside `.info-group`)
+               inside a `.global-actions-box`; that wrapper is gone, so `.actions-group` is now
+               `.toolbar-right`'s own second child and absorbs the column's stretched height
+               directly (see its `flex: 1 1 auto` below). -->
+          <div class="actions-group">
+            <div class="actions-row actions-row-1">
+              <label class="reasoning-toggle">
+                <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
+                Show reasoning
+              </label>
+              <label class="reasoning-toggle" title="Scroll the Editor and Preview panes together. Keyboard shortcut: Ctrl+Alt+Y">
+                <input type="checkbox" :checked="syncScrollEnabled" @change="onToggleSyncScrollCheckbox" />
+                Sync scroll
+              </label>
+            </div>
+            <div class="actions-row actions-row-2">
+              <button type="button" @click="historyOpen = !historyOpen">
+                {{ historyOpen ? 'Hide history' : 'History' }}
+              </button>
+              <button
+                type="button"
+                :disabled="previewVisible && !editorVisible"
+                :title="
+                  previewVisible
+                    ? 'Hide the Preview pane — the Canvas pane expands to fill the space. Keyboard shortcut: Ctrl+Alt+1'
+                    : 'Show the Preview pane. Keyboard shortcut: Ctrl+Alt+1'
+                "
+                @click="togglePreviewVisible"
+              >
+                {{ previewVisible ? 'Hide preview' : 'Show preview' }}
+              </button>
+              <button
+                type="button"
+                :disabled="editorVisible && !previewVisible"
+                :title="
+                  editorVisible
+                    ? 'Hide the document editor — the conversation sidebar stays visible and expands to fill the space. Keyboard shortcut: Ctrl+Alt+2'
+                    : 'Show the document editor. Keyboard shortcut: Ctrl+Alt+2'
+                "
+                @click="toggleEditorVisible"
+              >
+                {{ editorVisible ? 'Hide editor' : 'Show editor' }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <div v-if="primaryErrorMessage" class="toolbar-error-banner" role="alert">
@@ -576,26 +787,35 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <HelpDialog @close="helpOpen = false" />
     </div>
     <div ref="panesEl" class="panes" :style="panesStyle">
-      <PreviewComponent ref="previewComponentRef" :content="store.content" />
+      <PreviewComponent
+        v-show="previewVisible"
+        ref="previewComponentRef"
+        :style="{ gridColumn: previewGridColumn }"
+        :content="store.content"
+      />
       <div
-        v-if="isDesktop"
+        v-if="isDesktop && previewVisible"
         class="resize-handle resize-handle--horizontal"
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize Preview and Canvas panes"
         tabindex="0"
-        @pointerdown="editorPreviewResize.startDrag($event)"
+        :style="{ gridColumn: resizeHandleGridColumn }"
+        @pointerdown="onPreviewHandlePointerDown($event)"
         @keydown="editorPreviewResize.onKeydown($event)"
       ></div>
       <DocumentCanvas
         ref="documentCanvasRef"
+        :style="{ gridColumn: canvasGridColumn }"
         :model-value="store.content"
         :filter="conversationFilter"
         :focused-conversation-ids="focusedConversationIds"
         :max-focused-conversations="focusCap"
+        :editor-visible="editorVisible"
         @change="onEditorChange"
         @branch-from-selection="onBranchFromSelection"
         @toggle-focus="toggleFocus"
+        @branch-created="onBranchCreated"
       />
 
       <!-- Fix 1: History is a genuine, reserved grid column (see `panesStyle` above) that only
@@ -603,7 +823,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
            so `.panes`' column count always matches its actual number of children. It renders in
            normal flow alongside every other pane (not as an overlay), so nothing else on the page
            is ever covered or made unreachable while it's open. -->
-      <HistoryPanel v-if="historyOpen" class="history-drawer" @close="historyOpen = false" />
+      <HistoryPanel
+        v-if="historyOpen"
+        class="history-drawer"
+        :style="{ gridColumn: historyGridColumn }"
+        @close="historyOpen = false"
+      />
 
       <!-- 005-canvas-conversation-threads (multi-focus overlay): one `ConversationDetailPanel` per
            currently-focused conversation, ordered per `orderedFocusedConversations` above. Still
@@ -622,9 +847,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
           :key="conv.id"
           :conversation-id="conv.id"
           :active="conv.id === lastInteractedId"
+          :at-focus-cap="atFocusCap"
+          :max-focused="focusCap"
           @close="unfocusConversation(conv.id)"
           @interact="lastInteractedId = conv.id"
           @select="replaceFocus(conv.id, $event)"
+          @branch-created="onBranchCreated"
         />
       </div>
     </div>
@@ -665,8 +893,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
   gap: 1rem;
   min-width: 0;
 }
-/* Left column (~80%): document title above the "Conversations (HUD)" box, stacked as one unit —
-   both share this column's left edge/width. */
+/* Left column (~80%): just the "Conversations (HUD)" box now — the document title that used to
+   stack above it here moved to the browser tab (see the `document.title` watch in <script>),
+   freeing this column's height for the HUD box. Kept as a flex column (rather than collapsed
+   straight into `.hud-box`) since a future addition to this column would otherwise have to
+   reintroduce the wrapper. */
 .toolbar-left {
   flex: 4 1 0%;
   min-width: 0;
@@ -675,8 +906,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
   gap: 0.35rem;
 }
 /* Right column (~20%): `align-items: stretch` on `.toolbar-columns` (the flex default) already
-   makes this column exactly as tall as `.toolbar-left` — i.e. it starts level with the title and
-   extends down through the bottom of the HUD box — with no extra sizing math needed here. */
+   makes this column exactly as tall as `.toolbar-left` — i.e. it starts level with, and extends
+   down through the bottom of, the HUD box — with no extra sizing math needed here. */
 .toolbar-right {
   flex: 1 1 0%;
   min-width: 0;
@@ -684,20 +915,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
   flex-direction: column;
   gap: 0.5rem;
 }
-/* Fix: the document title is unbounded/user-supplied and a long one shouldn't push this column
-   wider instead of wrapping. `.text-wrap-safe`'s shared overflow-wrap handling (applied via the
-   template class) lives in style.css; `min-width: 0` stays here since it's this flex item's own
-   layout concern. */
-.toolbar-left h1 {
-  flex: 0 1 auto;
-  min-width: 0;
-  font-size: 1.1rem;
-}
-/* The "Conversations (HUD)" box and the right column's two sub-sections are each their own
+/* The "Conversations (HUD)" box and the right column's boxed sub-sections are each their own
    visually-boxed section, styled identically so the two-column layout reads as one system. */
 .hud-box,
 .primary-box,
-.global-actions-box {
+.info-group,
+.actions-group {
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   padding: 0.5rem 0.6rem;
@@ -712,40 +935,70 @@ async function onToggleReasoning(event: Event): Promise<void> {
   flex: 1 1 auto;
   min-width: 0;
 }
-/* Global Actions is the bottom box of the right column — `flex: 1 1 auto` lets it absorb
-   whatever extra height the stretched column has beyond the Primary box above it, so the column's
-   bottom edge still lines up with the HUD box's own bottom edge. Its two pseudo-grouped sub-boxes
-   (`.actions-group`, `.info-group`) are pinned to its top and bottom via `justify-content:
-   space-between`, so that extra height becomes a deliberate gap between them instead of dead
-   space below everything. */
-.global-actions-box {
+/* Row 1 of `.toolbar-right`: `.primary-box` (col 1) and `.info-group` (col 2) side by side.
+   `.primary-box` gets the lion's share of the width; `.info-group`'s icon cluster only needs
+   its content width. `align-items: flex-start` (rather than the flex default `stretch`) keeps
+   `.info-group` hugging its own content height instead of stretching to match however tall the
+   Primary notice/buttons happen to be. Neither grows vertically here — row 2/3's
+   `.actions-group` (below) is the one that absorbs the column's stretched height.
+   `flex-wrap: wrap` matches the same narrow-width behavior `.actions-row` (below) already relies
+   on: at the ~20%-width right column's narrowest breakpoints there isn't room for both the
+   Primary box's text/buttons *and* the icon cluster's own minimum content width on one line, so
+   `.info-group` drops to its own line beneath `.primary-box` instead of forcing this row wider
+   than `.toolbar-right` and overflowing its border. */
+.toolbar-right-row-1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+/* A 10rem flex-basis (rather than `auto`) matters here specifically because `.primary-box` is a
+   plain `<div>` with no intrinsic width of its own — `flex-basis: auto` on a sizeless block
+   resolves to fill the available space, which would leave no room for `.info-group` beside it
+   and force a wrap even at comfortable widths. 10rem is enough to fit `.primary-box`'s content at
+   this column's typical (~1400px-viewport) width without wrapping, while still being the first
+   thing to give up its share of space (`min-width: 0`) once the column gets too narrow for both
+   columns — at that point `flex-wrap` above takes over and drops `.info-group` to its own line. */
+.primary-box {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+/* Rows 2 & 3 of `.toolbar-right`: "Show reasoning" + "Sync scroll" (row 2) and "History" +
+   "Hide/Show preview" + "Hide/Show editor" (row 3). Explicit, fixed 2-row grouping — rather than
+   relying on `grid-template-columns: repeat(auto-fit, ...)` to happen to wrap into that same
+   grouping at a given container width — each row is its own flex container so the grouping is
+   structural (survives any width) instead of incidental to wrapping. `.actions-group` is
+   `.toolbar-right`'s second (and last) child, so `flex: 1 1 auto` lets it absorb whatever extra
+   height the stretched column has beyond row 1's height, keeping the column's bottom edge level
+   with the HUD box's own bottom edge. */
+.actions-group {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   gap: 0.5rem;
 }
-/* Group 1 "actions": "Show reasoning" + "Sync scroll" + "History", stretched across a 3-column
-   layout so all three controls share the group's full width — keeps its visible text labels. */
-.actions-group {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
 }
-/* Group 2 "info": "Keyboard shortcuts" + "Help", icon-only. Deliberately NOT a 2-column stretch —
-   a tight, centered cluster with normal gap spacing reads better than half-width icon cells. */
+.actions-row > * {
+  flex: 1 1 6.5rem;
+  min-width: 6.5rem;
+}
+/* "Keyboard shortcuts" + "Help", icon-only. Deliberately NOT a 2-column stretch — a tight,
+   centered cluster with normal gap spacing reads better than half-width icon cells; it doesn't
+   grow to fill row 1's height beyond its own content. `flex-shrink` is left at its default
+   (1, not 0) as a second line of defense alongside `.toolbar-right-row-1`'s `flex-wrap`: even
+   once this has wrapped onto its own line beneath `.primary-box`, shrinking lets it settle to
+   the line's width rather than overflowing `.toolbar-right`'s border by a few pixels. */
 .info-group {
+  flex: 0 1 auto;
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
 }
 .reasoning-toggle {
   display: flex;
@@ -784,6 +1037,15 @@ async function onToggleReasoning(event: Event): Promise<void> {
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 0;
+}
+/* Slide transition (Preview/Editor visibility toggle — see `panesStyle`'s own doc comment in
+   <script>, which sets `transition` as an inline style): honor `prefers-reduced-motion: reduce` by
+   skipping it entirely. `!important` is required since inline styles otherwise beat any plain
+   selector's specificity — an `!important` external rule is the one thing that still overrides it. */
+@media (prefers-reduced-motion: reduce) {
+  .panes {
+    transition: none !important;
+  }
 }
 /* Fix: a grid item's default min-width is `auto`, which respects its content's intrinsic minimum
    width — so once the Preview pane renders something wide (an unwrapped table or code block), its

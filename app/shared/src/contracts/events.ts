@@ -182,6 +182,12 @@ export const MessageCompletedEvent = base(
     role: z.enum(['user', 'assistant']),
     text: z.string(),
     reasoning: z.string().nullable(),
+    // No `isToolCallCarrier` (or other tool-call-related) field here: per this app's
+    // event-sourcing architecture, events store raw facts, not interpretations — and this event
+    // already carries the only raw facts the classification needs (`text`/`reasoning`).
+    // `MessageDto.isToolCallCarrier` (http.ts) is computed fresh from those at read time by
+    // `conversation-service.ts`'s `buildMessages`, so a future change to the classification logic
+    // applies to already-stored events automatically, with no backfill/migration.
   }),
 );
 

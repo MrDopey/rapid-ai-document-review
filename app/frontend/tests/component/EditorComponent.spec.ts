@@ -3,6 +3,13 @@ import { mount } from '@vue/test-utils';
 import { EditorView } from '@codemirror/view';
 import EditorComponent from '../../src/components/editor/EditorComponent.vue';
 
+function ctrlF(): KeyboardEvent {
+  // jsdom (unlike a real browser) doesn't set `event.code` from `key` alone — CodeMirror's
+  // keymap matching keys off `code` (`KeyF`) as well as `key`, so both need to be present for the
+  // dispatched event to actually match the searchKeymap's `Mod-f` binding below.
+  return new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true });
+}
+
 // Spec: specs/005-canvas-conversation-threads. Confirmed design: the single "Start conversation
 // from selection" button is split into two — "Branch (New)" (empty placeholder, no continuity)
 // and "Branch (Main)" (continues from the current point: the parent's last exchange renders as
@@ -79,5 +86,100 @@ describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
     await wrapper.findAll('button.branch-button')[1].trigger('click');
 
     expect(wrapper.emitted('branch-from-selection')).toBeUndefined();
+  });
+});
+
+// Branch-cap parity fix (005-canvas-conversation-threads follow-up): the toolbar's two Branch
+// buttons are threaded `focusedConversationIds`/`maxFocusedConversations` (App.vue's own multi-focus
+// state, via DocumentCanvas.vue) so they can be disabled — with a tooltip naming the focus limit —
+// once there's no free slot left to auto-focus a newly created branch into, the same behavior
+// change already applied to the sidebar and focus-view Branch buttons.
+describe('EditorComponent — Branch buttons at the focus cap', () => {
+  function mountWithSelectionAt(atCap: boolean) {
+    const wrapper = mount(EditorComponent, {
+      props: {
+        modelValue: 'Hello world, this is a document.',
+        focusedConversationIds: atCap ? new Set(['a', 'b', 'c']) : new Set(),
+        maxFocusedConversations: 3,
+      },
+    });
+    return wrapper;
+  }
+
+  async function makeSelection(wrapper: ReturnType<typeof mount>): Promise<void> {
+    const view = findView(wrapper);
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    await wrapper.vm.$nextTick();
+  }
+
+  it('disables both buttons, with a focus-limit tooltip, once a selection exists but the focus set is at the cap', async () => {
+    const wrapper = mountWithSelectionAt(true);
+    await makeSelection(wrapper);
+
+    const [branchButton, seedButton] = wrapper.findAll('button.branch-button');
+    expect(branchButton.attributes('disabled')).toBeDefined();
+    expect(seedButton.attributes('disabled')).toBeDefined();
+    expect(branchButton.attributes('title')).toMatch(/max 3/);
+    expect(seedButton.attributes('title')).toMatch(/max 3/);
+  });
+
+  it('keeps the original "no selection" tooltip (not the cap tooltip) when both reasons apply — no-selection takes priority', () => {
+    const wrapper = mountWithSelectionAt(true);
+    const [branchButton, seedButton] = wrapper.findAll('button.branch-button');
+
+    expect(branchButton.attributes('disabled')).toBeDefined();
+    expect(branchButton.attributes('title')).not.toMatch(/max 3/);
+    expect(branchButton.attributes('title')).toMatch(/Highlight text/);
+    expect(seedButton.attributes('title')).not.toMatch(/max 3/);
+    expect(seedButton.attributes('title')).toMatch(/Highlight text/);
+  });
+
+  it('stays enabled, with the original tooltip, once a selection exists and the focus set has room', async () => {
+    const wrapper = mountWithSelectionAt(false);
+    await makeSelection(wrapper);
+
+    const [branchButton, seedButton] = wrapper.findAll('button.branch-button');
+    expect(branchButton.attributes('disabled')).toBeUndefined();
+    expect(seedButton.attributes('disabled')).toBeUndefined();
+    expect(branchButton.attributes('title')).toMatch(/Highlight text/);
+  });
+
+  it('clicking either disabled (at-cap) button emits nothing', async () => {
+    const wrapper = mountWithSelectionAt(true);
+    await makeSelection(wrapper);
+
+    await wrapper.findAll('button.branch-button')[0].trigger('click');
+    await wrapper.findAll('button.branch-button')[1].trigger('click');
+
+    expect(wrapper.emitted('branch-from-selection')).toBeUndefined();
+  });
+});
+
+// Ctrl+F/Cmd+F in-editor search (not the browser's native find-in-page): `@codemirror/search`'s
+// `search()` extension + `searchKeymap` (wired into EditorComponent.vue's own keymap.of([...]))
+// give Mod-f -> openSearchPanel for free, and CodeMirror's keymap only fires when the keydown
+// event actually reaches the editor's own contentDOM — so this is exercised the same way a real
+// browser would: dispatching a real KeyboardEvent, not calling openSearchPanel directly.
+describe('EditorComponent — Ctrl+F opens the in-editor search panel', () => {
+  it('opens the CodeMirror search panel when the event reaches the focused editor', () => {
+    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const view = findView(wrapper);
+
+    expect(wrapper.find('.cm-search').exists()).toBe(false);
+
+    const event = ctrlF();
+    const prevented = !view.contentDOM.dispatchEvent(event);
+
+    expect(prevented).toBe(true); // dispatchEvent returns false once preventDefault() was called
+    expect(wrapper.find('.cm-search').exists()).toBe(true);
+  });
+
+  it('does not intercept (nor preventDefault) Ctrl+F when it fires outside the editor', () => {
+    mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+
+    const event = ctrlF();
+    const notPrevented = document.body.dispatchEvent(event);
+
+    expect(notPrevented).toBe(true); // true means nothing called preventDefault() — native find-in-page still applies
   });
 });

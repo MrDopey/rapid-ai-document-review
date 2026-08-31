@@ -3,6 +3,16 @@ import { defineConfig } from 'vitest/config';
 
 const backendTarget = `http://127.0.0.1:${process.env.RADR_FE_BACKEND_PORT ?? '3000'}`;
 
+// Default preserved from this project's prior hardcoded `server.port` (not Vite's own default of
+// 5173) so an operator who never sets `RADR_FE_PORT` sees no change in behavior.
+const DEFAULT_FRONTEND_PORT = 3001;
+const frontendPort = process.env.RADR_FE_PORT
+  ? Number.parseInt(process.env.RADR_FE_PORT, 10)
+  : DEFAULT_FRONTEND_PORT;
+if (Number.isNaN(frontendPort)) {
+  throw new Error(`RADR_FE_PORT must be a valid integer, got: ${process.env.RADR_FE_PORT}`);
+}
+
 // FR-044 (backend spec, applied here for consistency): loopback is the default, supported dev
 // bind host. `RADR_FE_HOST` lets an operator explicitly opt into a wider bind (e.g. a
 // containerized dev environment reached via port-forwarding) without changing that default.
@@ -24,7 +34,7 @@ export default defineConfig({
   },
   server: {
     host: frontendHost,
-    port: 3001,
+    port: frontendPort,
     allowedHosts: frontendHost === '127.0.0.1' ? undefined : true,
     proxy: {
       '/api': backendTarget,

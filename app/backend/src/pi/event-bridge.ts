@@ -214,7 +214,17 @@ export class EventBridge {
         }
         break;
 
-      case 'message_end':
+      case 'message_end': {
+        // The real SDK emits a whole message_start/message_end pair for a segment that carries
+        // ONLY a tool call — no text, no reasoning — before the tool runs, followed by a separate
+        // pair for the model's actual follow-up text once the tool result comes back. This still
+        // gets a real, persisted `message_completed` event — the application event log stays a
+        // complete record of what actually happened — with just the raw `text`/`reasoning` facts,
+        // no tool-call-specific field. Classifying a segment as an empty "tool-call carrier" for
+        // the UI to hide (`MessageDto.isToolCallCarrier`) is an interpretation, not a fact, so it's
+        // computed fresh from `text`/`reasoning` at read time by `conversation-service.ts`'s
+        // `buildMessages` rather than persisted here — event-sourcing: a future change to that
+        // classification logic then applies to already-stored events automatically.
         this.publish({
           type: 'message_completed',
           sequence: null,
@@ -232,6 +242,7 @@ export class EventBridge {
         this.runBuffer.clear(this.reasoningBufferKey(event.messageId));
         this.eventHub.clearActiveMessage(this.ctx.conversationId);
         break;
+      }
 
       case 'tool_execution_start':
         this.publish({

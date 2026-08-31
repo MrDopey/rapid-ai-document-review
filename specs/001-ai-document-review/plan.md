@@ -102,7 +102,7 @@ Gate result: **proceed to Phase 0**, with Principle VII to be settled by researc
 | IV | PASS | `data-model.md` keeps `revision` and `document_snapshot` distinct; restore inserts a new revision. Automerge history is never truncated. |
 | V | PASS | Limits are columns on `user_settings`, read by `ConversationService` (depths, concurrency) and `RevisionService` (debounce) on the server side of every guarded operation. |
 | VI | PASS | Sanitizer is the terminal stage of the render pipeline for Markdown, Mermaid output, SVG, and agent reasoning alike. |
-| VII | **PASS (resolved)** | R3 verified `noTools: "all"` + `customTools` + `DefaultResourceLoader({ systemPrompt })` are all SDK-level. No Pi extension is introduced; necessity is not demonstrated. |
+| VII | **PASS (resolved)** | R3 verified `noTools: "builtin"` + `customTools` + `DefaultResourceLoader({ systemPrompt })` are all SDK-level. No Pi extension is introduced; necessity is not demonstrated. |
 
 One factual deviation from `design.md` (not from the constitution) is recorded below and in R2.
 

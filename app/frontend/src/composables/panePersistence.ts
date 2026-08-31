@@ -87,22 +87,110 @@ export function persistCanvasScrollPosition(position: CanvasScrollPosition): voi
  * "Sync scroll" toggle (App.vue's `.actions-group`, composables/scrollSync.ts) — a lone boolean,
  * same per-viewer/best-effort/non-throwing convention as the rest of this file, under its own key
  * for the same reason `CANVAS_SCROLL_KEY` is: not an `fr`/pixel split `loadPaneSizes` already
- * shapes for. Defaults to off (there's no prior partial implementation or related state this
- * should match on) whenever nothing valid is stored yet.
+ * shapes for. Defaults to on whenever nothing valid is stored yet; an explicit stored `'false'`
+ * (a user who toggled it off) is still respected.
  */
 const SYNC_SCROLL_ENABLED_KEY = 'raidr:syncScrollEnabled';
 
 export function loadSyncScrollEnabled(): boolean {
   try {
-    return localStorage.getItem(SYNC_SCROLL_ENABLED_KEY) === 'true';
+    const stored = localStorage.getItem(SYNC_SCROLL_ENABLED_KEY);
+    return stored === null ? true : stored === 'true';
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function persistSyncScrollEnabled(enabled: boolean): void {
   try {
     localStorage.setItem(SYNC_SCROLL_ENABLED_KEY, String(enabled));
+  } catch {
+    // Best-effort persistence only.
+  }
+}
+
+/**
+ * Preview/Editor visibility toggles (App.vue's `.actions-group`, Ctrl+Alt+1/Ctrl+Alt+2) — two
+ * independent booleans, same per-viewer/best-effort/non-throwing/"defaults to on" convention as
+ * `SYNC_SCROLL_ENABLED_KEY` above, each under its own key for the same reason that one is: not an
+ * `fr`/pixel split `loadPaneSizes` already shapes for. App.vue itself is responsible for never
+ * persisting (or reaching) a state where both are false — these loaders/setters don't enforce that
+ * invariant themselves.
+ *
+ * Bug-fix rename (editor-vs-canvas scope fix): this used to be "Canvas visible", gating the whole
+ * `DocumentCanvas` pane (editor *and* the conversation sidebar/thread columns) via `App.vue`'s own
+ * `v-show`. The conversation sidebar must stay visible/usable even when the document editor is
+ * hidden, so the gate moved down into `DocumentCanvas.vue` itself as an `editorVisible` prop that
+ * only affects its `EditorComponent` child — `App.vue`'s `DocumentCanvas` pane now always renders.
+ * Renamed the key too (`raidr:canvasVisible` -> `raidr:editorVisible`) since its meaning changed;
+ * a viewer with a previously-stored "canvas hidden" preference just resets to the new default
+ * (editor visible) once, rather than silently reinterpreting the old value under its new meaning.
+ */
+const PREVIEW_VISIBLE_KEY = 'raidr:previewVisible';
+const EDITOR_VISIBLE_KEY = 'raidr:editorVisible';
+
+function loadVisibilityFlag(key: string): boolean {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored === null ? true : stored === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function persistVisibilityFlag(key: string, visible: boolean): void {
+  try {
+    localStorage.setItem(key, String(visible));
+  } catch {
+    // Best-effort persistence only.
+  }
+}
+
+export function loadPreviewVisible(): boolean {
+  return loadVisibilityFlag(PREVIEW_VISIBLE_KEY);
+}
+
+export function persistPreviewVisible(visible: boolean): void {
+  persistVisibilityFlag(PREVIEW_VISIBLE_KEY, visible);
+}
+
+export function loadEditorVisible(): boolean {
+  return loadVisibilityFlag(EDITOR_VISIBLE_KEY);
+}
+
+export function persistEditorVisible(visible: boolean): void {
+  persistVisibilityFlag(EDITOR_VISIBLE_KEY, visible);
+}
+
+/**
+ * DocumentCanvas.vue's Editor|Conversation-sidebar split (`.canvas-content`'s `.editor-pane` vs
+ * `.thread-columns`) — a second, independent drag-to-resize splitter one level down from
+ * `PANE_SIZES_KEY`'s Preview|Canvas split above, mirroring that one's naming/clamp convention
+ * (`MIN_PANE_FRACTION`-style drag clamp, per-viewer persistence) but scoped entirely to
+ * `DocumentCanvas.vue`'s own internal layout. Stored as a single fraction (the editor pane's own
+ * share of the split, clamped to `MIN_PANE_FRACTION`..`1 - MIN_PANE_FRACTION` — see
+ * `DocumentCanvas.vue`'s `editorThreadResize`), so — like `CANVAS_SCROLL_KEY`/
+ * `SYNC_SCROLL_ENABLED_KEY` above — it gets its own dedicated key rather than joining
+ * `loadPaneSizes`'s extensible named-`fr` blob, which `previewFr`/`canvasFr` alone use.
+ */
+const EDITOR_SPLIT_KEY = 'raidr:editorSplit';
+
+/** Falls back to `defaultFraction` (the caller's own default, since this module has no opinion on
+ *  DocumentCanvas.vue's preferred initial split) when nothing valid is stored yet. */
+export function loadEditorSplit(defaultFraction: number): number {
+  try {
+    const stored = localStorage.getItem(EDITOR_SPLIT_KEY);
+    if (stored === null) return defaultFraction;
+    const parsed = Number(stored);
+    return Number.isFinite(parsed) ? parsed : defaultFraction;
+  } catch {
+    return defaultFraction;
+  }
+}
+
+export function persistEditorSplit(fraction: number): void {
+  try {
+    localStorage.setItem(EDITOR_SPLIT_KEY, String(fraction));
   } catch {
     // Best-effort persistence only.
   }

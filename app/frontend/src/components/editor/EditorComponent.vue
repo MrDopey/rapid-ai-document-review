@@ -1,16 +1,50 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { ChangeSet, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, insertNewline, undo, redo } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
+import { search, searchKeymap } from '@codemirror/search';
+import { focusCapBranchTooltip } from '../../composables/focusConfig.js';
 
-const props = defineProps<{ modelValue: string }>();
+// 005-canvas-conversation-threads (branch-cap parity): `focusedConversationIds`/
+// `maxFocusedConversations` are App.vue's own multi-focus state, threaded straight through
+// DocumentCanvas.vue (which already receives them as its own props from App.vue, for
+// ConversationThreadBox.vue's identical cap check) — same raw-props-down convention, just one level
+// further. Defaults (an empty set, cap 3) match ConversationThreadBox.vue's own `maxFocused` default
+// so a bare `mount(EditorComponent, { props: { modelValue } })` (existing tests) behaves as "never at
+// cap", exactly as before this change.
+const props = withDefaults(
+  defineProps<{ modelValue: string; focusedConversationIds?: ReadonlySet<string>; maxFocusedConversations?: number }>(),
+  { focusedConversationIds: () => new Set(), maxFocusedConversations: 3 },
+);
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
   (e: 'selection', range: { from: number; to: number } | null): void;
   (e: 'branch-from-selection', range: { from: number; to: number }, includeSeedMessage: boolean): void;
 }>();
+
+const selection = ref<{ from: number; to: number } | null>(null);
+
+/** No free slot left to auto-focus a newly created branch into — see `requestBranch`'s doc comment
+ *  for why this blocks branch creation itself, not just auto-focus. */
+const atFocusCap = computed(() => props.focusedConversationIds.size >= props.maxFocusedConversations);
+const branchDisabled = computed(() => !selection.value || atFocusCap.value);
+
+/** Priority when both a disabled-reason could apply: no-selection wins over at-cap, since without a
+ *  selection these buttons are meaningless regardless of the focus cap. Each button keeps its own
+ *  existing "highlight text…" copy for every other case — only the genuinely new "at cap" reason
+ *  gets the shared cap tooltip. */
+const branchNewTitle = computed(() =>
+  selection.value && atFocusCap.value
+    ? focusCapBranchTooltip(props.maxFocusedConversations)
+    : 'Highlight text in the editor, then click here to start a focused conversation about just that passage, with an empty transcript. Keyboard shortcut: Alt+Shift+C',
+);
+const branchMainTitle = computed(() =>
+  selection.value && atFocusCap.value
+    ? focusCapBranchTooltip(props.maxFocusedConversations)
+    : 'Highlight text in the editor, then click here to start a focused conversation about just that passage, seeded with the document and your selection as its first message. Keyboard shortcut: Alt+Shift+S',
+);
 
 const hostRef = ref<HTMLDivElement | null>(null);
 // 005-canvas-conversation-threads: the root of this whole component (toolbar + host), not
@@ -22,8 +56,6 @@ const hostRef = ref<HTMLDivElement | null>(null);
 const paneRef = ref<HTMLDivElement | null>(null);
 let view: EditorView | null = null;
 let applyingRemote = false;
-
-const selection = ref<{ from: number; to: number } | null>(null);
 
 const CLIENT_BATCH_DEBOUNCE_MS = 250;
 // Composed (not concatenated): each CodeMirror update's offsets are relative to the document
@@ -57,10 +89,14 @@ function scheduleFlush(): void {
  * `includeSeedMessage` (005-canvas-conversation-threads) distinguishes the two: `false` (the
  * "Branch (New)"/Alt+Shift+C path) keeps the empty-placeholder-conversation default; `true` (the
  * "Branch (Main)"/Alt+Shift+S path) asks the backend to also deliver the selection excerpt as
- * the branch's first message (`ConversationService.branch`'s `buildBranchSeedMessage` call). */
+ * the branch's first message (`ConversationService.branch`'s `buildBranchSeedMessage` call).
+ *
+ * `branchDisabled` also gates the keyboard shortcuts here, not just the toolbar buttons' own
+ * `:disabled` binding below — a native `disabled` attribute only blocks pointer/Enter activation of
+ * the button element itself, not this keymap binding, which fires regardless of any button's state. */
 function requestBranch(includeSeedMessage: boolean): boolean {
-  if (!selection.value) return false;
-  emit('branch-from-selection', selection.value, includeSeedMessage);
+  if (branchDisabled.value) return false;
+  emit('branch-from-selection', selection.value!, includeSeedMessage);
   return true;
 }
 
@@ -81,7 +117,17 @@ onMounted(() => {
       { key: 'Alt-Shift-s', run: () => requestBranch(true) },
       ...defaultKeymap,
       ...historyKeymap,
+      ...searchKeymap,
     ]),
+    // @codemirror/search's `search()` extension supplies both the in-editor find/replace panel UI
+    // and the state the searchKeymap's Mod-f/Mod-g/Shift-Mod-g/Escape bindings above operate on.
+    // CodeMirror's keymap handling only fires when the editor itself has focus and the keydown
+    // event reaches it, so Mod-f (Ctrl+F/Cmd+F) opens this panel exactly when focus is inside the
+    // editor — no separate "is the editor focused" check needed — and is left completely alone
+    // (falls through to the browser's native find) everywhere else in the app, since nothing else
+    // in this codebase installs a global keydown listener that intercepts a bare Ctrl+F/Cmd+F
+    // (App.vue's and HudPanel.vue's own global handlers only act on Ctrl+Alt+* combinations).
+    search(),
     markdown(),
     EditorView.lineWrapping,
     // CodeMirror's own base theme hardcodes `.cm-content`'s caret-color to plain black (it has no
@@ -175,8 +221,8 @@ defineExpose({
         <button
           type="button"
           class="branch-button"
-          :disabled="!selection"
-          title="Highlight text in the editor, then click here to start a focused conversation about just that passage, with an empty transcript. Keyboard shortcut: Alt+Shift+C"
+          :disabled="branchDisabled"
+          :title="branchNewTitle"
           @click="requestBranch(false)"
         >
           Branch (New)
@@ -184,8 +230,8 @@ defineExpose({
         <button
           type="button"
           class="branch-button"
-          :disabled="!selection"
-          title="Highlight text in the editor, then click here to start a focused conversation about just that passage, seeded with the document and your selection as its first message. Keyboard shortcut: Alt+Shift+S"
+          :disabled="branchDisabled"
+          :title="branchMainTitle"
           @click="requestBranch(true)"
         >
           Branch (Main)
@@ -204,6 +250,18 @@ defineExpose({
      (research.md §1/§2) and must size to its own full content height — a floating page, not a
      viewport-bounded box with its own internal scrollbar. */
   border-right: 1px solid var(--border-color, #ccc);
+  /* Coordinator follow-up (scroll jiggle): without an explicit flex-basis, this pane defaults to
+     flex: 0 1 auto — shrink-to-fit sized by its content's intrinsic (max-content) width. CodeMirror
+     6 virtualizes line rendering around the visible viewport of `.document-canvas` (mounting/
+     unmounting line DOM as the user scrolls), so different lines scrolling into view have different
+     intrinsic widths, which recalculated this pane's shrink-to-fit width and pushed `.thread-columns`
+     sideways every scroll tick. `flex: 1 1 0` + `min-width: 0` makes this pane's width a pure
+     function of the flex split with `.thread-columns` in `.canvas-content` (DocumentCanvas.vue),
+     independent of whichever lines CodeMirror currently has mounted — same pattern as App.vue's
+     `min-width: 0` fix for its own shrink-to-fit-vs-flex layout. Width only; the floating-page
+     height behavior above is untouched. */
+  flex: 1 1 0;
+  min-width: 0;
 }
 .editor-toolbar {
   display: flex;
@@ -215,6 +273,18 @@ defineExpose({
   /* Fix 2/6: gives the Editor pane the same distinct-surface + visible-label treatment as the
      other regions (HUD, transcript, Preview). */
   background: var(--panel-bg, #f7f7f8);
+  /* Coordinator follow-up (Branch buttons scrolling out of view): `.editor-pane` deliberately has
+     no forced height (comment above) and lives entirely in-flow inside `DocumentCanvas.vue`'s
+     `.document-canvas`, the actual scrolling ancestor — so without this, scrolling a long document
+     scrolls this toolbar away with it. `position: sticky` pins it to the top of that scrollport
+     instead; the opaque `background` above already prevents content from showing through
+     underneath. `z-index: 2` only needs to beat this same stacking context's own unstyled
+     (z-index: auto) content scrolling beneath it — it's far below every app-level overlay's z-index
+     (App.vue's `.conversation-detail-overlay` at 50/55, `PrimaryPanel.vue`/`ConversationView.vue`
+     at 60, `ReconnectingIndicator.vue` at 1000), so it can never sit on top of any of those. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 .branch-buttons {

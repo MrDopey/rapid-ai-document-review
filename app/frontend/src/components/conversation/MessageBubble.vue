@@ -63,11 +63,23 @@ const safeReasoning = computed(() =>
 
 <template>
   <!-- FR-007c: `data-role` stays the real message role even for a seed card (e.g. tests select
-       `.message-bubble[data-role="user"]`); `seed` only changes how it's presented. -->
+       `.message-bubble[data-role="user"]`); `seed` only changes how it's presented.
+       `data-message-id`: lets both call sites' `scrollMessageTopIntoView` (composables/
+       messageScroll.ts) find this exact bubble's DOM node by message id, the same way
+       `App.vue`'s own `scrollBoxIntoView` already locates a `ConversationThreadBox` by
+       `data-conversation-id`.
+       Root `v-if`: a real-SDK tool-call-carrier segment (`message.isToolCallCarrier` —
+       event-bridge.ts's `message_end` handling) has no visible text/reasoning of its own — it's an
+       internal artifact of the model calling a tool, not a reply. Gated on the same "Show
+       reasoning" toggle reasoning content already uses (`settings.thinkingVisible`): hidden by
+       default so it never renders as a blank "Assistant" bubble, shown (as a small note, below)
+       when the toggle is on so the underlying event is still inspectable. -->
   <article
+    v-if="!message.isToolCallCarrier || settings.thinkingVisible"
     class="message-bubble"
-    :class="{ 'seed-card': seed }"
+    :class="{ 'seed-card': seed, 'tool-call-carrier': message.isToolCallCarrier }"
     :data-role="message.role"
+    :data-message-id="message.id"
     :aria-busy="message.streaming"
   >
     <header class="message-role">
@@ -94,6 +106,10 @@ const safeReasoning = computed(() =>
       <summary>Reasoning</summary>
       <div class="reasoning-content" v-html="safeReasoning"></div>
     </details>
+
+    <p v-if="message.isToolCallCarrier" class="tool-call-carrier-note">
+      Tool call — no reply text (visible because "Show reasoning" is on).
+    </p>
 
     <div ref="textEl" class="message-text text-wrap-safe" :style="clampStyle" v-html="safeText"></div>
   </article>
@@ -168,6 +184,15 @@ const safeReasoning = computed(() =>
 }
 .reasoning summary {
   cursor: pointer;
+}
+/* Debug-visible note for a tool-call-carrier segment shown while "Show reasoning" is on (see the
+   root `v-if` above) — same muted, small-print treatment as `.reasoning`, so it reads as internal/
+   diagnostic content rather than a genuine reply. */
+.tool-call-carrier-note {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  opacity: 0.7;
 }
 .message-text :deep(p:first-child) {
   margin-top: 0;

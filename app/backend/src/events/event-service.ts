@@ -33,7 +33,11 @@ export class EventService {
       data,
       createdAt: new Date().toISOString(),
     });
-    logger.info({ event: eventType, documentId, conversationId, sequence: row.sequence }, eventType);
+    // `agent_error` represents an actual agent/turn failure, not routine progress — log it at
+    // `error` severity so it surfaces in error-level monitoring; every other event type in the
+    // closed vocabulary (contracts/websocket-events.md) is routine and stays at `info`.
+    const log = eventType === 'agent_error' ? logger.error.bind(logger) : logger.info.bind(logger);
+    log({ event: eventType, documentId, conversationId, sequence: row.sequence }, eventType);
     return row;
   }
 

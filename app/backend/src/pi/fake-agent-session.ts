@@ -135,6 +135,15 @@ export class FakeAgentSession implements AgentSessionLike {
    * very next plain answer so an e2e test can assert the delivered content deterministically,
    * without a real model in the loop. */
   private readonly pendingCustomMessages: string[] = [];
+  /** Content delivered via `sendCustomMessage` with neither `deliverAs: 'nextTurn'` nor
+   *  `triggerTurn` set (`PiService.seedSession` — a branch's auto-seed message) — mirrors the real
+   *  SDK's non-streaming/no-trigger persistence branch (`agent-session.js`'s `sendCustomMessage`),
+   *  which appends straight to `state.messages`/the on-disk session file rather than the transient
+   *  `_pendingNextTurnMessages` queue `deliverAs: 'nextTurn'` uses. Kept permanently (never
+   *  drained/consumed the way `pendingCustomMessages` is), since real session history is never
+   *  discarded either — only exposed for tests via `getSeededHistory()`, to prove seed content
+   *  reached this session's own context rather than only the app's event log. */
+  private readonly seededHistory: string[] = [];
   private readonly turnTimeoutMs: number;
 
   constructor(sessionFile?: string, tools: RegisteredToolLike[] = [], turnTimeoutMs?: number) {
@@ -161,11 +170,29 @@ export class FakeAgentSession implements AgentSessionLike {
   }
 
   /** Test-mode stand-in for the real SDK's `sendCustomMessage` (research R1). Never triggers a
-   * turn itself (matching `deliverAs: 'nextTurn'`'s real semantics) — it just queues the content
-   * for the next plain answer to echo back, so a test can assert the fold summary actually
-   * reached the parent's session without a real model. */
-  async sendCustomMessage(message: CustomMessageLike): Promise<void> {
-    this.pendingCustomMessages.push(message.content);
+   * turn itself, either way — mirroring both real delivery modes this codebase actually uses:
+   *  - `deliverAs: 'nextTurn'` (`deliverFoldSummary`): queues the content for the very next plain
+   *    answer to echo back once, then discards it — matching the real SDK's transient
+   *    `_pendingNextTurnMessages` queue.
+   *  - no `deliverAs`/`triggerTurn` (`PiService.seedSession`, a branch's auto-seed message):
+   *    appends permanently to `seededHistory` instead, mirroring the real SDK's immediate
+   *    history-persist branch — never drained, since real session history isn't either. */
+  async sendCustomMessage(
+    message: CustomMessageLike,
+    options?: { triggerTurn?: boolean; deliverAs?: 'steer' | 'followUp' | 'nextTurn' },
+  ): Promise<void> {
+    if (options?.deliverAs === 'nextTurn') {
+      this.pendingCustomMessages.push(message.content);
+      return;
+    }
+    this.seededHistory.push(message.content);
+  }
+
+  /** Test-only accessor: everything ever delivered via `sendCustomMessage` without
+   *  `deliverAs: 'nextTurn'` (i.e. `PiService.seedSession`'s branch-seed path) — proves the
+   *  content reached this session's own persisted context, not merely the app's event log. */
+  getSeededHistory(): string[] {
+    return [...this.seededHistory];
   }
 
   async waitForIdle(): Promise<void> {
