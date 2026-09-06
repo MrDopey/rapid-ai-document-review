@@ -42,12 +42,10 @@ const shortcutsOpen = ref(false);
 const helpOpen = ref(false);
 const wsClient = ref<WsClient | null>(null);
 
-// Fix (first-time-user review): the initial document load used to hang on a bare, unstyled
-// "Loading…" forever if the backend was unreachable — `store.load()` never resolved or rejected in
-// a way the template could react to, so there was no retry/error affordance at all. `loadError`
-// holds a message once the initial load fails or times out; the template (see `!store.loaded`
-// below) swaps the plain "Loading…" for this message plus a Retry button that just re-runs
-// `loadInitialDocument`.
+// A bare, unstyled "Loading…" with no timeout would hang forever if the backend is unreachable,
+// with no retry/error affordance. `loadError` holds a message once the initial load fails or times
+// out; the template (see `!store.loaded` below) swaps the plain "Loading…" for this message plus a
+// Retry button that just re-runs `loadInitialDocument`.
 const LOAD_TIMEOUT_MS = 15_000;
 const loadError = ref<string | null>(null);
 
@@ -111,12 +109,11 @@ const {
 
 const hasDocument = computed(() => store.document !== null);
 
-// The document's title used to render in the topbar (`.toolbar-left`'s `<h1>`) — removed from
-// there to free that column's height for the HUD box; it now lives only in the browser tab, kept
-// in sync with `store.document?.title` reactively. `index.html`'s static `<title>AI Document
-// Review</title>` is this watch's own fallback/pre-load value (restored verbatim once no document
-// is loaded), so this is the only place in the app that ever writes `document.title` — no separate
-// title-management module existed to reuse (checked `main.ts`/router setup: neither sets it).
+// Keeps two surfaces in sync with `store.document?.title`: the browser tab (`document.title`,
+// written here) and the in-app `.document-title-bar` (bound directly in the template below).
+// `index.html`'s static `<title>AI Document Review</title>` is this watch's own fallback/pre-load
+// value (restored verbatim once no document is loaded). This is the only place in the app that
+// ever writes `document.title`.
 watch(
   () => store.document?.title,
   (title) => {
@@ -398,14 +395,13 @@ function onPreviewHandlePointerDown(event: PointerEvent): void {
   editorPreviewResize.startDrag(event);
 }
 
-// 006-toolbar-reorg: three new app-level hotkeys, none of which belong to the conversation list
-// (HudPanel.vue's own Alt+A/Ctrl+Alt+J/K) or any single dialog — they're global controls that now
-// live in the toolbar's "Global Actions" box (History, Show reasoning) or the "Primary" box
-// (dismiss notice). Same per-component `document`-level listener pattern as HudPanel.vue's own
-// `onGlobalKeydown` (mounted/removed alongside this component, since it's alive for the document's
-// whole lifetime), including the same shared `isEditingContext` guard (a11y/keymap-registry.ts,
-// imported above) against hijacking normal typing or an open dialog's own keys — both listeners
-// used to reimplement this same check independently; now both import the one definition.
+// App-level hotkeys, none of which belong to the conversation list (HudPanel.vue's own
+// Alt+A/Ctrl+Alt+J/K) or any single dialog — they're global controls living in the toolbar's
+// "Global Actions" box (History, Show reasoning) or the "Primary" box (dismiss notice). Same
+// per-component `document`-level listener pattern as HudPanel.vue's own `onGlobalKeydown`
+// (mounted/removed alongside this component, since it's alive for the document's whole lifetime),
+// including the same shared `isEditingContext` guard (a11y/keymap-registry.ts, imported above)
+// against hijacking normal typing or an open dialog's own keys.
 
 /** Ctrl+Alt+P/R/H/Y/1/2 — see the doc comment above for why these (and only these) live here
  *  rather than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global
@@ -485,11 +481,11 @@ onBeforeUnmount(() => {
 function connectWs(): void {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const client = new WsClient(`${protocol}//${location.host}/events`, () => store.eventSequence);
-  // Fix (WS-fanout): each store owns its own `subscribeToFrames` wiring (see the `subscribeToFrames`
-  // method on stores/document.ts, conversations.ts, settings.ts and edits.ts) — this loop is the
-  // single place a 5th store's frame handling would need to be registered, rather than a
-  // hand-listed `someStore.handleServerFrame(frame)` call per store inside `client.onFrame`, where
-  // nothing enforced that adding a new store here meant remembering to add its own line too.
+  // Each store owns its own `subscribeToFrames` wiring (see the `subscribeToFrames` method on
+  // stores/document.ts, conversations.ts, settings.ts and edits.ts) — this loop is the single
+  // place a new store's frame handling needs to be registered, rather than a hand-listed
+  // `someStore.handleServerFrame(frame)` call per store inside `client.onFrame`, where nothing
+  // would enforce that adding a new store here means remembering to add its own line too.
   for (const frameSubscriber of [store, conversationsStore, settingsStore, editsStore]) {
     frameSubscriber.subscribeToFrames(client);
   }
@@ -587,8 +583,6 @@ async function onToggleReasoning(event: Event): Promise<void> {
 <template>
   <ReconnectingIndicator :reconnecting="wsClient?.reconnecting ?? false" />
 
-  <!-- Fix (first-time-user review): a failed/timed-out initial load now shows a retry affordance
-       instead of hanging on a bare "Loading…" forever — see `loadInitialDocument` in <script>. -->
   <main v-if="loadError" class="loading load-error" role="alert">
     <p>{{ loadError }}</p>
     <button type="button" @click="loadInitialDocument">Retry</button>
@@ -609,21 +603,18 @@ async function onToggleReasoning(event: Event): Promise<void> {
   </section>
 
   <div v-else class="editor-layout">
-    <!-- 006-toolbar-reorg (confirmed layout): a two-column layout (~80/20) — the left column
-         holds just the "Conversations (HUD)" box now (the document title used to stack above it
-         here; freeing this column's height for the HUD box moved it to the browser tab only — see
-         the `document.title` watch in <script> — until the Fix below restored a compact visible
-         copy above both columns); the right column, top-aligned with the HUD box and extending down
-         through its bottom (plain flex-row stretch gives this for free), stacks two visually-boxed
-         sub-sections: Primary on top, Global Actions below. The error banner is pulled out of the
-         Primary box entirely and rendered as its own full-width strip beneath both columns. -->
+    <!-- A two-column layout (~80/20): the document title shows via `.document-title-bar` above
+         both columns (and in the browser tab — see the `document.title` watch in <script>); the
+         left column holds just the "Conversations (HUD)" box; the right column, top-aligned with
+         the HUD box and extending down through its bottom (plain flex-row stretch gives this for
+         free), stacks two visually-boxed sub-sections: Primary on top, Global Actions below. The
+         error banner is pulled out of the Primary box entirely and rendered as its own full-width
+         strip beneath both columns. -->
     <header class="toolbar">
-      <!-- Fix (first-time-user review): the document's name/identity was previously visible only in
-           the browser tab (see the `document.title` watch in <script>) or buried in system-prompt
-           text inside a chat transcript — never in the app's own visible chrome. `store.document` is
-           always set here (this whole branch is `v-else` of `!hasDocument` above), so `.title` is
-           always available; the `'AI Document Review'` fallback is purely defensive (an empty-string
-           title, say) rather than something this branch is ever expected to hit in practice. -->
+      <!-- `store.document` is always set here (this whole branch is `v-else` of `!hasDocument`
+           above), so `.title` is always available; the `'AI Document Review'` fallback is purely
+           defensive (an empty-string title, say) rather than something this branch is ever
+           expected to hit in practice. -->
       <h1 class="document-title-bar">{{ store.document?.title || 'AI Document Review' }}</h1>
       <div class="toolbar-columns">
         <div class="toolbar-left">
@@ -746,12 +737,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <div v-if="primaryErrorMessage" class="toolbar-error-banner" role="alert">
         {{ primaryErrorMessage }}
       </div>
-      <!-- Fix (conflictMessage wiring): `documentStore.conflictMessage` (stores/document.ts) is set
-           when the server rejects a manual edit because the document changed elsewhere while it was
-           in flight (a 409) — previously nothing displayed it. Same dismissible-notice shape as
-           `PrimaryPanel.vue`'s own `.primary-notice`/`.dismiss-notice-button` (the app's existing
-           convention for a dismissible inline notice), rather than the plain non-dismissible
-           `.toolbar-error-banner` strip above, since this one has a real per-viewer dismiss action
+      <!-- `documentStore.conflictMessage` (stores/document.ts) is set when the server rejects a
+           manual edit because the document changed elsewhere while it was in flight (a 409). Same
+           dismissible-notice shape as `PrimaryPanel.vue`'s own
+           `.primary-notice`/`.dismiss-notice-button` (the app's existing convention for a
+           dismissible inline notice), rather than the plain non-dismissible `.toolbar-error-banner`
+           strip above, since this one has a real per-viewer dismiss action
            (`clearConflictMessage`) rather than just reflecting still-live state. -->
       <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
         <span>{{ store.conflictMessage }}</span>
@@ -853,8 +844,6 @@ async function onToggleReasoning(event: Event): Promise<void> {
 </template>
 
 <style scoped>
-/* Fix (first-time-user review): the initial-load state (plain "Loading…" before, now also the
-   timed-out/failed retry state) gets a minimal centered layout instead of bare unstyled text. */
 .loading {
   display: flex;
   flex-direction: column;
@@ -902,11 +891,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
   gap: 1rem;
   min-width: 0;
 }
-/* Left column (~80%): just the "Conversations (HUD)" box now — the document title that used to
-   stack above it here moved to the browser tab (see the `document.title` watch in <script>) and,
-   since the Fix above, a compact `.document-title-bar` spanning both columns, freeing this column's
-   height for the HUD box. Kept as a flex column (rather than collapsed straight into `.hud-box`)
-   since a future addition to this column would otherwise have to reintroduce the wrapper. */
+/* Left column (~80%): just the "Conversations (HUD)" box. Kept as a flex column (rather than
+   collapsed straight into `.hud-box`) for future extensibility — a later addition to this column
+   would otherwise have to reintroduce the wrapper. */
 .toolbar-left {
   flex: 4 1 0%;
   min-width: 0;
@@ -1025,9 +1012,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
   line-height: 0;
   color: inherit;
 }
-/* Fix (first-time-user review): the document's name/identity, now visible in the app's own chrome
-   rather than only the browser tab. Deliberately small/unobtrusive — this two-column toolbar layout
-   (see the comment on `.toolbar-columns` below) has no spare vertical room for a large heading. */
+/* Deliberately small/unobtrusive — this two-column toolbar layout (see the comment on
+   `.toolbar-columns` below) has no spare vertical room for a large heading. */
 .document-title-bar {
   margin: 0;
   font-size: 0.95rem;
@@ -1036,10 +1022,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Fix (conflictMessage wiring): same dismissible-notice shape as `PrimaryPanel.vue`'s own
-   `.primary-notice`, but amber/warning-toned rather than that one's neutral info-blue — this
-   reflects a real, already-happened data-loss event (the user's last edit was dropped), not just
-   informational first-time guidance. */
+/* Same dismissible-notice shape as `PrimaryPanel.vue`'s own `.primary-notice`, but amber/
+   warning-toned rather than that one's neutral info-blue — this reflects a real, already-happened
+   data-loss event (the user's last edit was dropped), not just informational first-time guidance. */
 .toolbar-conflict-banner {
   display: flex;
   align-items: center;
@@ -1062,11 +1047,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
   border-radius: 4px;
   font-size: 0.8rem;
 }
-/* Fix (unclickable-Close-button bug): these are independent, page-level "simple" modals with no
-   nesting relationship to `.conversation-detail-overlay` below — but a user can open either one
-   while a conversation is focused (`--z-overlay-detail`), and `--z-overlay` sits BELOW that tier.
-   That rendered this dialog sliced in half underneath the focused panel, Close button included.
-   `--z-overlay-blocking` (style.css `:root`) is the tier reserved for exactly this "must always
+/* These are independent, page-level "simple" modals with no nesting relationship to
+   `.conversation-detail-overlay` below, but a user can open either one while a conversation is
+   focused (`--z-overlay-detail`), so they must render above that tier — hence
+   `--z-overlay-blocking` (style.css `:root`), the tier reserved for exactly this "must always
    render above everything else" case. */
 .shortcuts-overlay {
   z-index: var(--z-overlay-blocking, 70);
