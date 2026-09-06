@@ -226,10 +226,9 @@ onBeforeUnmount(() => {
             <span class="name">{{ conv.name }}</span>
           </button>
           <span class="conversation-status-cell">
-            <!-- Parity fix: pending-proposal-count/queue-position badges now come from
-                 `ConversationStatusBadges.vue` itself (via the shared `conversationStatusBadges.ts`
-                 composable) rather than being hand-rendered here — see that composable's own doc
-                 comment for why `ConversationThreadBox.vue` needed the exact same parity. -->
+            <!-- Pending-proposal-count/queue-position badges come from `ConversationStatusBadges.vue`
+                 itself, via the shared `conversationStatusBadges.ts` composable — see that
+                 composable's own doc comment. -->
             <ConversationStatusBadges :conversation-id="conv.id" />
           </span>
         </div>
@@ -384,12 +383,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   gap: 0.35rem;
 }
-/* `.pending-badge`/`.queue-badge` colors now live in `ConversationStatusBadges.vue` (shared with
-   `ConversationThreadBox.vue`/`ConversationView.vue` — see that composable's own doc comment).
-   Fix 4 (color-code conversation status) and the `.stale-badge` warning color that used to live
-   here are both now in `ConversationStatusBadges.vue` — shared verbatim (see that component's own
-   doc comment for the one spot, the closed-status color, where this panel's own copy actually
-   differed from `ConversationThreadBox.vue`'s/`ConversationView.vue`'s and which value won). */
+/* Every conversation status/badge color (`.pending-badge`/`.queue-badge`/`.stale-badge` and the
+   rest) lives in `ConversationStatusBadges.vue`, shared with `ConversationThreadBox.vue`/
+   `ConversationView.vue` — see that component's own doc comment. */
 /* 006-toolbar-reorg: Primary's notice/summary and the busy-switch dialog moved to
    `PrimaryPanel.vue` (its own visually-boxed section in App.vue's toolbar), and the primary-error
    banner moved to App.vue as a full-width strip beneath both toolbar columns — none of it lives

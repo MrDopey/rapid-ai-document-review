@@ -3,18 +3,16 @@ import { useConversationsStore } from '../stores/conversations.js';
 import { orderConversationsByAnchor } from '../components/canvas/conversationLayout.js';
 
 /**
- * Extracted from App.vue (multi-panel focus-set state machine, 005-canvas-conversation-threads):
- * up to `focusCap` conversations may have an open detail panel (`ConversationDetailPanel.vue`, one
- * instance per id) simultaneously. `lastInteractedId` is the separate "last-interacted" scalar the
- * confirmed design calls for: it backs `HudPanel.vue`'s Make-Primary/Clear-Primary targeting (same
- * role a single-scalar `selectedConversationId` used to play) *and* is the one signal that decides
- * which single panel's `useFocusTrap` is active at any given moment (every other simultaneously-open
- * panel renders with its own trap inactive — see `ConversationDetailPanel.vue`).
+ * Multi-panel focus-set state machine: up to `focusCap` conversations may have an open detail panel
+ * (`ConversationDetailPanel.vue`, one instance per id) simultaneously. `lastInteractedId` is a
+ * separate "last-interacted" scalar: it backs `HudPanel.vue`'s Make-Primary/Clear-Primary targeting
+ * *and* is the one signal that decides which single panel's `useFocusTrap` is active at any given
+ * moment (every other simultaneously-open panel renders with its own trap inactive — see
+ * `ConversationDetailPanel.vue`).
  *
- * Same external behavior as the inline version this replaces — App.vue's template/script now just
- * wires this up rather than owning the state machine directly. `focusCap` is passed in (App.vue
- * derives it from its own `.panes`-width `ResizeObserver` via `useFocusCap`) since it depends on
- * viewport layout this composable has no business knowing about.
+ * `focusCap` is passed in (App.vue derives it from its own `.panes`-width `ResizeObserver` via
+ * `useFocusCap`) rather than owned here, since it depends on viewport layout this composable has no
+ * business knowing about.
  */
 export function useFocusPanelState(focusCap: Ref<number> | ComputedRef<number>) {
   const conversationsStore = useConversationsStore();
