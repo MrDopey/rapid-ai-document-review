@@ -227,13 +227,24 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(GetDocumentResponse.parse(doc.json).content.startsWith('##')).toBe(true);
     });
 
-    it('proceeds (with only a warn-level log, not an error) when baseRevision is badly out of sync', async () => {
+    it('409s when baseRevision is badly out of sync (a genuine content-diverging conflict)', async () => {
       await createDoc(ctx.app, ctx.storage);
+      // -1000 is nowhere near any real revision number, so every "revision" in the
+      // baseRevision..currentRevision gap is missing (not a `manual_debounce` checkpoint) —
+      // DocumentService.applyChanges (bf220af, hardened by 6c1d3db) treats this as a genuine
+      // content-diverging conflict, not a benign debounce-only gap, and rejects it.
       const res = await call(ctx.app, 'PATCH', '/api/document', {
         baseRevision: -1000,
         changes: [{ from: 0, to: 0, insert: 'x' }],
       });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(409);
+      // DocumentOutOfSyncError has no dedicated `instanceof` catch/ErrorCode mapping in
+      // api/http/document.ts (unlike DocumentNotFoundError/DocumentAlreadyExistsError there), so it
+      // propagates to Fastify's default error handler instead of the app's `{ error: { code, ... } }`
+      // ErrorEnvelope — hence checking the raw body shape here rather than `ErrorEnvelope.parse`.
+      const body = res.json as { statusCode: number; error: string; message: string };
+      expect(body.statusCode).toBe(409);
+      expect(body.message).toMatch(/baseRevision -1000/);
     });
 
     it('404 DOCUMENT_NOT_FOUND before creation', async () => {
