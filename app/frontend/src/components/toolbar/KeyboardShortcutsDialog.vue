@@ -34,7 +34,7 @@ const groups = computed(() => {
 <template>
   <div
     ref="rootEl"
-    class="keyboard-shortcuts-dialog"
+    class="keyboard-shortcuts-dialog dialog-box"
     role="dialog"
     aria-modal="true"
     aria-label="Keyboard shortcuts"
@@ -60,16 +60,15 @@ const groups = computed(() => {
 </template>
 
 <style scoped>
+/* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own width/max-width/max-height/
+   padding/overflow stay here. */
 .keyboard-shortcuts-dialog {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1rem;
   width: 48rem;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 .dialog-header {
   display: flex;

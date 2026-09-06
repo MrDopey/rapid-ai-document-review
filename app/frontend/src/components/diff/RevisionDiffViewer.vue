@@ -68,7 +68,7 @@ const identical = computed(
 <template>
   <div
     ref="rootEl"
-    class="revision-diff-viewer"
+    class="revision-diff-viewer dialog-box"
     role="dialog"
     aria-label="Compare revisions"
     aria-modal="true"
@@ -172,17 +172,15 @@ const identical = computed(
    `.modal-overlay`'s viewport-centering flexbox, a long document's diff could grow taller than the
    viewport with nothing to cap it, pushing the header/close button and most of the diff off-screen
    with no scrollbar to reach them (`overflow: auto` only takes effect once a max-height/height
-   exists for content to overflow against). */
+   exists for content to overflow against). Background/color/border-radius/box-shadow now live in
+   style.css's shared `.dialog-box` class (applied via the template class above); only the
+   width/max-width/max-height/padding/overflow specific to this dialog stay here. */
 .revision-diff-viewer {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1rem;
   width: 48rem;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 /* `.diff-header`, `.diff-header-left`, `.view-toggle button[aria-selected='true']`,
    `.focus-toggle`, `.collapsed-marker`, `.collapsed-marker--full-row`, `.side-by-side-columns`,

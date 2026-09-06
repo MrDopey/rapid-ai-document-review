@@ -13,7 +13,7 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 </script>
 
 <template>
-  <div ref="rootEl" class="help-dialog" role="dialog" aria-modal="true" aria-label="Help">
+  <div ref="rootEl" class="help-dialog dialog-box" role="dialog" aria-modal="true" aria-label="Help">
     <header class="dialog-header">
       <h2>Help</h2>
       <button type="button" class="close-button" @click="emit('close')">Close</button>
@@ -69,16 +69,15 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 </template>
 
 <style scoped>
+/* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own width/max-width/max-height/
+   padding/overflow stay here. */
 .help-dialog {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1rem;
   width: 32rem;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 .dialog-header {
   display: flex;
