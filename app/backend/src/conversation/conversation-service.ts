@@ -49,9 +49,8 @@ export class AgentUnavailableError extends Error {}
  * `kind === 'main'` conversation outright — nothing today ever creates a replacement Main once the
  * existing one is closed (`ensureMain` only creates one when none exists at all, and a closed Main
  * still exists, just unusable), so allowing this through would permanently strand the document
- * without a usable Main. NOT YET mapped to an HTTP status in api/http/conversations.ts's
- * `handleConversationError` dispatch table — that file is outside this pass's scope; until it's
- * added there, this throw surfaces as an unmapped/500 error rather than a clean 4xx.
+ * without a usable Main. Mapped to 409/`CANNOT_CLOSE_MAIN_CONVERSATION` in
+ * api/http/conversations.ts's `handleConversationError` dispatch table.
  */
 export class CannotCloseMainConversationError extends Error {}
 /** Shared shape for "a branch/refresh would exceed a configured depth limit" (FR-*): both
@@ -241,14 +240,7 @@ export class ConversationService {
     const document = this.storage.getDocument();
     if (!document) throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     const page = this.storage.listConversations(documentId, options);
-    // FIX: materialize the document's content once per request, not once per conversation in the
-    // page — `getContent()` re-derives the whole document text from the CRDT and was previously
-    // being called inside this `.map()`, redundantly re-materializing it once per row.
     const content = this.automerge.get().getContent();
-    // FIX: batch DTO construction via `toConversationDtos` instead of calling the single-row
-    // `toConversationDto` inside `.map()` — the batched form issues one `getSettings()` call and
-    // one pending-edits scan for the whole page instead of one each per row (see
-    // conversation-mapper.ts's doc comment on `toConversationDtos` for the measured N+1 impact).
     return {
       currentRevision: document.currentRevision,
       conversations: toConversationDtos(this.storage, page.items, document.currentRevision, content),
@@ -345,7 +337,7 @@ export class ConversationService {
     }
 
     // Disambiguate only the auto-generated case (FR-014 follow-up): an explicit `request.name` is
-    // left exactly as the caller supplied it, same as before this fix.
+    // left exactly as the caller supplied it.
     const autoName = seedSelection ? deriveBranchName(seedExcerpt, seedSelection.text) : 'Branch';
     const name = request.name ?? this.dedupeConversationName(document.id, autoName);
     const now = new Date().toISOString();
@@ -556,8 +548,7 @@ export class ConversationService {
    * FR-036: an independent review of a closed conversation and its branches. Validates the target
    * conversation/document here (so thrown errors stay exactly where callers already expect them),
    * delegating the rest — building the reviewed-conversation-id set, the transcript, the new
-   * `kind: 'review'` conversation row, and its seed message — to `ConversationReviewService`
-   * (extracted out of this class; see its doc comment).
+   * `kind: 'review'` conversation row, and its seed message — to `ConversationReviewService`.
    */
   review(conversationId: string): ReviewConversationResponse {
     const target = this.getConversationOrThrow(conversationId);
@@ -701,13 +692,13 @@ export class ConversationService {
   }
 
   /**
-   * Minor UX fix: auto-generated branch names (`deriveBranchName`, derived from the seeded
-   * selection's heading/leading words) just truncate the passage, so branching the same or
-   * adjacent text repeatedly produces multiple conversations with identical-looking names — a
-   * confirmed first-time-user pain point (can't tell them apart in the sidebar). When `name`
+   * Auto-generated branch names (`deriveBranchName`, derived from the seeded selection's
+   * heading/leading words) just truncate the passage, so branching the same or adjacent text
+   * repeatedly can produce multiple conversations with identical-looking names. When `name`
    * collides with an existing conversation in the same document, appends the lowest-numbered
    * " (N)" suffix (starting at 2) not already in use, so sidebar entries stay distinguishable. A
-   * non-colliding name (the common case) is returned untouched.
+   * non-colliding name (the common case) is returned untouched. Explicit names (`request.name`)
+   * never reach this method, so they're never deduped.
    */
   private dedupeConversationName(documentId: string, name: string): string {
     const existingNames = new Set(this.storage.listAllConversations(documentId).map((c) => c.name));

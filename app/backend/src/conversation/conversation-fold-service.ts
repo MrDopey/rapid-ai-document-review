@@ -4,12 +4,10 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 
 /**
- * Extracted out of `ConversationService` (which had grown 5 responsibilities across 959 lines):
- * assembling and delivering a closed conversation's fold summary into its parent (FR-034/FR-034a).
- * Depends on the same `storage`/`piService`/`publisher` primitives `ConversationService` already
- * has injected — `ConversationService.close()` still owns the decision of *whether* to fold (and
- * the fire-and-forget/catch wrapping around the call, since that's specific to `close()`'s own
- * HTTP-response timing), delegating only the actual fold-summary work here.
+ * Assembles and delivers a closed conversation's fold summary into its parent (FR-034/FR-034a).
+ * `ConversationService.close()` owns the decision of *whether* to fold (and the fire-and-forget/
+ * catch wrapping around the call, since that's specific to `close()`'s own HTTP-response timing),
+ * delegating only the actual fold-summary work here.
  */
 export class ConversationFoldService {
   private readonly storage: StorageAdapter;
@@ -54,7 +52,7 @@ export class ConversationFoldService {
       );
       return;
     } finally {
-      // FIX 5: `generateFoldSynopsis` above was this closed conversation's own last use of
+      // `generateFoldSynopsis` above is this closed conversation's own last use of
       // `getOrCreateSession` (`deliverFoldSummary` below only ever touches the *parent*'s
       // session) — safe to evict now regardless of whether the synopsis call succeeded.
       this.piService.evictSession(conversation.id);

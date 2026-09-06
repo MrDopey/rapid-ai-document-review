@@ -23,7 +23,6 @@ export interface ReviewCallbacks {
 }
 
 /**
- * Extracted out of `ConversationService` (which had grown 5 responsibilities across 959 lines):
  * FR-036's independent review of a closed conversation and its branches. Depends on the same
  * `storage`/`piService`/`publisher` primitives (plus `automerge`, for the content mapping
  * `toConversationDto` needs) `ConversationService` already has injected.
@@ -106,7 +105,8 @@ export class ConversationReviewService {
     // returns as soon as the review conversation exists; its own progress surfaces over the event
     // stream (http-api.md, FR-037).
     void callbacks.sendMessage(row.id, seedMessage).catch((err) => {
-      // `event: 'agent_error'` — same reasoning as branch()'s seed-message catch above.
+      // `event: 'agent_error'` is the vocabulary term for a Pi call failing with no other event
+      // of its own (FR-042).
       logger.warn(
         { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
         'failed to deliver review seed message',
