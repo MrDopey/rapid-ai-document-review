@@ -6,6 +6,7 @@ import { defaultKeymap, history, historyKeymap, insertNewline, undo, redo } from
 import { markdown } from '@codemirror/lang-markdown';
 import { search, searchKeymap } from '@codemirror/search';
 import { focusCapBranchTooltip } from '../../composables/focusConfig.js';
+import { ChangeBatcher } from './ChangeBatcher';
 
 // 005-canvas-conversation-threads (branch-cap parity): `focusedConversationIds`/
 // `maxFocusedConversations` are App.vue's own multi-focus state, threaded straight through
@@ -58,27 +59,34 @@ let view: EditorView | null = null;
 let applyingRemote = false;
 
 const CLIENT_BATCH_DEBOUNCE_MS = 250;
-// Composed (not concatenated): each CodeMirror update's offsets are relative to the document
-// state left by the previous update in the batch, not to the original pre-batch text. Composing
-// keeps the net result expressed relative to that one original base, which is what a flat
-// {from,to,insert}[] batch must be for the backend to apply it correctly.
-let accumulated: ChangeSet | null = null;
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
+// Coordinator follow-up (stress-test perf pass, rapid-edit bursts): pure debounce alone lets a
+// sustained typing/paste burst (each edit arriving under CLIENT_BATCH_DEBOUNCE_MS after the last)
+// push the flush out indefinitely, so the batch — and the cost of composing each new change onto
+// it in ChangeBatcher's `compose` below — keeps growing for as long as the burst lasts. This caps
+// that: a flush is forced at least this often regardless, bounding both the outbound payload size
+// and the compose chain length, while still collapsing any burst shorter than this into one flush.
+const CLIENT_BATCH_MAX_WAIT_MS = 1000;
 
-function flush(): void {
-  if (!accumulated) return;
-  const changes: { from: number; to: number; insert: string }[] = [];
-  accumulated.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-    changes.push({ from: fromA, to: toA, insert: inserted.toString() });
-  });
-  accumulated = null;
-  if (changes.length > 0) emit('change', changes);
-}
-
-function scheduleFlush(): void {
-  if (flushTimer) clearTimeout(flushTimer);
-  flushTimer = setTimeout(flush, CLIENT_BATCH_DEBOUNCE_MS);
-}
+// ChangeBatcher (./ChangeBatcher.ts) owns the accumulation buffer and debounce/max-wait timers as
+// plain, CodeMirror/Vue-free logic; this composes/flattens one ChangeSet-shaped batch into the
+// flat {from,to,insert}[] the backend expects — composed (not concatenated), since each CodeMirror
+// update's offsets are relative to the document state left by the previous update in the batch,
+// not to the original pre-batch text. Composing keeps the net result expressed relative to that
+// one original base, which is what a flat batch must be for the backend to apply it correctly.
+const changeBatcher = new ChangeBatcher<ChangeSet>(
+  (batch) => {
+    const changes: { from: number; to: number; insert: string }[] = [];
+    batch.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      changes.push({ from: fromA, to: toA, insert: inserted.toString() });
+    });
+    if (changes.length > 0) emit('change', changes);
+  },
+  {
+    debounceMs: CLIENT_BATCH_DEBOUNCE_MS,
+    maxWaitMs: CLIENT_BATCH_MAX_WAIT_MS,
+    compose: (accumulated, change) => (accumulated ? accumulated.compose(change) : change),
+  },
+);
 
 /** FR-011/FR-043a: branching from a selection is reachable both by these two focus-reachable
  * toolbar buttons and by a keyboard shortcut each bound directly in the editor's own keymap below
@@ -157,8 +165,7 @@ onMounted(() => {
       if (!update.docChanged && !update.selectionSet) return;
 
       if (update.docChanged && !applyingRemote) {
-        accumulated = accumulated ? accumulated.compose(update.changes) : update.changes;
-        scheduleFlush();
+        changeBatcher.add(update.changes);
       }
 
       if (update.selectionSet) {
@@ -177,7 +184,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  if (flushTimer) clearTimeout(flushTimer);
+  changeBatcher.dispose();
   view?.destroy();
 });
 
