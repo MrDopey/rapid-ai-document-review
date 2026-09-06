@@ -309,16 +309,47 @@ export class DocumentService {
     }
 
     if (changes && changes.length > 0) {
-      // Hard reject on ANY base-revision mismatch — see `DocumentOutOfSyncError`. This replaces a
+      // Hard reject on a base-revision mismatch — see `DocumentOutOfSyncError`. This replaces a
       // previous coarse diagnostic that only log-warned past a 50-revision drift and otherwise
       // applied `changes` regardless; that left every smaller mismatch (a single concurrent edit
       // landing first, which is the common case) silently applying stale offsets.
+      //
+      // Fix (spurious-409-on-debounce-checkpoint): a revision-number mismatch alone is not
+      // sufficient to conclude the document's CONTENT has actually moved on. Manual edits (this
+      // method) never bump `currentRevision` themselves — only `RevisionService.createRevision`
+      // does, on: (a) `manual_debounce`'s periodic checkpoints of whatever content already exists
+      // (scheduled below, at the end of this same `if` block), which never themselves change
+      // content, or (b) an `agent_edit`/`restore`, which do. That means several manual edits from
+      // this same client routinely accumulate under one unchanged `currentRevision` before any
+      // debounce fires — comparing actual content between `baseRevision` and now (e.g. via each
+      // revision's retained Automerge `heads`, as `RevisionService.restore`/`export` do) would
+      // *always* differ across that gap and isn't the right test here. What actually matters is
+      // whether every revision created between `baseRevision` and `currentRevision` was a
+      // content-preserving `manual_debounce` checkpoint (safe to apply `changes` to the live
+      // content as usual — e.g. this same client's own earlier edit retrying after transient
+      // network failures, whose debounce fired mid-retry) versus at least one being a real
+      // content-changing `agent_edit`/`restore` (a genuine conflict: this tab's local text no
+      // longer matches the document's actual shape, so `changes`' offsets can no longer be trusted
+      // — reject as before).
       if (baseRevision !== undefined && baseRevision !== doc.currentRevision) {
-        throw new DocumentOutOfSyncError(
-          `Document has changed since baseRevision ${baseRevision} (current revision is ` +
-            `${doc.currentRevision}); refetch the document via GET /api/document and retry your edit.`,
-          doc.currentRevision,
-        );
+        let onlyDebounceCheckpointsSinceBaseRevision = baseRevision < doc.currentRevision;
+        for (let revision = baseRevision + 1; revision <= doc.currentRevision; revision += 1) {
+          const row = this.storage.getRevision(doc.id, revision);
+          if (!row || row.origin !== 'manual_debounce') {
+            onlyDebounceCheckpointsSinceBaseRevision = false;
+            break;
+          }
+        }
+
+        if (!onlyDebounceCheckpointsSinceBaseRevision) {
+          throw new DocumentOutOfSyncError(
+            `Document has changed since baseRevision ${baseRevision} (current revision is ` +
+              `${doc.currentRevision}); refetch the document via GET /api/document and retry your edit.`,
+            doc.currentRevision,
+          );
+        }
+        // Every intervening revision was a content-preserving debounce checkpoint — fall through
+        // and apply `changes` to the live content as if `baseRevision` had matched.
       }
 
       // Descending offset order keeps earlier offsets valid as each splice is applied.
