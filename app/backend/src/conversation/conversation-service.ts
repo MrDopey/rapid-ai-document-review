@@ -230,11 +230,13 @@ export class ConversationService {
     const document = this.storage.getDocument();
     if (!document) throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     const page = this.storage.listConversations(documentId, options);
+    // FIX: materialize the document's content once per request, not once per conversation in the
+    // page — `getContent()` re-derives the whole document text from the CRDT and was previously
+    // being called inside this `.map()`, redundantly re-materializing it once per row.
+    const content = this.automerge.get().getContent();
     return {
       currentRevision: document.currentRevision,
-      conversations: page.items.map((row) =>
-        toConversationDto(this.storage, row, document.currentRevision, this.automerge.get().getContent()),
-      ),
+      conversations: page.items.map((row) => toConversationDto(this.storage, row, document.currentRevision, content)),
       nextCursor: page.nextCursor,
     };
   }
