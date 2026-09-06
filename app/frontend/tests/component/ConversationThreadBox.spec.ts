@@ -206,6 +206,38 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
   });
 });
 
+// Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent + tint) had no
+// equivalent on this sidebar/canvas box — this proves the box now carries the same `.is-primary`
+// class, driven by `conversation.isPrimary`, mirroring HudPanel's own binding.
+describe('ConversationThreadBox — Primary conversation indicator', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountBox(isPrimary: boolean) {
+    const store = useConversationsStore();
+    store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One', isPrimary })];
+    store.messagesByConversation['conv-1'] = [];
+    return mount(ConversationThreadBox, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('applies the is-primary class when the conversation is Primary', () => {
+    const wrapper = mountBox(true);
+    expect(wrapper.find('.conversation-thread-box').classes()).toContain('is-primary');
+  });
+
+  it('omits the is-primary class when the conversation is not Primary', () => {
+    const wrapper = mountBox(false);
+    expect(wrapper.find('.conversation-thread-box').classes()).not.toContain('is-primary');
+  });
+});
+
 // Rename UI: click-to-edit title, save on Enter/blur, cancel on Escape, empty-name validation.
 describe('ConversationThreadBox — rename UI', () => {
   let pinia: Pinia;

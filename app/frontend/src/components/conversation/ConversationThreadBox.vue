@@ -285,7 +285,13 @@ defineExpose({ el: rootEl });
 </script>
 
 <template>
-  <article v-if="conversation" ref="rootEl" class="conversation-thread-box" :data-conversation-id="conversationId">
+  <article
+    v-if="conversation"
+    ref="rootEl"
+    class="conversation-thread-box"
+    :class="{ 'is-primary': conversation.isPrimary }"
+    :data-conversation-id="conversationId"
+  >
     <span class="pane-eyebrow">Conversation</span>
     <header ref="threadHeaderEl" class="thread-header">
       <div class="thread-header-top">
@@ -373,6 +379,20 @@ defineExpose({ el: rootEl });
   border-radius: 6px;
   padding: 0.4rem 0.6rem 0.6rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+/* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
+   background tint) had no equivalent on this box — reused verbatim for visual consistency across
+   all three surfaces that display a conversation (HudPanel, `ConversationView.vue`, this box).
+   `box-shadow` is a single property, so this rule restates the base rule's own drop-shadow
+   alongside the two new inset shadows rather than losing it to a separate `.is-primary` override;
+   both inset shadows automatically follow this box's own `border-radius: 6px` (an inset shadow is
+   always clipped to the padding box's rounded corners, same as the border it sits just inside of),
+   so there's no separate corner-radius fix needed here. */
+.conversation-thread-box.is-primary {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 3px 0 0 0 var(--accent-color, #2563eb),
+    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
 }
 /* Header consolidation: title+status stays a single top row; lineage + actions stack beneath it.
    Previously `.thread-header` was a single 3-column grid holding only title | Open | status — the

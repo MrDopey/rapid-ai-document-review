@@ -575,7 +575,7 @@ const actions = computed<ActionDescriptor[]>(() => {
 </script>
 
 <template>
-  <section class="conversation-view" aria-label="Conversation">
+  <section class="conversation-view" :class="{ 'is-primary': conversation?.isPrimary }" aria-label="Conversation">
     <!-- UI convention: title | status | action (see .specify/memory/constitution.md
          "UI Conventions") — the same 3-section pattern as HudPanel.vue's conversation-list rows,
          laid out as two explicit rows rather than one (see `.conversation-header`'s doc comment
@@ -774,6 +774,19 @@ const actions = computed<ActionDescriptor[]>(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+/* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
+   background tint, both via `box-shadow` so they layer independently of any other border/background
+   this root element might have) had no equivalent here — this focused/detail view showed no visual
+   cue at all for the Primary conversation. Same recipe, reused verbatim for visual consistency
+   across all three surfaces that display a conversation (HudPanel, this view,
+   `ConversationThreadBox.vue`). Never color alone: the closed-conversation `.readonly-banner` above
+   already spells out "no Primary" in words, and `PrimaryPanel.vue`'s Make/Clear-Primary controls
+   name this conversation by its title, not by this styling alone. */
+.conversation-view.is-primary {
+  box-shadow:
+    inset 3px 0 0 0 var(--accent-color, #2563eb),
+    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
 }
 /* Layout fix: an explicit two-row column (rather than a single-row 3-column grid with
    `.header-actions` wrapping onto a second line when it overflows) — the row-wrap fallback still

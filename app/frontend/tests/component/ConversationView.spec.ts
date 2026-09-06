@@ -577,6 +577,42 @@ describe('ConversationView — rename UI', () => {
   });
 });
 
+// Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent + tint) had no
+// equivalent on this focused/detail view's own root — this proves the view now carries the same
+// `.is-primary` class, driven by `conversation.isPrimary`, mirroring HudPanel's own binding.
+describe('ConversationView — Primary conversation indicator', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.getConversation).mockReset();
+    vi.mocked(httpClient.listEdits).mockReset();
+    vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
+  });
+
+  function mountView(isPrimary: boolean) {
+    const store = useConversationsStore();
+    const conversation = conversationFixture({ id: 'conv-1', isPrimary });
+    store.conversations = [conversation];
+    store.messagesByConversation['conv-1'] = [];
+    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
+    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+  }
+
+  it('applies the is-primary class when the conversation is Primary', async () => {
+    const wrapper = mountView(true);
+    await flushPromises();
+    expect(wrapper.find('.conversation-view').classes()).toContain('is-primary');
+  });
+
+  it('omits the is-primary class when the conversation is not Primary', async () => {
+    const wrapper = mountView(false);
+    await flushPromises();
+    expect(wrapper.find('.conversation-view').classes()).not.toContain('is-primary');
+  });
+});
+
 // Bug fix (scroll-to-top-of-message): a new assistant message arriving used to always scroll the
 // whole transcript to its bottom (`scrollToBottomIfSticky`, previously wired to a `deep` watch over
 // `messages`) — for a long reply, that could show only whatever the tail currently looks like as it
