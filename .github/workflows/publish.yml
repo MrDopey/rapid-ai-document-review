@@ -76,7 +76,7 @@ jobs:
           if [[ -n "$PREV_TAG" ]]; then
             PREV_DATE=$(git log -1 --format=%aI "$PREV_TAG")
           else
-            PREV_DATE=$(git log --reverse --format=%aI | head -1)
+            PREV_DATE=$(git log --reverse --format=%aI -1)
           fi
           echo "previous_date=${PREV_DATE}" >> "$GITHUB_OUTPUT"
 
