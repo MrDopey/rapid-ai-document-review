@@ -693,6 +693,24 @@ async function onToggleReasoning(event: Event): Promise<void> {
       <div v-if="primaryErrorMessage" class="toolbar-error-banner" role="alert">
         {{ primaryErrorMessage }}
       </div>
+      <!-- Fix (conflictMessage wiring): `documentStore.conflictMessage` (stores/document.ts) is set
+           when the server rejects a manual edit because the document changed elsewhere while it was
+           in flight (a 409) — previously nothing displayed it. Same dismissible-notice shape as
+           `PrimaryPanel.vue`'s own `.primary-notice`/`.dismiss-notice-button` (the app's existing
+           convention for a dismissible inline notice), rather than the plain non-dismissible
+           `.toolbar-error-banner` strip above, since this one has a real per-viewer dismiss action
+           (`clearConflictMessage`) rather than just reflecting still-live state. -->
+      <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
+        <span>{{ store.conflictMessage }}</span>
+        <button
+          type="button"
+          class="dismiss-notice-button"
+          aria-label="Dismiss conflict notice"
+          @click="store.clearConflictMessage()"
+        >
+          Dismiss
+        </button>
+      </div>
     </header>
 
     <div v-if="shortcutsOpen" class="modal-overlay shortcuts-overlay">
@@ -936,6 +954,23 @@ async function onToggleReasoning(event: Event): Promise<void> {
 }
 /* Error banner: pulled out of the Primary box entirely (see `PrimaryPanel.vue`'s `update:error`) —
    a full-width strip beneath BOTH toolbar columns, only rendered when there's an error. */
+/* Fix (conflictMessage wiring): same dismissible-notice shape as `PrimaryPanel.vue`'s own
+   `.primary-notice`, but amber/warning-toned rather than that one's neutral info-blue — this
+   reflects a real, already-happened data-loss event (the user's last edit was dropped), not just
+   informational first-time guidance. */
+.toolbar-conflict-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--warning-bg, #fef3c7);
+  color: var(--warning-color, #92400e);
+  border: 1px solid var(--warning-border, #fde68a);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
 .toolbar-error-banner {
   padding: 0.4rem 0.5rem;
   background: var(--danger-bg, #fee2e2);
