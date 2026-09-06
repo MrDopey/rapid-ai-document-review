@@ -71,6 +71,7 @@ vi.mock('../../src/transport/http-client.js', () => ({
 
 import { httpClient } from '../../src/transport/http-client.js';
 import { useConversationsStore } from '../../src/stores/conversations.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
 import PreviewComponent from '../../src/components/preview/PreviewComponent.vue';
 import ConversationDetailPanel from '../../src/components/conversation/ConversationDetailPanel.vue';
@@ -470,6 +471,29 @@ describe('App.vue — Preview|Canvas resize handle: 30% minimum-width clamp', ()
     // 30% of a 2000px container (600px) — not the old fixed 200px floor.
     expect(previewPx).toBeCloseTo(600, 0);
   });
+
+  // d75a6c2: the resize handle is a role="separator" with no native semantics of its own for
+  // "how far dragged" — aria-valuenow/min/max make that state available to assistive tech, and
+  // must track the live drag, not just a static initial render.
+  it('exposes aria-valuenow/min/max, and aria-valuenow updates live as the handle is dragged', async () => {
+    const wrapper = await mountApp(pinia);
+    stubPanesWidth(wrapper, 1000);
+
+    const handle = wrapper.get('.resize-handle');
+    expect(handle.attributes('aria-valuemin')).toBe('0');
+    expect(handle.attributes('aria-valuemax')).toBe('100');
+    const before = Number(handle.attributes('aria-valuenow'));
+    expect(before).toBeGreaterThanOrEqual(0);
+    expect(before).toBeLessThanOrEqual(100);
+
+    // A huge leftward drag toward Preview's 30%-of-container floor (same gesture as the clamp
+    // test above) — aria-valuenow must reflect the new, dragged-to ratio, not the pre-drag one.
+    await drag(wrapper, 500, -1000);
+
+    const after = Number(wrapper.get('.resize-handle').attributes('aria-valuenow'));
+    expect(after).toBeLessThan(before);
+    expect(after).toBeCloseTo(30, 0);
+  });
 });
 
 describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () => {
@@ -621,5 +645,99 @@ describe('App.vue — document.title reflects the loaded document (moved out of 
     const wrapper = await mountApp(pinia);
     expect(wrapper.get('.toolbar-left').text()).not.toContain('Test Document');
     expect(wrapper.find('.toolbar-left h1').exists()).toBe(false);
+  });
+});
+
+// 9dbc077: an unreachable/erroring backend used to leave `!store.loaded` (a bare "Loading…") true
+// forever, with no way for the user to know anything had gone wrong or to do anything about it.
+describe('App.vue — initial-load timeout/retry', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    stubMatchMedia(true);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('a rejected initial load shows the retry UI; clicking Retry re-invokes load and, once it succeeds, shows the document', async () => {
+    vi.mocked(httpClient.getDocument).mockRejectedValueOnce(new Error('Network request failed'));
+
+    const wrapper = mount(App, { global: { plugins: [pinia], stubs: STUBS } });
+    await flushPromises();
+
+    expect(httpClient.getDocument).toHaveBeenCalledTimes(1);
+    const loadError = wrapper.get('.load-error');
+    expect(loadError.text()).toContain('Network request failed');
+    expect(loadError.get('button').text()).toBe('Retry');
+    expect(wrapper.find('.toolbar').exists()).toBe(false);
+
+    // The next call succeeds (the default mocked resolution from this file's top-level factory).
+    await loadError.get('button').trigger('click');
+    await flushPromises();
+
+    expect(httpClient.getDocument).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('.load-error').exists()).toBe(false);
+    expect(wrapper.get('.toolbar').exists()).toBe(true);
+  });
+
+  it('an unreachable backend that never resolves times out (LOAD_TIMEOUT_MS) with a "couldn\'t reach the server" message', async () => {
+    vi.useFakeTimers();
+    vi.mocked(httpClient.getDocument).mockImplementationOnce(() => new Promise(() => {})); // never settles
+
+    const wrapper = mount(App, { global: { plugins: [pinia], stubs: STUBS } });
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    const loadError = wrapper.get('.load-error');
+    expect(loadError.text()).toMatch(/couldn't reach the server/i);
+  });
+});
+
+// 29a11a2: `documentStore.conflictMessage` (stores/document.ts) is set once a manual edit is
+// rejected over a genuine baseRevision conflict (bf220af) — surfaced here as a dismissible banner
+// rather than silently resyncing with no visible explanation.
+describe('App.vue — conflictMessage banner', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    stubMatchMedia(true);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('is absent when conflictMessage is unset', async () => {
+    const wrapper = await mountApp(pinia);
+    expect(wrapper.find('.toolbar-conflict-banner').exists()).toBe(false);
+  });
+
+  it('renders the message once documentStore.conflictMessage is set, and Dismiss clears it', async () => {
+    const wrapper = await mountApp(pinia);
+    const documentStore = useDocumentStore();
+    documentStore.conflictMessage = 'This document changed elsewhere while you were editing.';
+    await wrapper.vm.$nextTick();
+
+    const banner = wrapper.get('.toolbar-conflict-banner');
+    expect(banner.attributes('role')).toBe('alert');
+    expect(banner.text()).toContain('This document changed elsewhere while you were editing.');
+
+    await banner.get('[aria-label="Dismiss conflict notice"]').trigger('click');
+    await wrapper.vm.$nextTick();
+
+    expect(documentStore.conflictMessage).toBeNull();
+    expect(wrapper.find('.toolbar-conflict-banner').exists()).toBe(false);
   });
 });
