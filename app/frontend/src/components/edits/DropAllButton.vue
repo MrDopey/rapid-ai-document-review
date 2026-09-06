@@ -4,7 +4,17 @@ import { useBusyAction } from '../../composables/useBusyAction.js';
 
 const props = defineProps<{ conversationId: string; disabled?: boolean }>();
 const store = useEditsStore();
-const { busy, run: onClick } = useBusyAction(() => store.dropRemaining(props.conversationId));
+const { busy, run } = useBusyAction(() => store.dropRemaining(props.conversationId));
+
+// Discarding every still-pending proposal in one click is destructive and has no undo, unlike
+// "Accept remaining" (which only applies proposed edits) — so this button, unlike
+// AcceptAllButton.vue, gates its action behind an explicit confirmation before it fires.
+function onClick(): void {
+  if (!window.confirm('Drop all remaining proposed edits in this conversation? This cannot be undone.')) {
+    return;
+  }
+  void run();
+}
 </script>
 
 <template>
@@ -12,3 +22,17 @@ const { busy, run: onClick } = useBusyAction(() => store.dropRemaining(props.con
     {{ busy ? 'Dropping…' : 'Drop remaining' }}
   </button>
 </template>
+
+<style scoped>
+/* Fix: "Accept remaining" and "Drop remaining" used to be visually identical adjacent buttons for
+   opposite-consequence actions. Give Drop a lower-emphasis, danger-toned treatment so it doesn't
+   read as an equally-weighted peer of Accept. */
+.drop-all-button {
+  background: transparent;
+  border-color: var(--danger-color, #b91c1c);
+  color: var(--danger-color, #b91c1c);
+}
+.drop-all-button:hover:not(:disabled) {
+  background: var(--danger-bg, #fef2f2);
+}
+</style>
