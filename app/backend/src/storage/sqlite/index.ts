@@ -716,10 +716,10 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   // ---- transaction ----
 
-  /** See `StorageAdapter.transaction` for the contract (commit-on-return, rollback-on-throw,
-   *  safe to nest). FIX 3: gives callers with several related writes (e.g. applying a staged edit
-   *  — updateStagedEdit, updateConversation, an Automerge splice/appendChange, and a new revision
-   *  row — a way to make that whole sequence atomic, instead of a mid-sequence crash being able to
+  /** See `StorageAdapter.transaction` for the contract (commit-on-return, rollback-on-throw, safe
+   *  to nest). Gives callers with several related writes (e.g. applying a staged edit —
+   *  updateStagedEdit, updateConversation, an Automerge splice/appendChange, and a new revision
+   *  row) a way to make that whole sequence atomic, instead of a mid-sequence crash being able to
    *  leave e.g. a staged edit marked `applied` with no corresponding revision row. */
   transaction<T>(fn: () => T): T {
     const isOutermost = this.transactionDepth === 0;

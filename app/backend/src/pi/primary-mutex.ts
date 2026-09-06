@@ -1,16 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
- * The per-document write lock (FIX 4): a minimal async mutex, one FIFO tail-chain per
- * `documentId`. Originally introduced just for `propose_document_edit` (held for the duration of
- * one `execute` call — http-api.md §POST /primary "Primary switch and tool execution are mutually
- * exclusive") and for `PrimaryService`'s designation switch/clear, both of which still use it via
- * exactly the same `withLock` call. It has since been generalized into the single lock EVERY
- * document-mutating path serializes against: manual edits (`DocumentService.applyChanges`),
- * `EditService.apply()` (both the HTTP accept path and `acceptRemaining`), and the
- * `propose_document_edit` tool path — so none of them can read-then-write document content while
- * another is doing the same, and none of them can run concurrently with a Primary-designation
- * switch either.
+ * The per-document write lock: a minimal async mutex, one FIFO tail-chain per `documentId`. It is
+ * the single lock EVERY document-mutating path serializes against: manual edits
+ * (`DocumentService.applyChanges`), `EditService.apply()` (both the HTTP accept path and
+ * `acceptRemaining`), the `propose_document_edit` tool path, and `PrimaryService`'s designation
+ * switch/clear (held for the duration of one `execute` call — http-api.md §POST /primary "Primary
+ * switch and tool execution are mutually exclusive") — all via the same `withLock` call — so none
+ * of them can read-then-write document content while another is doing the same, and none of them
+ * can run concurrently with a Primary-designation switch either.
  *
  * Reentrant per document within one async call chain: `AsyncLocalStorage` tracks which
  * `documentId`s the *current* chain already holds, so e.g. `propose_document_edit`

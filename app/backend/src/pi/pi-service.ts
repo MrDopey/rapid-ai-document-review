@@ -58,7 +58,7 @@ export interface RegisteredToolLike {
 }
 
 /** Bound on how long one agent turn may run without settling (`agent_settled`/`agent_error`)
- *  before `PiService` force-completes it as `agent_error` itself (FIX 1b). This is a backstop for
+ *  before `PiService` force-completes it as `agent_error` itself. This is a backstop for
  *  the real-session path: `FakeAgentSession` has its own, much shorter, internal timeout and
  *  ordinarily self-heals well before this one would ever fire. Overridable via
  *  `PI_AGENT_TURN_TIMEOUT_MS` for tests. */
@@ -253,7 +253,7 @@ export class PiService {
    * run settles. Throws (after routing a synthetic `agent_error` through the bridge) if the
    * model call fails immediately — the caller translates that into `AGENT_UNAVAILABLE`.
    *
-   * FIX 1: a turn that never settles (a stuck tool call, or any other hang) no longer leaves this
+   * A turn that never settles (a stuck tool call, or any other hang) does not leave this
    * conversation's session permanently unusable. A watchdog timer force-completes the turn as
    * `agent_error` if neither `agent_settled` nor `agent_error` arrives within
    * `PI_AGENT_TURN_TIMEOUT_MS`, and — on ANY `agent_error` (immediate `prompt()` rejection, a
@@ -294,15 +294,14 @@ export class PiService {
 
   /**
    * Delivers a branch's auto-seed message (the document/selection excerpt built by
-   * `seed-excerpt.ts`, sent by `ConversationService.sendBranchSeedMessage`) into the underlying
-   * Pi session's OWN history at branch-creation time, without ever triggering a turn. This is the
-   * fix for the previously-confirmed gap: `ConversationService.send()` returns early for
-   * `isSeed: true` before ever calling `PiService.send()`/`session.prompt()` (branches must stay
-   * transient/inert until the user's own first real message — a prior, deliberate fix for "branch
-   * new and main both immediately triggered a request as soon as i branched"), which meant the
-   * branch's real Pi session was never even created at seed time, let alone shown the seed
-   * content — the model had no idea the excerpt the UI displays ever existed until forking lazily
-   * off the parent on the user's first genuine message.
+   * `seed-excerpt.ts`, sent by `ConversationService.sendBranchSeedMessage`) into the underlying Pi
+   * session's OWN history at branch-creation time, without ever triggering a turn.
+   * `ConversationService.send()` returns early for `isSeed: true` before ever calling
+   * `PiService.send()`/`session.prompt()`, since branches must stay transient/inert until the
+   * user's own first real message — so without this method, the branch's real Pi session would
+   * never even be created at seed time, let alone shown the seed content, and the model would have
+   * no idea the excerpt the UI displays ever existed until forking lazily off the parent on the
+   * user's first genuine message.
    *
    * `getOrCreateSession` here creates/forks the session exactly as a real `send()` eventually
    * would (so the *same* cached session is reused for the user's first real message afterward —
@@ -347,7 +346,7 @@ export class PiService {
    * (`agent_settled`/`agent_error`) within the turn timeout, this synthesizes an `agent_error`
    * through the bridge itself and evicts the conversation's cached session, so a hang that a
    * session's own internal machinery never recovers from still resolves into a retryable
-   * `errored` conversation instead of hanging forever (FIX 1b). Cleared automatically once the
+   * `errored` conversation instead of hanging forever. Cleared automatically once the
    * bridge settles by any other means, via `bridge.addCleanup` (fires immediately if the bridge
    * has already settled by the time this runs).
    */
@@ -368,11 +367,11 @@ export class PiService {
 
   /**
    * Drops `conversationId`'s cached session (disposing it first, best-effort) so the next
-   * `getOrCreateSession` call builds a fresh one instead of reusing a session that just errored
-   * or hung (FIX 1c) — without this, `PiService.sessions` would keep serving the same broken
-   * session to every subsequent send/retry for the conversation's whole process lifetime. Also
-   * used by `ConversationService.close()` once a closed conversation's session is no longer
-   * needed at all (FIX 5). Safe to call on a conversation with no cached session (no-op).
+   * `getOrCreateSession` call builds a fresh one instead of reusing a session that just errored or
+   * hung — without this, `PiService.sessions` would keep serving the same broken session to every
+   * subsequent send/retry for the conversation's whole process lifetime. Also used by
+   * `ConversationService.close()` once a closed conversation's session is no longer needed at all.
+   * Safe to call on a conversation with no cached session (no-op).
    */
   evictSession(conversationId: string): void {
     const session = this.sessions.get(conversationId);

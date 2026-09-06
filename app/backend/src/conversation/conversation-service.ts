@@ -452,7 +452,7 @@ export class ConversationService {
     }
 
     if (!(willFold && parent)) {
-      // FIX 5: nothing further will ever call `getOrCreateSession` for this now-closed
+      // Nothing further will ever call `getOrCreateSession` for this now-closed
       // conversation (no fold summary is pending), so its cached Pi session can be evicted right
       // away instead of sitting in `PiService.sessions` for the rest of the process's lifetime.
       // When a fold *is* pending, `foldSummaryIntoParent` below evicts it once that flow — the
@@ -504,10 +504,10 @@ export class ConversationService {
    *  - `kind === 'branch'` — Main (`ensureMain`'s single per-document row) and `review`
    *    conversations (which always start with a real, non-seed-marked seed message, so they could
    *    never satisfy the next condition anyway) are never discarded this way.
-   *  - No message the *user* has sent yet (`hasUserSentMessage`) — "empty" no longer means zero
-   *    stored messages: `branch()` above now auto-sends its own seed message (`isSeed: true`) on
-   *    both the "Branch (New)" and "Branch (Main)" paths, and that alone must not count as activity
-   *    that keeps the placeholder around. Only once the user sends their own first message (real
+   *  - No message the *user* has sent yet (`hasUserSentMessage`) — this is not the same as zero
+   *    stored messages: `branch()` above auto-sends its own seed message (`isSeed: true`) on both
+   *    the "Branch (New)" and "Branch (Main)" paths, and that alone must not count as activity that
+   *    keeps the placeholder around. Only once the user sends their own first message (real
    *    `role: 'user'`, `isSeed` false/absent) does the branch survive a close.
    *  - No other conversation has since branched off *it* — deleting this row would either orphan
    *    that child's `parent_id` or simply be refused outright by the FK on `conversation.parent_id`.
@@ -585,15 +585,15 @@ export class ConversationService {
     //
     // It must, however, still reach the underlying Pi session's OWN context — otherwise the
     // model never actually sees the document/selection excerpt the UI displays as if it were part
-    // of the conversation (previously-confirmed gap: the branch's real Pi session was only ever
-    // created lazily on the user's first genuine message, forked from the parent, with the seed
-    // content nowhere in it). `piService.seedSession` creates/forks that session right now and
-    // hands it the content through a vendor SDK path that persists it into session history
-    // without ever calling `session.prompt()` — see its doc comment in pi-service.ts for exactly
-    // why that mechanism (not `deliverAs: 'nextTurn'`, used by the fold-summary path) is the right
-    // one here. Any failure here is surfaced to this method's caller exactly like a failed
-    // `piService.send()` would be — `sendBranchSeedMessage`'s existing fire-and-forget
-    // `.catch(...)` (and `seedMain`'s) already logs and swallows it the same way.
+    // of the conversation: without this call, the branch's real Pi session would only be created
+    // lazily on the user's first genuine message, forked from the parent, with the seed content
+    // nowhere in it. `piService.seedSession` creates/forks that session right now and hands it the
+    // content through a vendor SDK path that persists it into session history without ever calling
+    // `session.prompt()` — see its doc comment in pi-service.ts for exactly why that mechanism (not
+    // `deliverAs: 'nextTurn'`, used by the fold-summary path) is the right one here. Any failure
+    // here is surfaced to this method's caller exactly like a failed `piService.send()` would be —
+    // `sendBranchSeedMessage`'s existing fire-and-forget `.catch(...)` (and `seedMain`'s) already
+    // logs and swallows it the same way.
     if (options.isSeed) {
       await this.piService.seedSession(conversation, message);
       return { accepted: true, queued: false, contextRevision: conversation.contextRevision };
@@ -737,12 +737,11 @@ export class ConversationService {
           createdAt: row.createdAt,
         };
       })
-      // Defensive: a persisted event predating a bridge/adapter fix (or any other future bug in
-      // whatever recorded it) can be missing `messageId`/`role`/`text` entirely. `MessageDto`
-      // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse`
-      // on the client and blank out this conversation's *entire* history rather than just the one
-      // row — dropping it here is strictly better than surfacing a response the client can't
-      // parse at all.
+      // Defensive: a persisted event can be missing `messageId`/`role`/`text` entirely (e.g., an older
+      // row recorded before validation existed, or a future bug in whatever recorded it). `MessageDto`
+      // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse` on the
+      // client and blank out this conversation's *entire* history rather than just the one row —
+      // dropping it here is strictly better than surfacing a response the client can't parse at all.
       .filter((message) => Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string');
   }
 

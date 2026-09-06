@@ -3,14 +3,11 @@ import type { EventHub } from './event-hub.ts';
 import type { EventService } from './event-service.ts';
 
 /**
- * The one place `eventService.append` + `eventHub.broadcast` are sequenced together. Every service
- * that emits an application event previously hand-rolled this exact pair in its own private
- * `publish` method; this consolidates that boilerplate without changing any event's shape or
- * ordering — callers still decide what `type`/`data` (or whole frame) to publish, this just does
- * the append-then-broadcast mechanics once.
+ * The one place `eventService.append` + `eventHub.broadcast` are sequenced together, so every
+ * service that emits an application event does so through the same append-then-broadcast
+ * mechanics — callers still decide what `type`/`data` (or whole frame) to publish.
  *
- * Two call shapes are supported, matching the two variants that existed independently before this
- * was consolidated:
+ * Two call shapes are supported:
  *  - `publish(documentId, conversationId, type, data)` — the common case, used by services that
  *    build the frame from discrete fields (ConversationService, EditService, ConflictService,
  *    PrimaryService, settings.ts).
