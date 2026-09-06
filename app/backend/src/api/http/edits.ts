@@ -50,12 +50,24 @@ export function registerEditRoutes(app: FastifyInstance, deps: { editService: Ed
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/edits/accept-remaining', async (request, reply) => {
-    const result = await editService.acceptRemaining(request.params.id);
-    return reply.send(result);
+    try {
+      const result = await editService.acceptRemaining(request.params.id);
+      return reply.send(result);
+    } catch (err) {
+      const mapped = handleEditError(err);
+      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
+      throw err;
+    }
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/edits/drop-remaining', async (request, reply) => {
-    const droppedEditIds = editService.dropRemaining(request.params.id);
-    return reply.send({ droppedEditIds });
+    try {
+      const droppedEditIds = editService.dropRemaining(request.params.id);
+      return reply.send({ droppedEditIds });
+    } catch (err) {
+      const mapped = handleEditError(err);
+      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
+      throw err;
+    }
   });
 }
