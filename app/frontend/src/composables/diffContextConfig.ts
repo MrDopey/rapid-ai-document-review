@@ -9,15 +9,14 @@
  * `VITE_RADR_MAX_FOCUSED_CONVERSATIONS` pattern: Vite only ever inlines `import.meta.env` values
  * at build time, so it's read once here at module scope rather than re-read reactively.
  */
+import { resolveEnvInt } from './envConfig.ts';
+
 export const DEFAULT_DIFF_CONTEXT_LINES = 3;
 
 /** Pure so it's directly unit-testable without touching `import.meta.env` — unset/empty/non-
  *  positive-integer all fall back to the default. */
 export function resolveDiffContextLines(raw: string | undefined): number {
-  if (raw === undefined || raw === '') return DEFAULT_DIFF_CONTEXT_LINES;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return DEFAULT_DIFF_CONTEXT_LINES;
-  return parsed;
+  return resolveEnvInt(raw, DEFAULT_DIFF_CONTEXT_LINES, { min: 0 });
 }
 
 /** Read once at module load (see doc comment above). */

@@ -1,4 +1,5 @@
 import { computed, type Ref } from 'vue';
+import { resolveEnvInt } from './envConfig.ts';
 
 /**
  * 005-canvas-conversation-threads (multi-focus overlay): how many conversations may be
@@ -14,10 +15,7 @@ export const DEFAULT_MAX_FOCUSED_CONVERSATIONS = 3;
 /** Pure so it's directly unit-testable without touching `import.meta.env` — parses `raw` the same
  *  way for every caller: unset/empty/non-positive-integer all fall back to the default. */
 export function resolveMaxFocusedConversations(raw: string | undefined): number {
-  if (raw === undefined || raw === '') return DEFAULT_MAX_FOCUSED_CONVERSATIONS;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_MAX_FOCUSED_CONVERSATIONS;
-  return parsed;
+  return resolveEnvInt(raw, DEFAULT_MAX_FOCUSED_CONVERSATIONS, { min: 1 });
 }
 
 /** Read once at module load (see doc comment above) — every `useFocusCap` call shares this same
