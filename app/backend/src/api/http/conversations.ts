@@ -28,7 +28,7 @@ import {
   type PrimaryService,
 } from '../../conversation/primary-service.ts';
 import type { StorageAdapter } from '../../storage/storage-adapter.ts';
-import { sendError } from './errors.ts';
+import { parseOrFail, sendError } from './errors.ts';
 
 /**
  * Maps every known error thrown by ConversationService/PrimaryService's methods to its HTTP
@@ -95,20 +95,16 @@ export function registerConversationRoutes(
     if (!doc) {
       return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
     }
-    const parsed = PaginationQuery.safeParse(request.query);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
-    return reply.send(conversationService.getAll(doc.id, parsed.data));
+    const data = parseOrFail(reply, PaginationQuery, request.query);
+    if (!data) return;
+    return reply.send(conversationService.getAll(doc.id, data));
   });
 
   app.post('/api/conversations', async (request, reply) => {
-    const parsed = CreateConversationRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, CreateConversationRequest, request.body);
+    if (!data) return;
     try {
-      const conversation = conversationService.branch(parsed.data);
+      const conversation = conversationService.branch(data);
       return reply.status(201).send(conversation);
     } catch (err) {
       const mapped = handleConversationError(err);
@@ -143,12 +139,10 @@ export function registerConversationRoutes(
   });
 
   app.patch<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
-    const parsed = RenameConversationRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, RenameConversationRequest, request.body);
+    if (!data) return;
     try {
-      const conversation = conversationService.rename(request.params.id, parsed.data.name);
+      const conversation = conversationService.rename(request.params.id, data.name);
       return reply.send(conversation);
     } catch (err) {
       const mapped = handleConversationError(err);
@@ -158,12 +152,10 @@ export function registerConversationRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/send', async (request, reply) => {
-    const parsed = SendMessageRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, SendMessageRequest, request.body);
+    if (!data) return;
     try {
-      const result = await conversationService.send(request.params.id, parsed.data.message);
+      const result = await conversationService.send(request.params.id, data.message);
       return reply.status(202).send(result);
     } catch (err) {
       const mapped = handleConversationError(err);
@@ -173,12 +165,10 @@ export function registerConversationRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/refresh-send', async (request, reply) => {
-    const parsed = SendMessageRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, SendMessageRequest, request.body);
+    if (!data) return;
     try {
-      const result = await conversationService.refreshAndSend(request.params.id, parsed.data.message);
+      const result = await conversationService.refreshAndSend(request.params.id, data.message);
       return reply.status(202).send(result);
     } catch (err) {
       const mapped = handleConversationError(err);
@@ -199,12 +189,10 @@ export function registerConversationRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/close', async (request, reply) => {
-    const parsed = CloseConversationRequest.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, CloseConversationRequest, request.body ?? {});
+    if (!data) return;
     try {
-      const result = conversationService.close(request.params.id, parsed.data.foldSummaryIntoParent);
+      const result = conversationService.close(request.params.id, data.foldSummaryIntoParent);
       return reply.send(result);
     } catch (err) {
       const mapped = handleConversationError(err);
@@ -225,12 +213,10 @@ export function registerConversationRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/primary', async (request, reply) => {
-    const parsed = DesignatePrimaryRequest.safeParse(request.body ?? {});
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, DesignatePrimaryRequest, request.body ?? {});
+    if (!data) return;
     try {
-      const result = await primaryService.designate(request.params.id, parsed.data.whenBusy);
+      const result = await primaryService.designate(request.params.id, data.whenBusy);
       return reply.send(result);
     } catch (err) {
       const mapped = handleConversationError(err);
