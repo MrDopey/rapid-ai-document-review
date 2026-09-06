@@ -42,7 +42,12 @@ describe('conversations store: isToolCallCarrier is derived live from a WS messa
     const store = useConversationsStore();
 
     store.handleServerFrame(
-      messageCompletedFrame({ messageId: 'msg_carrier', role: 'assistant', text: '', reasoning: null }),
+      messageCompletedFrame({
+        messageId: 'msg_carrier',
+        role: 'assistant',
+        text: '',
+        reasoning: null,
+      }),
     );
 
     const message = store.messagesFor('conv_1').find((m) => m.id === 'msg_carrier');
@@ -53,7 +58,11 @@ describe('conversations store: isToolCallCarrier is derived live from a WS messa
     const store = useConversationsStore();
 
     store.handleServerFrame(
-      messageCompletedFrame({ messageId: 'msg_reply', role: 'assistant', text: 'Here is the answer.' }),
+      messageCompletedFrame({
+        messageId: 'msg_reply',
+        role: 'assistant',
+        text: 'Here is the answer.',
+      }),
     );
 
     const message = store.messagesFor('conv_1').find((m) => m.id === 'msg_reply');
@@ -64,7 +73,12 @@ describe('conversations store: isToolCallCarrier is derived live from a WS messa
     const store = useConversationsStore();
 
     store.handleServerFrame(
-      messageCompletedFrame({ messageId: 'msg_reasoning', role: 'assistant', text: '', reasoning: 'Thinking it through.' }),
+      messageCompletedFrame({
+        messageId: 'msg_reasoning',
+        role: 'assistant',
+        text: '',
+        reasoning: 'Thinking it through.',
+      }),
     );
 
     const message = store.messagesFor('conv_1').find((m) => m.id === 'msg_reasoning');
@@ -86,7 +100,12 @@ describe('conversations store: isToolCallCarrier is derived live from a WS messa
     ];
 
     store.handleServerFrame(
-      messageCompletedFrame({ messageId: 'msg_carrier2', role: 'assistant', text: '', reasoning: null }),
+      messageCompletedFrame({
+        messageId: 'msg_carrier2',
+        role: 'assistant',
+        text: '',
+        reasoning: null,
+      }),
     );
 
     const message = store.messagesFor('conv_1').find((m) => m.id === 'msg_carrier2');

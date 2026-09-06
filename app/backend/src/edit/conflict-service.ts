@@ -2,7 +2,12 @@ import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contract
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
-import type { ConflictDetail, EditOperation, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import type {
+  ConflictDetail,
+  EditOperation,
+  StagedEditRow,
+  StorageAdapter,
+} from '../storage/storage-adapter.ts';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
 
 export interface ConflictOutcome {
@@ -22,7 +27,10 @@ export interface ConflictOutcome {
   message: string;
 }
 
-function reasonText(reason: 'not_found' | 'ambiguous' | 'overlapping', occurrences: number): string {
+function reasonText(
+  reason: 'not_found' | 'ambiguous' | 'overlapping',
+  occurrences: number,
+): string {
   switch (reason) {
     case 'not_found':
       return 'the `old_string` was not found in the current document.';
@@ -40,7 +48,10 @@ function renderConflictMessage(
   status: 'requested' | 'exhausted',
   maxReplacementAttempts: number,
 ): string {
-  const lines: string[] = ['This proposal could not be applied: the text it targets has changed.', ''];
+  const lines: string[] = [
+    'This proposal could not be applied: the text it targets has changed.',
+    '',
+  ];
   operations.forEach((_op, index) => {
     const conflict = detail.operations.find((o) => o.index === index);
     lines.push(
@@ -80,7 +91,12 @@ export class ConflictService {
   private readonly automerge: AutomergeStoreHolder;
   private readonly publisher: EventPublisher;
 
-  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, automerge: AutomergeStoreHolder) {
+  constructor(
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    automerge: AutomergeStoreHolder,
+  ) {
     this.storage = storage;
     this.eventService = eventService;
     this.eventHub = eventHub;
@@ -145,7 +161,11 @@ export class ConflictService {
   recordConflict(edit: StagedEditRow, detail: ConflictDetail): ConflictOutcome {
     const maxAttempts = this.storage.getSettings().maxReplacementAttempts;
     const resolvedAt = new Date().toISOString();
-    this.storage.updateStagedEdit(edit.id, { status: 'superseded', conflictDetail: detail, resolvedAt });
+    this.storage.updateStagedEdit(edit.id, {
+      status: 'superseded',
+      conflictDetail: detail,
+      resolvedAt,
+    });
 
     // Chain-wide budget (FR-032a): derived by walking `supersedes_id`, not read off `edit`'s own
     // `replacementAttempt` field directly — see `getChainAttempts` above.

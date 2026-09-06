@@ -114,15 +114,28 @@ describe('EventBridge: real-SDK tool-call-carrier message segments', () => {
       }),
     );
 
-    h.bridge.handle(real({ type: 'tool_execution_start', toolCallId: 'tc_1', toolName: 'read_document' }));
-    h.bridge.handle(real({ type: 'tool_execution_end', toolCallId: 'tc_1', toolName: 'read_document', isError: false, result: {} }));
+    h.bridge.handle(
+      real({ type: 'tool_execution_start', toolCallId: 'tc_1', toolName: 'read_document' }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_end',
+        toolCallId: 'tc_1',
+        toolName: 'read_document',
+        isError: false,
+        result: {},
+      }),
+    );
 
     // Segment 2: the model's real follow-up text.
     h.bridge.handle(real({ type: 'message_start', message: { role: 'assistant' } }));
     h.bridge.handle(
       real({
         type: 'message_end',
-        message: { role: 'assistant', content: [{ type: 'text', text: 'Here is what the document says.' }] },
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Here is what the document says.' }],
+        },
       }),
     );
 
@@ -148,7 +161,10 @@ describe('EventBridge: real-SDK tool-call-carrier message segments', () => {
     h.bridge.handle(
       real({
         type: 'message_end',
-        message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Mulling it over.' }] },
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'Mulling it over.' }],
+        },
       }),
     );
     h.bridge.handle(real({ type: 'agent_settled' }));
@@ -176,7 +192,13 @@ describe('EventBridge: real-SDK tool-call-carrier message segments', () => {
 
     h.bridge.handle({ type: 'agent_start' });
     h.bridge.handle({ type: 'message_start', messageId: 'fake_msg_1', role: 'assistant' });
-    h.bridge.handle({ type: 'message_end', messageId: 'fake_msg_1', role: 'assistant', text: 'hi', reasoning: undefined });
+    h.bridge.handle({
+      type: 'message_end',
+      messageId: 'fake_msg_1',
+      role: 'assistant',
+      text: 'hi',
+      reasoning: undefined,
+    });
     h.bridge.handle({ type: 'agent_settled' });
 
     const completed = messageCompletedEvents(h);

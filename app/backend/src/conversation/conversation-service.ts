@@ -179,7 +179,12 @@ export class ConversationService {
       closedAt: null,
     });
 
-    this.seedMain(row.id, document.title, document.currentRevision, this.automerge.get().getContent());
+    this.seedMain(
+      row.id,
+      document.title,
+      document.currentRevision,
+      this.automerge.get().getContent(),
+    );
 
     return row;
   }
@@ -200,7 +205,11 @@ export class ConversationService {
     void this.send(conversationId, seedMessage).catch((err) => {
       // `event: 'agent_error'` — same reasoning as branch()'s/review()'s seed-message catch above.
       logger.warn(
-        { event: 'agent_error', conversationId, err: err instanceof Error ? err.message : String(err) },
+        {
+          event: 'agent_error',
+          conversationId,
+          err: err instanceof Error ? err.message : String(err),
+        },
         'failed to deliver main seed message',
       );
     });
@@ -239,7 +248,12 @@ export class ConversationService {
     const content = this.automerge.get().getContent();
     return {
       currentRevision: document.currentRevision,
-      conversations: toConversationDtos(this.storage, page.items, document.currentRevision, content),
+      conversations: toConversationDtos(
+        this.storage,
+        page.items,
+        document.currentRevision,
+        content,
+      ),
       nextCursor: page.nextCursor,
     };
   }
@@ -249,7 +263,12 @@ export class ConversationService {
     const document = this.storage.getDocument();
     if (!document) throw new DocumentNotFoundError('Document not found');
     return {
-      conversation: toConversationDto(this.storage, conversation, document.currentRevision, this.automerge.get().getContent()),
+      conversation: toConversationDto(
+        this.storage,
+        conversation,
+        document.currentRevision,
+        this.automerge.get().getContent(),
+      ),
       messages: this.buildMessages(conversationId),
       stagedEdits: this.storage.listStagedEditsByConversation(conversationId).map(toStagedEditDto),
     };
@@ -274,7 +293,12 @@ export class ConversationService {
 
     this.publish(conversation.documentId, conversationId, 'conversation_renamed', { name });
 
-    return toConversationDto(this.storage, updated, document.currentRevision, this.automerge.get().getContent());
+    return toConversationDto(
+      this.storage,
+      updated,
+      document.currentRevision,
+      this.automerge.get().getContent(),
+    );
   }
 
   /**
@@ -347,7 +371,9 @@ export class ConversationService {
     // anchor to, so this stays `null` there (the document excerpt in `seedSelection` is its anchor
     // instead).
     const forkedFromMessageId =
-      !request.selection || request.includeSeedMessage ? (this.buildMessages(parent.id).at(-1)?.id ?? null) : null;
+      !request.selection || request.includeSeedMessage
+        ? (this.buildMessages(parent.id).at(-1)?.id ?? null)
+        : null;
 
     const row = this.storage.createConversation({
       id,
@@ -391,7 +417,12 @@ export class ConversationService {
       this.sendBranchSeedMessage(row.id, seedMessage);
     }
 
-    return toConversationDto(this.storage, row, document.currentRevision, documentContent || this.automerge.get().getContent());
+    return toConversationDto(
+      this.storage,
+      row,
+      document.currentRevision,
+      documentContent || this.automerge.get().getContent(),
+    );
   }
 
   /**
@@ -444,7 +475,9 @@ export class ConversationService {
     const wasPrimary = conversation.isPrimary;
     this.storage.updateConversation(conversationId, { status: 'closed', closedAt: now });
 
-    const parent = conversation.parentId ? this.storage.getConversation(conversation.parentId) : null;
+    const parent = conversation.parentId
+      ? this.storage.getConversation(conversation.parentId)
+      : null;
     const willFold = foldSummaryIntoParent && parent !== null && parent.status !== 'closed';
 
     this.publish(conversation.documentId, conversationId, 'conversation_closed', {
@@ -518,7 +551,9 @@ export class ConversationService {
     }
     const oldMain = this.storage.getMainConversation(documentId);
     if (!oldMain) {
-      throw new ConversationNotFoundError(`Main conversation not found for document: ${documentId}`);
+      throw new ConversationNotFoundError(
+        `Main conversation not found for document: ${documentId}`,
+      );
     }
 
     const now = new Date().toISOString();
@@ -526,7 +561,11 @@ export class ConversationService {
     const newMainId = newId('conv');
 
     this.storage.transaction(() => {
-      this.storage.updateConversation(oldMain.id, { status: 'closed', closedAt: now, isCurrentMain: false });
+      this.storage.updateConversation(oldMain.id, {
+        status: 'closed',
+        closedAt: now,
+        isCurrentMain: false,
+      });
       this.storage.createConversation({
         id: newMainId,
         documentId,
@@ -577,7 +616,12 @@ export class ConversationService {
 
     // FR-008: the replacement Main is seeded with the document's current content, same as any
     // brand-new Main (`ensureMain` above).
-    this.seedMain(newMainId, document.title, document.currentRevision, this.automerge.get().getContent());
+    this.seedMain(
+      newMainId,
+      document.title,
+      document.currentRevision,
+      this.automerge.get().getContent(),
+    );
 
     return {
       conversationId: oldMain.id,
@@ -624,7 +668,9 @@ export class ConversationService {
       .listAllConversations(conversation.documentId)
       .some((c) => c.parentId === conversationId);
     if (hasChildren) {
-      throw new ConversationNotEmptyError('Conversation has its own branches and cannot be discarded');
+      throw new ConversationNotEmptyError(
+        'Conversation has its own branches and cannot be discarded',
+      );
     }
 
     // Same reasoning as `close()`'s own wasPrimary handling: never transferred implicitly
@@ -661,7 +707,11 @@ export class ConversationService {
     });
   }
 
-  async send(conversationId: string, message: string, options: { isSeed?: boolean } = {}): Promise<SendMessageResponse> {
+  async send(
+    conversationId: string,
+    message: string,
+    options: { isSeed?: boolean } = {},
+  ): Promise<SendMessageResponse> {
     const conversation = this.getConversationOrThrow(conversationId);
     if (conversation.status === 'closed') {
       throw new ConversationClosedError('Conversation is closed');
@@ -670,7 +720,12 @@ export class ConversationService {
     // Recorded directly (rather than relying on Pi to report the user's own message back
     // through its event stream) so message history and retry are well-defined regardless of
     // exactly which lifecycle events a given Pi SDK version emits for the prompt it was given.
-    this.publishUserMessage(conversation.documentId, conversationId, message, options.isSeed ?? false);
+    this.publishUserMessage(
+      conversation.documentId,
+      conversationId,
+      message,
+      options.isSeed ?? false,
+    );
 
     // A seed message (branch's/Main's auto-injected document/selection context, `isSeed: true`)
     // is stored above so it's part of the app's own event log for whenever the user's own first
@@ -818,27 +873,32 @@ export class ConversationService {
   }
 
   private buildMessages(conversationId: string): MessageDto[] {
-    return this.storage
-      .listEventsByConversation(conversationId)
-      .filter((row) => row.eventType === 'message_completed')
-      .map((row) => {
-        const data = row.data as UserMessageEventData;
-        return {
-          id: data.messageId,
-          role: data.role,
-          text: data.text,
-          reasoning: data.reasoning,
-          isToolCallCarrier: computeIsToolCallCarrier(data),
-          toolCalls: [],
-          createdAt: row.createdAt,
-        };
-      })
-      // Defensive: a persisted event can be missing `messageId`/`role`/`text` entirely (e.g., an older
-      // row recorded before validation existed, or a future bug in whatever recorded it). `MessageDto`
-      // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse` on the
-      // client and blank out this conversation's *entire* history rather than just the one row —
-      // dropping it here is strictly better than surfacing a response the client can't parse at all.
-      .filter((message) => Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string');
+    return (
+      this.storage
+        .listEventsByConversation(conversationId)
+        .filter((row) => row.eventType === 'message_completed')
+        .map((row) => {
+          const data = row.data as UserMessageEventData;
+          return {
+            id: data.messageId,
+            role: data.role,
+            text: data.text,
+            reasoning: data.reasoning,
+            isToolCallCarrier: computeIsToolCallCarrier(data),
+            toolCalls: [],
+            createdAt: row.createdAt,
+          };
+        })
+        // Defensive: a persisted event can be missing `messageId`/`role`/`text` entirely (e.g., an older
+        // row recorded before validation existed, or a future bug in whatever recorded it). `MessageDto`
+        // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse` on the
+        // client and blank out this conversation's *entire* history rather than just the one row —
+        // dropping it here is strictly better than surfacing a response the client can't parse at all.
+        .filter(
+          (message) =>
+            Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string',
+        )
+    );
   }
 
   /**
@@ -870,12 +930,28 @@ export class ConversationService {
     throw new Error(`No prior user message found to retry for conversation ${conversationId}`);
   }
 
-  private publish(documentId: string, conversationId: string | null, type: string, data: unknown): void {
+  private publish(
+    documentId: string,
+    conversationId: string | null,
+    type: string,
+    data: unknown,
+  ): void {
     this.publisher.publish(documentId, conversationId, type, data);
   }
 
-  private publishUserMessage(documentId: string, conversationId: string, text: string, isSeed = false): void {
-    const data: UserMessageEventData = { messageId: newId('msg'), role: 'user', text, reasoning: null, isSeed };
+  private publishUserMessage(
+    documentId: string,
+    conversationId: string,
+    text: string,
+    isSeed = false,
+  ): void {
+    const data: UserMessageEventData = {
+      messageId: newId('msg'),
+      role: 'user',
+      text,
+      reasoning: null,
+      isSeed,
+    };
     // No separate log here: `EventPublisher.publish` -> `eventService.append` already emits the
     // compliant `{ event: 'message_completed', documentId, conversationId, sequence }` record
     // (FR-042) — a second one under a name outside the closed vocabulary would be pure duplication.
@@ -893,7 +969,11 @@ export class ConversationService {
     void this.send(conversationId, message, { isSeed: true }).catch((err) => {
       // `event: 'agent_error'` — same reasoning as seedMain's/review()'s seed-message catch blocks.
       logger.warn(
-        { event: 'agent_error', conversationId, err: err instanceof Error ? err.message : String(err) },
+        {
+          event: 'agent_error',
+          conversationId,
+          err: err instanceof Error ? err.message : String(err),
+        },
         'failed to deliver branch seed message',
       );
     });

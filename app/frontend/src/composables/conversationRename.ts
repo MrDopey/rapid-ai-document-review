@@ -32,7 +32,9 @@ export function useConversationRename(
   nameInputEl: Ref<HTMLInputElement | null>,
 ): ConversationRename {
   const store = useConversationsStore();
-  const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const conversation = computed(
+    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
+  );
 
   const isEditingName = ref(false);
   const nameDraft = ref('');
@@ -77,11 +79,23 @@ export function useConversationRename(
       renameError.value = null;
     } catch (err) {
       renameError.value =
-        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to rename conversation.';
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to rename conversation.';
     } finally {
       renameSaving.value = false;
     }
   }
 
-  return { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName };
+  return {
+    isEditingName,
+    nameDraft,
+    renameError,
+    renameSaving,
+    startEditingName,
+    cancelEditingName,
+    saveName,
+  };
 }

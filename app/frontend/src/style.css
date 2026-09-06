@@ -87,7 +87,8 @@
      below is the plain drop-in for a consumer with no other `box-shadow` of its own;
      `ConversationThreadBox.vue` composes this value alongside its own drop-shadow directly, since
      `box-shadow` values don't merge across separate rules. */
-  --primary-indicator-shadow: inset 3px 0 0 0 var(--accent-color, #2563eb),
+  --primary-indicator-shadow:
+    inset 3px 0 0 0 var(--accent-color, #2563eb),
     inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
   /* This app now has a real dark palette (see the `prefers-color-scheme: dark` block below), so
      both schemes are genuinely supported — the browser should render native form
@@ -196,7 +197,10 @@ body,
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   color: var(--text-color);
   background: var(--bg-color);
 }
@@ -298,7 +302,9 @@ body {
 .modal-leave-active.dialog-box,
 .modal-enter-active .dialog-box,
 .modal-leave-active .dialog-box {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 .modal-enter-from.dialog-box,
 .modal-leave-to.dialog-box,

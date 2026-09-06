@@ -78,7 +78,10 @@ export const useDocumentStore = defineStore('document', {
     // guarantees don't make a stale numeric offset keep naming the same logical span — so instead
     // of retrying, this resyncs `content`/`document` from the server and leaves `conflictMessage`
     // set for the UI to tell the user their edit wasn't saved and needs to be redone.
-    async patchContent(baseRevision: number, changes: { from: number; to: number; insert: string }[]): Promise<void> {
+    async patchContent(
+      baseRevision: number,
+      changes: { from: number; to: number; insert: string }[],
+    ): Promise<void> {
       this.pendingPatchCount += 1;
       try {
         let attempt = 0;
@@ -119,8 +122,12 @@ export const useDocumentStore = defineStore('document', {
     },
 
     async loadRevisions(): Promise<void> {
-      const page = await httpClient.listRevisions({ cursor: this.revisionsNextCursor ?? undefined });
-      this.revisions = this.revisionsNextCursor ? [...this.revisions, ...page.revisions] : page.revisions;
+      const page = await httpClient.listRevisions({
+        cursor: this.revisionsNextCursor ?? undefined,
+      });
+      this.revisions = this.revisionsNextCursor
+        ? [...this.revisions, ...page.revisions]
+        : page.revisions;
       this.revisionsNextCursor = page.nextCursor;
     },
 

@@ -140,14 +140,22 @@ const identical = computed(
       >
         <p v-if="identical">No differences found.</p>
         <div v-else-if="!focusedView" class="side-by-side-columns">
-          <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="diffParts ?? []" side="left" /></pre>
-          <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="diffParts ?? []" side="right" /></pre>
+          <pre
+            class="diff-column-left text-wrap-safe-pre"
+          ><DiffText :parts="diffParts ?? []" side="left" /></pre>
+          <pre
+            class="diff-column-right text-wrap-safe-pre"
+          ><DiffText :parts="diffParts ?? []" side="right" /></pre>
         </div>
         <div v-else class="side-by-side-columns">
           <template v-for="(group, i) in diffGroups" :key="i">
             <template v-if="isGroupVisible(group, i)">
-              <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="left" /></pre>
-              <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="right" /></pre>
+              <pre
+                class="diff-column-left text-wrap-safe-pre"
+              ><DiffText :parts="groupParts(group)" side="left" /></pre>
+              <pre
+                class="diff-column-right text-wrap-safe-pre"
+              ><DiffText :parts="groupParts(group)" side="right" /></pre>
             </template>
             <button
               v-else

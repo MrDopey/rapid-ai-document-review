@@ -8,7 +8,10 @@ import type {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import ConversationView from '../../src/components/conversation/ConversationView.vue';
 import MessageBubble from '../../src/components/conversation/MessageBubble.vue';
-import { useConversationsStore, type ConversationMessageState } from '../../src/stores/conversations.js';
+import {
+  useConversationsStore,
+  type ConversationMessageState,
+} from '../../src/stores/conversations.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // jsdom doesn't implement `Element.scrollTo` — `ConversationView.vue`'s own sticky-auto-scroll
@@ -52,7 +55,9 @@ vi.mock('../../src/transport/http-client.js', () => ({
   },
 }));
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -182,14 +187,18 @@ describe('ConversationView — draft-aware discard-on-close', () => {
   it('restores a previously left draft when the same conversation is reopened', async () => {
     const first = mountView('branch-4');
     await flushPromises();
-    await first.wrapper.find<HTMLTextAreaElement>('#composer-branch-4').setValue('resume this later');
+    await first.wrapper
+      .find<HTMLTextAreaElement>('#composer-branch-4')
+      .setValue('resume this later');
     first.wrapper.unmount();
 
     // Reopening (e.g. re-focusing the same conversation's panel after closing it) mounts a brand
     // new ConversationView instance — `store.drafts` is what carries the text across that gap.
     const second = mountView('branch-4');
     await flushPromises();
-    expect(second.wrapper.find<HTMLTextAreaElement>('#composer-branch-4').element.value).toBe('resume this later');
+    expect(second.wrapper.find<HTMLTextAreaElement>('#composer-branch-4').element.value).toBe(
+      'resume this later',
+    );
   });
 
   it('does not discard a conversation that is not a branch (e.g. Main), regardless of messages/draft', async () => {
@@ -204,7 +213,14 @@ describe('ConversationView — draft-aware discard-on-close', () => {
 
   it('does not discard a branch that already has a sent message', async () => {
     const { store } = mountView('branch-5', {}, [
-      { id: 'm1', role: 'user', text: 'hi', reasoning: null, toolCalls: [], createdAt: '2026-01-01T00:00:00.000Z' },
+      {
+        id: 'm1',
+        role: 'user',
+        text: 'hi',
+        reasoning: null,
+        toolCalls: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
     ]);
     await flushPromises();
 
@@ -236,8 +252,15 @@ describe('ConversationView — Stale/Orphaned badges (bug fix regression)', () =
     const conversation = conversationFixture({ id: 'conv-1', ...overrides });
     store.conversations = [conversation];
     store.messagesByConversation['conv-1'] = [];
-    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
-    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [],
+      stagedEdits: [],
+    });
+    return mount(ConversationView, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
   }
 
   it('renders the Stale badge in the header when the conversation is stale', async () => {
@@ -291,7 +314,9 @@ describe('ConversationView — continuity context for a freshly-created placehol
     vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
   });
 
-  function makeMessage(overrides: Partial<ConversationMessageState> & { id: string }): ConversationMessageState {
+  function makeMessage(
+    overrides: Partial<ConversationMessageState> & { id: string },
+  ): ConversationMessageState {
     return {
       role: 'assistant',
       text: 'short text',
@@ -334,7 +359,10 @@ describe('ConversationView — continuity context for a freshly-created placehol
       messages: [],
       stagedEdits: [],
     });
-    return mount(ConversationView, { props: { conversationId: 'branch-1' }, global: { plugins: [pinia] } });
+    return mount(ConversationView, {
+      props: { conversationId: 'branch-1' },
+      global: { plugins: [pinia] },
+    });
   }
 
   it("renders the parent's last user and last assistant message up to the fork point as read-only context", async () => {
@@ -380,14 +408,24 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
     vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
   });
 
-  function mountView(props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {}) {
+  function mountView(
+    props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {},
+  ) {
     const store = useConversationsStore();
     const conversation = conversationFixture({ id: 'conv-1', canBranch: props.canBranch ?? true });
     store.conversations = [conversation];
     store.messagesByConversation['conv-1'] = [];
-    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [],
+      stagedEdits: [],
+    });
     return mount(ConversationView, {
-      props: { conversationId: 'conv-1', atFocusCap: props.atFocusCap, maxFocused: props.maxFocused },
+      props: {
+        conversationId: 'conv-1',
+        atFocusCap: props.atFocusCap,
+        maxFocused: props.maxFocused,
+      },
       global: { plugins: [pinia] },
     });
   }
@@ -429,7 +467,9 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   it('branches successfully and emits branch-created with the new id when under the cap', async () => {
     const wrapper = mountView({ atFocusCap: false });
     await flushPromises();
-    vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
+    vi.mocked(httpClient.branchConversation).mockResolvedValue(
+      conversationFixture({ id: 'branch-9' }),
+    );
 
     await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
@@ -461,10 +501,17 @@ describe('ConversationView — rename UI', () => {
     const conversation = conversationFixture({ id: 'conv-1', name: 'Original Name' });
     store.conversations = [conversation];
     store.messagesByConversation['conv-1'] = [];
-    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [],
+      stagedEdits: [],
+    });
     return {
       store,
-      wrapper: mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } }),
+      wrapper: mount(ConversationView, {
+        props: { conversationId: 'conv-1' },
+        global: { plugins: [pinia] },
+      }),
     };
   }
 
@@ -563,7 +610,9 @@ describe('ConversationView — rename UI', () => {
 
   it('shows an inline error and keeps editing open when the API call fails', async () => {
     const { ApiError } = await import('../../src/transport/http-client.js');
-    vi.mocked(httpClient.renameConversation).mockRejectedValue(new ApiError(500, 'UNKNOWN', 'Server exploded'));
+    vi.mocked(httpClient.renameConversation).mockRejectedValue(
+      new ApiError(500, 'UNKNOWN', 'Server exploded'),
+    );
     const { wrapper } = mountView();
     await flushPromises();
     await wrapper.find('.thread-rename-button').trigger('click');
@@ -596,8 +645,15 @@ describe('ConversationView — Primary conversation indicator', () => {
     const conversation = conversationFixture({ id: 'conv-1', isPrimary });
     store.conversations = [conversation];
     store.messagesByConversation['conv-1'] = [];
-    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
-    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [],
+      stagedEdits: [],
+    });
+    return mount(ConversationView, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
   }
 
   it('applies the is-primary class when the conversation is Primary', async () => {
@@ -635,8 +691,15 @@ describe('ConversationView — archiveOrReviewAction (specs/006-archivable-main-
     const conversation = conversationFixture({ id: 'conv-1', ...overrides });
     store.conversations = [conversation];
     store.messagesByConversation['conv-1'] = [];
-    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
-    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [],
+      stagedEdits: [],
+    });
+    return mount(ConversationView, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
   }
 
   it('renders the "Archive" action for an open (non-closed) Main conversation', async () => {
@@ -700,7 +763,9 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
   });
 
-  function makeMessage(overrides: Partial<ConversationMessageState> & { id: string }): ConversationMessageState {
+  function makeMessage(
+    overrides: Partial<ConversationMessageState> & { id: string },
+  ): ConversationMessageState {
     return {
       role: 'assistant',
       text: 'short text',
@@ -732,7 +797,10 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
       })),
       stagedEdits: [],
     });
-    const wrapper = mount(ConversationView, { props: { conversationId }, global: { plugins: [pinia] } });
+    const wrapper = mount(ConversationView, {
+      props: { conversationId },
+      global: { plugins: [pinia] },
+    });
     return { store, wrapper };
   }
 
@@ -749,25 +817,35 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
   });
 
   it("scrolls a newly-arrived assistant message's own top edge into view, not the list's bottom", async () => {
-    const { store } = mountView('conv-1', [makeMessage({ id: 'm1', role: 'user', text: 'question' })]);
+    const { store } = mountView('conv-1', [
+      makeMessage({ id: 'm1', role: 'user', text: 'question' }),
+    ]);
     await flushPromises();
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
 
     // Simulates conversations.ts's `message_started` handler pushing a new streaming message.
-    store.messagesByConversation['conv-1']!.push(makeMessage({ id: 'm2', role: 'assistant', text: '', streaming: true }));
+    store.messagesByConversation['conv-1']!.push(
+      makeMessage({ id: 'm2', role: 'assistant', text: '', streaming: true }),
+    );
     await flushPromises();
 
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
     const [target] = vi.mocked(Element.prototype.scrollIntoView).mock.contexts;
     expect((target as HTMLElement).getAttribute('data-message-id')).toBe('m2');
-    expect(vi.mocked(Element.prototype.scrollIntoView).mock.calls[0]?.[0]).toMatchObject({ block: 'start' });
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.calls[0]?.[0]).toMatchObject({
+      block: 'start',
+    });
   });
 
   it('does not re-scroll on every streaming token delta to the same message, only once when it first appears', async () => {
-    const { store } = mountView('conv-1', [makeMessage({ id: 'm1', role: 'user', text: 'question' })]);
+    const { store } = mountView('conv-1', [
+      makeMessage({ id: 'm1', role: 'user', text: 'question' }),
+    ]);
     await flushPromises();
 
-    store.messagesByConversation['conv-1']!.push(makeMessage({ id: 'm2', role: 'assistant', text: 'Hel', streaming: true }));
+    store.messagesByConversation['conv-1']!.push(
+      makeMessage({ id: 'm2', role: 'assistant', text: 'Hel', streaming: true }),
+    );
     await flushPromises();
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
 
@@ -781,7 +859,9 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
   });
 
   it('does not auto-scroll a new message into view once the user has deliberately scrolled away from the bottom', async () => {
-    const { store, wrapper } = mountView('conv-1', [makeMessage({ id: 'm1', role: 'user', text: 'question' })]);
+    const { store, wrapper } = mountView('conv-1', [
+      makeMessage({ id: 'm1', role: 'user', text: 'question' }),
+    ]);
     await flushPromises();
 
     const listEl = wrapper.get('.message-list').element;
@@ -792,7 +872,9 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
     await flushPromises();
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
 
-    store.messagesByConversation['conv-1']!.push(makeMessage({ id: 'm2', role: 'assistant', text: 'reply' }));
+    store.messagesByConversation['conv-1']!.push(
+      makeMessage({ id: 'm2', role: 'assistant', text: 'reply' }),
+    );
     await flushPromises();
 
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();

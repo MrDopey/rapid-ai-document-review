@@ -13,7 +13,11 @@ import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.j
 import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
 import { newId } from '../../src/ids.js';
-import type { ConversationRow, StagedEditRow, StorageAdapter } from '../../src/storage/storage-adapter.js';
+import type {
+  ConversationRow,
+  StagedEditRow,
+  StorageAdapter,
+} from '../../src/storage/storage-adapter.js';
 import type { AgentSessionLike } from '../../src/pi/agent-session-port.js';
 import { FakePiSession } from '../fakes/fake-pi-session.js';
 
@@ -55,14 +59,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -76,13 +100,27 @@ function buildHarness(): Harness {
   );
   piService.setEditService(editService);
 
-  return { storage, eventService, eventHub, automerge, revisionService, documentService, piService, conflictService, editService };
+  return {
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    documentService,
+    piService,
+    conflictService,
+    editService,
+  };
 }
 
 /** Bypasses `ConversationService.branch()` entirely (no fire-and-forget seed message, no real Pi
  *  session lookup) — this suite tests EditService/ConflictService/TextAnchor directly, so a plain
  *  storage-level row with a known id is all a "conversation" needs to be here. */
-function createBranchConversation(storage: StorageAdapter, documentId: string, contextRevision: number): ConversationRow {
+function createBranchConversation(
+  storage: StorageAdapter,
+  documentId: string,
+  contextRevision: number,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -109,8 +147,15 @@ function createBranchConversation(storage: StorageAdapter, documentId: string, c
  *  conversation id, so `getOrCreateSession` hits the cache and never falls through to the real Pi
  *  SDK branch (which would require live model credentials). This is a test-only seam accessed via
  *  a type assertion rather than a production code change. */
-function registerFakeSession(piService: PiService, conversationId: string, session: FakePiSession): void {
-  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(conversationId, session);
+function registerFakeSession(
+  piService: PiService,
+  conversationId: string,
+  session: FakePiSession,
+): void {
+  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(
+    conversationId,
+    session,
+  );
 }
 
 /** Advances the document the way a concurrent manual edit would: splice the live Automerge text
@@ -147,7 +192,9 @@ function assertCrossEntityInvariants(storage: StorageAdapter, documentId: string
   expect(mains).toHaveLength(1);
   expect(mains[0]!.status).not.toBe('closed');
 
-  const allEdits: StagedEditRow[] = conversations.flatMap((c) => storage.listStagedEditsByConversation(c.id));
+  const allEdits: StagedEditRow[] = conversations.flatMap((c) =>
+    storage.listStagedEditsByConversation(c.id),
+  );
 
   // 4. Idempotency: (conversationId, piToolCallId) unique across every staged_edit ever created.
   const toolCallKeys = new Set<string>();
@@ -238,7 +285,12 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_clean_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
 
@@ -261,17 +313,29 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_notfound_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
 
     // Rewrite the exact region the proposal targets — its anchor no longer exists at all.
-    advance(h, documentId, 'The quick fox jumps over the lazy dog.', 'The swift wolf leaps over the sleepy dog.');
+    advance(
+      h,
+      documentId,
+      'The quick fox jumps over the lazy dog.',
+      'The swift wolf leaps over the sleepy dog.',
+    );
 
     const result = await h.editService.apply(edit1.id);
     expect(result.response.outcome).toBe('conflict');
     if (result.response.outcome !== 'conflict') throw new Error('unreachable');
-    expect(result.response.conflictDetail.operations).toEqual([{ index: 0, reason: 'not_found', occurrences: 0 }]);
+    expect(result.response.conflictDetail.operations).toEqual([
+      { index: 0, reason: 'not_found', occurrences: 0 },
+    ]);
     expect(result.response.replacementRequested).toBe(true);
     expect(result.response.replacementAttempt).toBe(1);
 
@@ -286,10 +350,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId2,
       'Swap quick for swift (revised)',
-      [{ old_string: 'The swift wolf leaps over the sleepy dog.', new_string: 'The swift fox leaps over the sleepy dog.' }],
+      [
+        {
+          old_string: 'The swift wolf leaps over the sleepy dog.',
+          new_string: 'The swift fox leaps over the sleepy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: replacement.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: replacement.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Here is a revised proposal.');
     fakeSession.completeRun();
@@ -326,7 +397,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     const result = await h.editService.apply(edit1.id);
     expect(result.response.outcome).toBe('conflict');
     if (result.response.outcome !== 'conflict') throw new Error('unreachable');
-    expect(result.response.conflictDetail.operations).toEqual([{ index: 0, reason: 'ambiguous', occurrences: 2 }]);
+    expect(result.response.conflictDetail.operations).toEqual([
+      { index: 0, reason: 'ambiguous', occurrences: 2 },
+    ]);
     expect(result.response.replacementRequested).toBe(true);
 
     await flushMicrotasks();
@@ -339,7 +412,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       [{ old_string: 'jumps over the lazy dog', new_string: 'jumps over the sleepy dog' }],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: replacement.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: replacement.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Revised with more context.');
     fakeSession.completeRun();
@@ -371,7 +446,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     expect(result.response.outcome).toBe('conflict');
     if (result.response.outcome !== 'conflict') throw new Error('unreachable');
     expect(result.response.conflictDetail.operations).toHaveLength(2);
-    expect(result.response.conflictDetail.operations.every((o) => o.reason === 'overlapping')).toBe(true);
+    expect(result.response.conflictDetail.operations.every((o) => o.reason === 'overlapping')).toBe(
+      true,
+    );
     expect(result.response.replacementRequested).toBe(true);
 
     await flushMicrotasks();
@@ -385,7 +462,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       [{ old_string: 'abcdefgh', new_string: 'XY' }],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: replacement.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: replacement.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Revised without overlap.');
     fakeSession.completeRun();
@@ -403,10 +482,20 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_chain_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    advance(h, documentId, 'The quick fox jumps over the lazy dog.', 'The swift wolf leaps over the sleepy dog.');
+    advance(
+      h,
+      documentId,
+      'The quick fox jumps over the lazy dog.',
+      'The swift wolf leaps over the sleepy dog.',
+    );
 
     const r1 = await h.editService.apply(edit1.id);
     expect(r1.response.outcome).toBe('conflict');
@@ -418,10 +507,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId2,
       'Swap quick for swift (revised)',
-      [{ old_string: 'The swift wolf leaps over the sleepy dog.', new_string: 'The swift fox leaps over the sleepy dog.' }],
+      [
+        {
+          old_string: 'The swift wolf leaps over the sleepy dog.',
+          new_string: 'The swift fox leaps over the sleepy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: edit2.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: edit2.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Revised once.');
     fakeSession.completeRun();
@@ -429,7 +525,12 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     expect(edit2.replacementAttempt).toBe(1);
 
     // The replacement itself goes stale before the user (or Primary auto-apply) gets to it.
-    advance(h, documentId, 'The swift wolf leaps over the sleepy dog.', 'The swift wolf sprints past the sleepy dog.');
+    advance(
+      h,
+      documentId,
+      'The swift wolf leaps over the sleepy dog.',
+      'The swift wolf sprints past the sleepy dog.',
+    );
 
     const r2 = await h.editService.apply(edit2.id);
     expect(r2.response.outcome).toBe('conflict');
@@ -444,10 +545,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId3,
       'Swap quick for swift (revised again)',
-      [{ old_string: 'The swift wolf sprints past the sleepy dog.', new_string: 'The swift fox sprints past the sleepy dog.' }],
+      [
+        {
+          old_string: 'The swift wolf sprints past the sleepy dog.',
+          new_string: 'The swift fox sprints past the sleepy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId3, 'propose_document_edit', { result: { details: { stagedEditId: edit3.id } } });
+    fakeSession.emitToolCompleted(toolCallId3, 'propose_document_edit', {
+      result: { details: { stagedEditId: edit3.id } },
+    });
     fakeSession.emitMessageStart('msg_2');
     fakeSession.emitMessageCompleted('msg_2', 'Revised twice.');
     fakeSession.completeRun();
@@ -473,13 +581,23 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_exhaust_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
     // Each `advance` below rewrites whatever the *actual* live content currently is — a staged
     // (but not yet applied) replacement never changes the document itself, so the next conflict
     // must be manufactured against the real current text, not the replacement's own new_string.
-    advance(h, documentId, 'The quick fox jumps over the lazy dog.', 'Rev A of the drifting phrase.');
+    advance(
+      h,
+      documentId,
+      'The quick fox jumps over the lazy dog.',
+      'Rev A of the drifting phrase.',
+    );
 
     const r1 = await h.editService.apply(edit1.id);
     expect(r1.response.outcome).toBe('conflict');
@@ -491,10 +609,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId2,
       'Replacement 1',
-      [{ old_string: 'Rev A of the drifting phrase.', new_string: 'Rev B of the drifting phrase.' }],
+      [
+        {
+          old_string: 'Rev A of the drifting phrase.',
+          new_string: 'Rev B of the drifting phrase.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: edit2.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: edit2.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Replacement 1.');
     fakeSession.completeRun();
@@ -515,10 +640,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId3,
       'Replacement 2',
-      [{ old_string: 'Rev A2 of the drifting phrase.', new_string: 'Rev C of the drifting phrase.' }],
+      [
+        {
+          old_string: 'Rev A2 of the drifting phrase.',
+          new_string: 'Rev C of the drifting phrase.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId3, 'propose_document_edit', { result: { details: { stagedEditId: edit3.id } } });
+    fakeSession.emitToolCompleted(toolCallId3, 'propose_document_edit', {
+      result: { details: { stagedEditId: edit3.id } },
+    });
     fakeSession.emitMessageStart('msg_2');
     fakeSession.emitMessageCompleted('msg_2', 'Replacement 2.');
     fakeSession.completeRun();
@@ -556,10 +688,20 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_zero_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    advance(h, documentId, 'The quick fox jumps over the lazy dog.', 'The swift wolf leaps over the sleepy dog.');
+    advance(
+      h,
+      documentId,
+      'The quick fox jumps over the lazy dog.',
+      'The swift wolf leaps over the sleepy dog.',
+    );
 
     const result = await h.editService.apply(edit1.id);
     expect(result.response.outcome).toBe('conflict_exhausted');
@@ -583,12 +725,22 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       'tool_getchain_1',
       'Swap quick for swift',
-      [{ old_string: 'The quick fox jumps over the lazy dog.', new_string: 'The swift fox jumps over the lazy dog.' }],
+      [
+        {
+          old_string: 'The quick fox jumps over the lazy dog.',
+          new_string: 'The swift fox jumps over the lazy dog.',
+        },
+      ],
       branch.contextRevision,
     );
     expect(h.conflictService.getChainAttempts(edit1.id)).toBe(0);
 
-    advance(h, documentId, 'The quick fox jumps over the lazy dog.', 'The swift wolf leaps over the sleepy dog.');
+    advance(
+      h,
+      documentId,
+      'The quick fox jumps over the lazy dog.',
+      'The swift wolf leaps over the sleepy dog.',
+    );
     await h.editService.apply(edit1.id);
     await flushMicrotasks();
 
@@ -598,10 +750,17 @@ describe('conflict/reconciliation pipeline (US6)', () => {
       branch.id,
       toolCallId2,
       'Revised',
-      [{ old_string: 'The swift wolf leaps over the sleepy dog.', new_string: 'The swift fox leaps over the sleepy dog.' }],
+      [
+        {
+          old_string: 'The swift wolf leaps over the sleepy dog.',
+          new_string: 'The swift fox leaps over the sleepy dog.',
+        },
+      ],
       branch.contextRevision,
     );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', { result: { details: { stagedEditId: edit2.id } } });
+    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+      result: { details: { stagedEditId: edit2.id } },
+    });
     fakeSession.emitMessageStart('msg_1');
     fakeSession.emitMessageCompleted('msg_1', 'Revised.');
     fakeSession.completeRun();

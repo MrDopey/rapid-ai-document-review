@@ -48,7 +48,11 @@ function applyScrollRatio(el: HTMLElement, ratio: number): void {
  * "no scroll-linking happens at all" (each pane scrolls independently), since it never touches the
  * other pane's scroll position.
  */
-export function attachScrollSync(elA: HTMLElement, elB: HTMLElement, isEnabled: () => boolean): () => void {
+export function attachScrollSync(
+  elA: HTMLElement,
+  elB: HTMLElement,
+  isEnabled: () => boolean,
+): () => void {
   let syncing = false;
 
   function syncTo(source: HTMLElement, target: HTMLElement): void {

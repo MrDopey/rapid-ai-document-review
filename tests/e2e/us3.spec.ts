@@ -7,7 +7,10 @@ import { test, expect, type Page } from '@playwright/test';
 // ConflictService pipeline deterministically, with no live model involved.
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 
-function proposeEdit(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeEdit(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return `${PROPOSE_EDIT_DIRECTIVE}${JSON.stringify({ summary, operations })}`;
 }
 
@@ -67,12 +70,18 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   }
 
   const existing = await page.request.get('/api/document');
-  const body = (await existing.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await existing.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   if (body.content.includes(MARKERS.intro)) return; // a previous US3 run already appended it
 
   const from = body.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: body.document.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: body.document.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
   await page.reload();
   await expect(page.locator('.toolbar h1')).toBeVisible();
@@ -85,7 +94,9 @@ async function waitIdle(page: Page): Promise<void> {
 }
 
 test.describe('US3 — branch from a selection and review proposed edits', () => {
-  test('branch, propose, preview, accept, drop, bulk, act-while-active, close-blocked', async ({ page }) => {
+  test('branch, propose, preview, accept, drop, bulk, act-while-active, close-blocked', async ({
+    page,
+  }) => {
     // 79c2d07/61d7e3d: per-row Drop and "Drop remaining" now gate behind window.confirm —
     // Playwright auto-dismisses unhandled native dialogs, so accept every one for this test's
     // several Drop/Drop-remaining click sites further below.
@@ -106,10 +117,14 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
 
       // The branch is created under Main, selected automatically, and its name is derived from
       // the enclosing "## US3 Body" heading (seed-excerpt.ts's deriveBranchName).
-      await expect(page.locator('.conversation-header h2')).toHaveText('US3 Body', { timeout: 10_000 });
+      await expect(page.locator('.conversation-header h2')).toHaveText('US3 Body', {
+        timeout: 10_000,
+      });
       branchName = 'US3 Body';
 
-      await expect(page.getByRole('navigation', { name: 'Conversations' }).getByText('US3 Body')).toBeVisible();
+      await expect(
+        page.getByRole('navigation', { name: 'Conversations' }).getByText('US3 Body'),
+      ).toBeVisible();
 
       // FR-012: the seeded first message contains the highlighted text. Scoped to the focused
       // conversation panel (`.conversation-view` — ConversationView.vue's root class), not
@@ -127,7 +142,10 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       const composer = page.getByLabel(`Message ${branchName}`);
       await composer.fill(
         proposeEdit('Tighten the target sentence', [
-          { old_string: MARKERS.target1, new_string: 'US3-MARKER-TARGET-1: This sentence has been tightened.' },
+          {
+            old_string: MARKERS.target1,
+            new_string: 'US3-MARKER-TARGET-1: This sentence has been tightened.',
+          },
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -174,9 +192,12 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       await row.getByRole('button', { name: 'Accept' }).click();
       await expect(row.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
 
-      await expect(page.locator('.editor-host')).toContainText('This sentence has been tightened.', {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.editor-host')).toContainText(
+        'This sentence has been tightened.',
+        {
+          timeout: 10_000,
+        },
+      );
 
       await page.getByRole('button', { name: 'History' }).click();
       await expect(page.locator('.history-entry').first()).toContainText(branchName);
@@ -191,7 +212,10 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       const composer = page.getByLabel(`Message ${branchName}`);
       await composer.fill(
         proposeEdit('Rewrite the second sentence', [
-          { old_string: MARKERS.target2, new_string: 'US3-MARKER-TARGET-2: Something else entirely.' },
+          {
+            old_string: MARKERS.target2,
+            new_string: 'US3-MARKER-TARGET-2: Something else entirely.',
+          },
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -215,9 +239,13 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
         ['Bulk edit two', MARKERS.bulk2],
         ['Bulk edit three', MARKERS.bulk3],
       ] as const) {
-        await composer.fill(proposeEdit(summary, [{ old_string: marker, new_string: `${marker} EDITED` }]));
+        await composer.fill(
+          proposeEdit(summary, [{ old_string: marker, new_string: `${marker} EDITED` }]),
+        );
         await page.getByRole('button', { name: 'Send', exact: true }).click();
-        await expect(page.locator('.edit-row', { hasText: summary })).toBeVisible({ timeout: 15_000 });
+        await expect(page.locator('.edit-row', { hasText: summary })).toBeVisible({
+          timeout: 15_000,
+        });
         await waitIdle(page);
       }
 
@@ -228,14 +256,12 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
 
       // The other two resolve together via the bulk action.
       await page.getByRole('button', { name: 'Drop remaining' }).click();
-      await expect(page.locator('.edit-row', { hasText: 'Bulk edit two' }).locator('.status-badge')).toHaveText(
-        'dropped',
-        { timeout: 10_000 },
-      );
-      await expect(page.locator('.edit-row', { hasText: 'Bulk edit three' }).locator('.status-badge')).toHaveText(
-        'dropped',
-        { timeout: 10_000 },
-      );
+      await expect(
+        page.locator('.edit-row', { hasText: 'Bulk edit two' }).locator('.status-badge'),
+      ).toHaveText('dropped', { timeout: 10_000 });
+      await expect(
+        page.locator('.edit-row', { hasText: 'Bulk edit three' }).locator('.status-badge'),
+      ).toHaveText('dropped', { timeout: 10_000 });
     });
 
     await test.step('act while active: accept a pending proposal while the agent is still working (FR-024)', async () => {
@@ -243,7 +269,10 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
 
       await composer.fill(
         proposeEdit('Revise the active-turn sentence', [
-          { old_string: MARKERS.active, new_string: 'US3-MARKER-ACTIVE: The conclusion has been revised.' },
+          {
+            old_string: MARKERS.active,
+            new_string: 'US3-MARKER-ACTIVE: The conclusion has been revised.',
+          },
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -254,7 +283,10 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       // A long message keeps FakeAgentSession streaming for long enough to accept mid-turn.
       await composer.fill('x'.repeat(2000));
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'working');
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'working',
+      );
 
       await activeRow.getByRole('button', { name: 'Accept' }).click();
       await expect(activeRow.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
@@ -266,7 +298,9 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
     await test.step('close is blocked while a proposal is pending, then succeeds once resolved (FR-033)', async () => {
       const composer = page.getByLabel(`Message ${branchName}`);
       await composer.fill(
-        proposeEdit('Edit for the close test', [{ old_string: MARKERS.close, new_string: `${MARKERS.close} EDITED` }]),
+        proposeEdit('Edit for the close test', [
+          { old_string: MARKERS.close, new_string: `${MARKERS.close} EDITED` },
+        ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       const closeRow = page.locator('.edit-row', { hasText: 'Edit for the close test' });
@@ -279,8 +313,13 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       const closeDialog = page.getByRole('alertdialog', { name: 'Close conversation' });
       await expect(closeDialog).toBeVisible();
       await closeDialog.getByRole('button', { name: 'Close conversation' }).click();
-      await expect(page.locator('.conversation-view .error-banner')).toContainText(/pending/i, { timeout: 10_000 });
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'idle');
+      await expect(page.locator('.conversation-view .error-banner')).toContainText(/pending/i, {
+        timeout: 10_000,
+      });
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'idle',
+      );
 
       await closeRow.getByRole('button', { name: 'Drop' }).click();
       await expect(closeRow.locator('.status-badge')).toHaveText('dropped', { timeout: 10_000 });
@@ -288,9 +327,13 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       await page.getByRole('button', { name: 'Archive', exact: true }).click();
       await expect(closeDialog).toBeVisible();
       await closeDialog.getByRole('button', { name: 'Close conversation' }).click();
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'closed', {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'closed',
+        {
+          timeout: 10_000,
+        },
+      );
     });
   });
 });

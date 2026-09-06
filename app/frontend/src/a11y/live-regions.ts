@@ -84,7 +84,9 @@ export function announceStagedEditCreated(conversationName: string, summary: str
 }
 
 export function announceConversationStale(conversationName: string): void {
-  announcePolite(`${conversationName} is now stale: the document changed since its last context refresh.`);
+  announcePolite(
+    `${conversationName} is now stale: the document changed since its last context refresh.`,
+  );
 }
 
 export function announceAgentError(conversationName: string, message: string): void {

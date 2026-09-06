@@ -89,7 +89,11 @@ export class PiService {
   private readonly automerge: AutomergeStoreHolder;
   private readonly primaryMutex: PrimaryMutex;
 
-  constructor(storage: StorageAdapter, automerge: AutomergeStoreHolder, primaryMutex: PrimaryMutex) {
+  constructor(
+    storage: StorageAdapter,
+    automerge: AutomergeStoreHolder,
+    primaryMutex: PrimaryMutex,
+  ) {
     this.storage = storage;
     this.automerge = automerge;
     this.primaryMutex = primaryMutex;
@@ -128,7 +132,15 @@ export class PiService {
     const colonIndex = id.lastIndexOf(':');
     if (colonIndex !== -1) {
       const thinkingLevel = id.slice(colonIndex + 1);
-      const validThinkingLevels = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+      const validThinkingLevels = new Set([
+        'off',
+        'minimal',
+        'low',
+        'medium',
+        'high',
+        'xhigh',
+        'max',
+      ]);
       if (!validThinkingLevels.has(thinkingLevel)) invalid();
       id = id.slice(0, colonIndex);
     }
@@ -199,7 +211,9 @@ export class PiService {
     const cwd = process.cwd();
     const sessionDir = dirname(conversation.piSessionPath);
 
-    const parent = conversation.parentId ? this.storage.getConversation(conversation.parentId) : null;
+    const parent = conversation.parentId
+      ? this.storage.getConversation(conversation.parentId)
+      : null;
 
     const sessionManager = existsSync(conversation.piSessionPath)
       ? SessionManager.open(conversation.piSessionPath, sessionDir, cwd)
@@ -358,7 +372,10 @@ export class PiService {
         { conversationId, timeoutMs },
         'agent turn exceeded its timeout without settling; forcing agent_error',
       );
-      bridge.handle({ type: 'agent_error', message: `Agent turn timed out after ${timeoutMs}ms without completing.` });
+      bridge.handle({
+        type: 'agent_error',
+        message: `Agent turn timed out after ${timeoutMs}ms without completing.`,
+      });
       this.evictSession(conversationId);
     }, timeoutMs);
     timer.unref?.();
@@ -437,7 +454,11 @@ export class PiService {
    * picks the content up as context whenever it next actually runs, fully decoupled from the
    * `close()` HTTP response that kicked off summary generation (FR-034).
    */
-  async deliverFoldSummary(parent: ConversationRow, sourceConversationName: string, summary: string): Promise<void> {
+  async deliverFoldSummary(
+    parent: ConversationRow,
+    sourceConversationName: string,
+    summary: string,
+  ): Promise<void> {
     const session = await this.getOrCreateSession(parent);
     await session.sendCustomMessage(
       {

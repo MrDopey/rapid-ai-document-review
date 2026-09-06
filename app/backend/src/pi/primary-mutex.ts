@@ -35,7 +35,10 @@ export class PrimaryMutex {
     const next = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.tails.set(documentId, tail.then(() => next));
+    this.tails.set(
+      documentId,
+      tail.then(() => next),
+    );
     await tail;
 
     const nextHeld = new Set(current ?? []);

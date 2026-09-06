@@ -18,7 +18,9 @@ defineProps<{
   <h3>{{ scope }}</h3>
   <dl>
     <template v-for="shortcut in shortcuts" :key="shortcut.keys">
-      <dt><kbd>{{ shortcut.keys }}</kbd></dt>
+      <dt>
+        <kbd>{{ shortcut.keys }}</kbd>
+      </dt>
       <dd>{{ shortcut.description }}</dd>
     </template>
   </dl>

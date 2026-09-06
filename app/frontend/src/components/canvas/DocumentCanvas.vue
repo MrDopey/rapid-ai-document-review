@@ -4,7 +4,11 @@ import EditorComponent from '../editor/EditorComponent.vue';
 import ConversationThreadBox from '../conversation/ConversationThreadBox.vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { computeAnchorY, type AnchorPositionSource } from './anchorY.js';
-import { computeConversationLayout, resolveAnchorRoot, type ConversationLayoutInput } from './conversationLayout.js';
+import {
+  computeConversationLayout,
+  resolveAnchorRoot,
+  type ConversationLayoutInput,
+} from './conversationLayout.js';
 import {
   loadCanvasScrollPosition,
   persistCanvasScrollPosition,
@@ -41,7 +45,11 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
-  (e: 'branch-from-selection', range: { from: number; to: number }, includeSeedMessage: boolean): void;
+  (
+    e: 'branch-from-selection',
+    range: { from: number; to: number },
+    includeSeedMessage: boolean,
+  ): void;
   (e: 'toggle-focus', conversationId: string): void;
   // Relays `ConversationThreadBox.vue`'s sidebar "Branch this conversation" result up to App.vue,
   // same auto-focus-on-success convention as `ConversationDetailPanel.vue`'s own `branch-created`
@@ -98,9 +106,13 @@ let resizeObserver: ResizeObserver | null = null;
 const pendingBoxHeights = new Map<string, number>();
 let boxHeightsFlushHandle: number | null = null;
 const scheduleFrame: (cb: () => void) => number =
-  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : ((cb) => setTimeout(cb, 0) as unknown as number);
+  typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (cb) => setTimeout(cb, 0) as unknown as number;
 const cancelScheduledFrame: (handle: number) => void =
-  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : ((handle) => clearTimeout(handle));
+  typeof cancelAnimationFrame === 'function'
+    ? cancelAnimationFrame
+    : (handle) => clearTimeout(handle);
 
 function flushBoxHeights(): void {
   boxHeightsFlushHandle = null;
@@ -138,7 +150,8 @@ onMounted(() => {
         changed = true;
       }
     }
-    if (changed && boxHeightsFlushHandle === null) boxHeightsFlushHandle = scheduleFrame(flushBoxHeights);
+    if (changed && boxHeightsFlushHandle === null)
+      boxHeightsFlushHandle = scheduleFrame(flushBoxHeights);
   });
   for (const el of observedEls.values()) resizeObserver.observe(el);
 });
@@ -172,7 +185,10 @@ function onCanvasScroll(): void {
   if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
   scrollFlushTimer = setTimeout(() => {
     if (!canvasEl.value) return;
-    persistCanvasScrollPosition({ scrollLeft: canvasEl.value.scrollLeft, scrollTop: canvasEl.value.scrollTop });
+    persistCanvasScrollPosition({
+      scrollLeft: canvasEl.value.scrollLeft,
+      scrollTop: canvasEl.value.scrollTop,
+    });
   }, SCROLL_PERSIST_DEBOUNCE_MS);
 }
 
@@ -231,7 +247,11 @@ const editorThreadResize = useResizeHandle({
     const startEditorPx = remainingPx * editorFraction.value;
     const minPx = containerRect.width * MIN_PANE_FRACTION;
     return (deltaPx) => {
-      const nextEditorPx = clamp(startEditorPx + deltaPx, minPx, Math.max(minPx, remainingPx - minPx));
+      const nextEditorPx = clamp(
+        startEditorPx + deltaPx,
+        minPx,
+        Math.max(minPx, remainingPx - minPx),
+      );
       editorFraction.value = nextEditorPx / remainingPx;
     };
   },
@@ -396,7 +416,10 @@ const connectors = computed<BranchConnector[]>(() => {
       const y1 = parentEntry.top + heightOf(parentEntry.id) / 2;
       const y2 = entry.top + heightOf(entry.id) / 2;
       const midX = (parentRightX + childLeftX) / 2;
-      result.push({ id: entry.id, d: `M ${parentRightX} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${childLeftX} ${y2}` });
+      result.push({
+        id: entry.id,
+        d: `M ${parentRightX} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${childLeftX} ${y2}`,
+      });
     }
   }
   return result;
@@ -438,7 +461,9 @@ defineExpose({
           :max-focused-conversations="maxFocusedConversations"
           :style="{ flex: '0 0 auto', width: `${editorFraction * 100}%` }"
           @change="emit('change', $event)"
-          @branch-from-selection="(range, includeSeedMessage) => emit('branch-from-selection', range, includeSeedMessage)"
+          @branch-from-selection="
+            (range, includeSeedMessage) => emit('branch-from-selection', range, includeSeedMessage)
+          "
         />
       </Transition>
       <!-- Editor|Conversation-sidebar resize handle: independent of App.vue's own Preview|Canvas
@@ -485,7 +510,12 @@ defineExpose({
           :width="threadColumnsWidth"
           :height="threadColumnsHeight"
         >
-          <path v-for="connector in connectors" :key="connector.id" :d="connector.d" class="branch-connector-path" />
+          <path
+            v-for="connector in connectors"
+            :key="connector.id"
+            :d="connector.d"
+            class="branch-connector-path"
+          />
         </svg>
         <div
           v-for="[column, entries] in columns"
@@ -497,10 +527,15 @@ defineExpose({
           <ConversationThreadBox
             v-for="entry in entries"
             :key="entry.id"
-            :ref="(instance) => registerBoxEl(entry.id, instance as { el: HTMLElement | null } | null)"
+            :ref="
+              (instance) => registerBoxEl(entry.id, instance as { el: HTMLElement | null } | null)
+            "
             :conversation-id="entry.id"
             :is-focused="focusedConversationIds.has(entry.id)"
-            :focus-disabled="!focusedConversationIds.has(entry.id) && focusedConversationIds.size >= maxFocusedConversations"
+            :focus-disabled="
+              !focusedConversationIds.has(entry.id) &&
+              focusedConversationIds.size >= maxFocusedConversations
+            "
             :at-focus-cap="focusedConversationIds.size >= maxFocusedConversations"
             :max-focused="maxFocusedConversations"
             :style="{ top: `${entry.top}px` }"

@@ -14,7 +14,10 @@ import { test, expect, type Page } from '@playwright/test';
 // forced by mutating the live document between staging and applying (never a scripted fake one).
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 
-function proposeEdit(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeEdit(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return `${PROPOSE_EDIT_DIRECTIVE}${JSON.stringify({ summary, operations })}`;
 }
 
@@ -50,7 +53,10 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
 async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
   const response = await page.request.get('/api/document');
-  const body = (await response.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await response.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   return { currentRevision: body.document.currentRevision, content: body.content };
 }
 
@@ -64,10 +70,16 @@ async function mutateDocument(page: Page, oldStr: string, newStr: string): Promi
   expect(occurrences).toBe(1);
   const mutated = before.content.replace(oldStr, newStr);
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from: 0, to: before.content.length, insert: mutated }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from: 0, to: before.content.length, insert: mutated }],
+    },
   });
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 }
 
@@ -89,10 +101,16 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   const from = before.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
@@ -100,11 +118,9 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 }
 
 async function waitIdle(page: Page): Promise<void> {
-  await expect(page.locator('.conversation-view .conversation-header .badge').first()).toHaveAttribute(
-    'data-status',
-    /idle|closed/,
-    { timeout: 20_000 },
-  );
+  await expect(
+    page.locator('.conversation-view .conversation-header .badge').first(),
+  ).toHaveAttribute('data-status', /idle|closed/, { timeout: 20_000 });
 }
 
 /** Branches from the line containing `markerText`, selected via the keyboard (FR-043a), and
@@ -171,7 +187,11 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await waitIdle(page);
 
       // Advance the document elsewhere — a concurrent manual edit unrelated to this proposal's anchor.
-      await mutateDocument(page, MARKERS.cleanElsewhere, `${MARKERS.cleanElsewhere} CHANGED CONCURRENTLY`);
+      await mutateDocument(
+        page,
+        MARKERS.cleanElsewhere,
+        `${MARKERS.cleanElsewhere} CHANGED CONCURRENTLY`,
+      );
 
       await row.getByRole('button', { name: 'Accept' }).click();
       await expect(row.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
@@ -200,7 +220,9 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await mutateDocument(page, MARKERS.notfound, mutatedNotfound);
 
       await originalRow.getByRole('button', { name: 'Accept' }).click();
-      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
+      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', {
+        timeout: 10_000,
+      });
       await expect(page.locator('.editor-host')).not.toContainText(`${MARKERS.notfound} EDITED`);
       await waitIdle(page);
 
@@ -211,13 +233,19 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      const replacementRow = page.locator('.edit-row', { hasText: 'Replacement for the not_found sentence' });
+      const replacementRow = page.locator('.edit-row', {
+        hasText: 'Replacement for the not_found sentence',
+      });
       await expect(replacementRow).toBeVisible({ timeout: 15_000 });
-      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', {
+        timeout: 10_000,
+      });
       await expect(replacementRow.locator('.chain-indicator')).toBeVisible();
 
       await replacementRow.getByRole('button', { name: 'Accept' }).click();
-      await expect(replacementRow.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('applied', {
+        timeout: 10_000,
+      });
       await expect(page.locator('.editor-host')).toContainText(`${mutatedNotfound} REPLACED`);
       await waitIdle(page);
     });
@@ -239,15 +267,26 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await page.request.patch('/api/document', {
         data: {
           baseRevision: before.currentRevision,
-          changes: [{ from: before.content.length, to: before.content.length, insert: `\n\n${MARKERS.ambiguous}\n` }],
+          changes: [
+            {
+              from: before.content.length,
+              to: before.content.length,
+              insert: `\n\n${MARKERS.ambiguous}\n`,
+            },
+          ],
         },
       });
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+        .poll(async () => (await getDocumentState(page)).currentRevision, {
+          timeout: 10_000,
+          intervals: [300],
+        })
         .toBeGreaterThan(before.currentRevision);
 
       await originalRow.getByRole('button', { name: 'Accept' }).click();
-      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
+      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', {
+        timeout: 10_000,
+      });
       await waitIdle(page);
 
       // A replacement with enough surrounding context to be unique this time.
@@ -260,12 +299,18 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      const replacementRow = page.locator('.edit-row', { hasText: 'Replacement for the ambiguous sentence' });
+      const replacementRow = page.locator('.edit-row', {
+        hasText: 'Replacement for the ambiguous sentence',
+      });
       await expect(replacementRow).toBeVisible({ timeout: 15_000 });
-      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', {
+        timeout: 10_000,
+      });
 
       await replacementRow.getByRole('button', { name: 'Accept' }).click();
-      await expect(replacementRow.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('applied', {
+        timeout: 10_000,
+      });
       await expect(page.locator('.editor-host')).toContainText('DISAMBIGUATED');
       await waitIdle(page);
     });
@@ -282,13 +327,20 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await expect(edit1Row).toBeVisible({ timeout: 15_000 });
       await waitIdle(page);
 
-      const revA = MARKERS.chained.replace('drift twice before a replacement lands', 'has drifted once (rev A)');
+      const revA = MARKERS.chained.replace(
+        'drift twice before a replacement lands',
+        'has drifted once (rev A)',
+      );
       await mutateDocument(page, MARKERS.chained, revA);
       await edit1Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit1Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
 
-      await composer.fill(proposeEdit('Chained replacement 1', [{ old_string: revA, new_string: `${revA} REPLACED-1` }]));
+      await composer.fill(
+        proposeEdit('Chained replacement 1', [
+          { old_string: revA, new_string: `${revA} REPLACED-1` },
+        ]),
+      );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       const edit2Row = page.locator('.edit-row', { hasText: 'Chained replacement 1' });
       await expect(edit2Row).toBeVisible({ timeout: 15_000 });
@@ -303,7 +355,11 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await expect(edit2Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
 
-      await composer.fill(proposeEdit('Chained replacement 2', [{ old_string: revB, new_string: `${revB} REPLACED-2` }]));
+      await composer.fill(
+        proposeEdit('Chained replacement 2', [
+          { old_string: revB, new_string: `${revB} REPLACED-2` },
+        ]),
+      );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       const edit3Row = page.locator('.edit-row', { hasText: 'Chained replacement 2' });
       await expect(edit3Row).toBeVisible({ timeout: 15_000 });
@@ -327,13 +383,18 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await expect(edit1Row).toBeVisible({ timeout: 15_000 });
       await waitIdle(page);
 
-      const revA = MARKERS.exhaust.replace('drift three times to exhaust the budget', 'has drifted (rev A)');
+      const revA = MARKERS.exhaust.replace(
+        'drift three times to exhaust the budget',
+        'has drifted (rev A)',
+      );
       await mutateDocument(page, MARKERS.exhaust, revA);
       await edit1Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit1Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
 
-      await composer.fill(proposeEdit('Exhaust replacement 1', [{ old_string: revA, new_string: `${revA} R1` }]));
+      await composer.fill(
+        proposeEdit('Exhaust replacement 1', [{ old_string: revA, new_string: `${revA} R1` }]),
+      );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       const edit2Row = page.locator('.edit-row', { hasText: 'Exhaust replacement 1' });
       await expect(edit2Row).toBeVisible({ timeout: 15_000 });
@@ -346,7 +407,9 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await expect(edit2Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
 
-      await composer.fill(proposeEdit('Exhaust replacement 2', [{ old_string: revB, new_string: `${revB} R2` }]));
+      await composer.fill(
+        proposeEdit('Exhaust replacement 2', [{ old_string: revB, new_string: `${revB} R2` }]),
+      );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       const edit3Row = page.locator('.edit-row', { hasText: 'Exhaust replacement 2' });
       await expect(edit3Row).toBeVisible({ timeout: 15_000 });
@@ -383,10 +446,16 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     const beforeMarker = await getDocumentState(page);
     const from = beforeMarker.content.length;
     await page.request.patch('/api/document', {
-      data: { baseRevision: beforeMarker.currentRevision, changes: [{ from, to: from, insert: `\n\n${MARKERS.restore}\n` }] },
+      data: {
+        baseRevision: beforeMarker.currentRevision,
+        changes: [{ from, to: from, insert: `\n\n${MARKERS.restore}\n` }],
+      },
     });
     await expect
-      .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+      .poll(async () => (await getDocumentState(page)).currentRevision, {
+        timeout: 10_000,
+        intervals: [300],
+      })
       .toBeGreaterThan(beforeMarker.currentRevision);
     await page.reload();
     await expect(page.locator('.toolbar h1')).toBeVisible();
@@ -409,24 +478,32 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     // filter matches exactly this test's own fresh branch. `.at(-1)` is kept defensively (`GET
     // /api/conversations` orders by `createdAt` ascending, per http-api.md) in case a name ever
     // collides again for some other reason.
-    const conversationsBefore = (await page.request.get('/api/conversations').then((r) => r.json())) as {
+    const conversationsBefore = (await page.request
+      .get('/api/conversations')
+      .then((r) => r.json())) as {
       conversations: { id: string; name: string }[];
     };
-    const conversation = conversationsBefore.conversations.filter((c) => c.name === branchName).at(-1);
+    const conversation = conversationsBefore.conversations
+      .filter((c) => c.name === branchName)
+      .at(-1);
     expect(conversation).toBeTruthy();
-    const editsBefore = (await page.request.get(`/api/conversations/${conversation!.id}/edits`).then((r) => r.json())) as {
+    const editsBefore = (await page.request
+      .get(`/api/conversations/${conversation!.id}/edits`)
+      .then((r) => r.json())) as {
       stagedEdits: { id: string; status: string; summary: string }[];
     };
-    const stagedEdit = editsBefore.stagedEdits.find((e) => e.summary === 'Proposal pending across a restore');
+    const stagedEdit = editsBefore.stagedEdits.find(
+      (e) => e.summary === 'Proposal pending across a restore',
+    );
     expect(stagedEdit?.status).toBe('pending');
 
     // Restore to the revision *before* the RESTORE marker existed — the pending proposal's anchor
     // will no longer resolve against that content (reconcilable: false, not_found). Matched by the
     // exact "v<N>" label (not a plain substring, which "v1" would also match inside "v10"/"v11").
     await page.getByRole('button', { name: 'History' }).click();
-    const targetEntry = page
-      .locator('.history-entry')
-      .filter({ has: page.locator('strong', { hasText: new RegExp(`^v${beforeMarker.currentRevision}$`) }) });
+    const targetEntry = page.locator('.history-entry').filter({
+      has: page.locator('strong', { hasText: new RegExp(`^v${beforeMarker.currentRevision}$`) }),
+    });
     await targetEntry.getByRole('button', { name: 'Restore' }).click();
     // c92bf3f: Restore now opens a confirmation dialog (role="alertdialog") before actually
     // restoring — click through it to exercise the full restore flow.
@@ -437,13 +514,17 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
 
     await expect(page.locator('.reconciliation-panel')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.reconciliation-panel')).toContainText('No longer applies');
-    await expect(page.locator('.reconciliation-panel')).toContainText('Proposal pending across a restore');
+    await expect(page.locator('.reconciliation-panel')).toContainText(
+      'Proposal pending across a restore',
+    );
     await expect(page.locator('.reconciliation-panel')).toContainText(branchName);
 
     await expect(page.locator('.editor-host')).not.toContainText(MARKERS.restore);
 
     // The dry-run never altered the proposal: still pending, unchanged, in the API.
-    const editsAfter = (await page.request.get(`/api/conversations/${conversation!.id}/edits`).then((r) => r.json())) as {
+    const editsAfter = (await page.request
+      .get(`/api/conversations/${conversation!.id}/edits`)
+      .then((r) => r.json())) as {
       stagedEdits: { id: string; status: string; summary: string }[];
     };
     const stagedEditAfter = editsAfter.stagedEdits.find((e) => e.id === stagedEdit!.id);

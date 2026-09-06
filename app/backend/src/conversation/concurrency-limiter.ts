@@ -84,7 +84,13 @@ export class ConcurrencyLimiter {
 
     const queue = this.queueFor(documentId);
     const queuePosition = queue.length + 1;
-    queue.push({ conversationId, turnId, contextRevision, run, lastEmittedPosition: queuePosition });
+    queue.push({
+      conversationId,
+      turnId,
+      contextRevision,
+      run,
+      lastEmittedPosition: queuePosition,
+    });
     this.publishQueued(documentId, conversationId, queuePosition, runningSet.size, limit);
     return { queued: true, queuePosition };
   }

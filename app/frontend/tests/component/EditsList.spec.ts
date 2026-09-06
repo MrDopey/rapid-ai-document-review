@@ -24,7 +24,9 @@ vi.mock('../../src/transport/http-client.js', () => ({
   },
 }));
 
-function stagedEdit(overrides: Partial<StagedEditDto> & { id: string; createdAt: string }): StagedEditDto {
+function stagedEdit(
+  overrides: Partial<StagedEditDto> & { id: string; createdAt: string },
+): StagedEditDto {
   return {
     conversationId: 'conv-1',
     piToolCallId: `tool-${overrides.id}`,
@@ -61,7 +63,10 @@ describe('EditsList — proposal ordering', () => {
       ],
     });
 
-    const wrapper = mount(EditsList, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    const wrapper = mount(EditsList, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
     await flushPromises();
 
     const summaries = wrapper.findAll('.summary-text').map((el) => el.text());
@@ -73,7 +78,10 @@ describe('EditsList — proposal ordering', () => {
       stagedEdits: [stagedEdit({ id: 'first', createdAt: '2026-01-01T00:00:10.000Z' })],
     });
 
-    const wrapper = mount(EditsList, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    const wrapper = mount(EditsList, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
     await flushPromises();
     expect(wrapper.findAll('.summary-text').map((el) => el.text())).toEqual(['first']);
 
@@ -214,14 +222,20 @@ describe('EditsList — per-row Drop confirmation gate', () => {
     vi.mocked(httpClient.listEdits).mockResolvedValue({
       stagedEdits: [stagedEdit({ id: 'edit-1', createdAt: '2026-01-01T00:00:10.000Z' })],
     });
-    const wrapper = mount(EditsList, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    const wrapper = mount(EditsList, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
     await flushPromises();
     return wrapper;
   }
 
   it('confirming the dialog proceeds with the drop', async () => {
     confirmSpy.mockReturnValue(true);
-    vi.mocked(httpClient.dropEdit).mockResolvedValue({ outcome: 'dropped', stagedEditId: 'edit-1' });
+    vi.mocked(httpClient.dropEdit).mockResolvedValue({
+      outcome: 'dropped',
+      stagedEditId: 'edit-1',
+    });
 
     const wrapper = await mountWithOnePending();
     await wrapper.get('[aria-label="Drop: edit-1"]').trigger('click');

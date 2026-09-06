@@ -49,13 +49,17 @@ function createPreMigration1Database(): DatabaseSync {
        (id, document_id, parent_id, name, kind, pi_session_path, status, is_primary, context_revision, branch_depth, created_at, updated_at)
      VALUES ('conv_old', 'doc_old', NULL, 'Main', 'main', '/tmp/main.jsonl', 'idle', 1, 1, 0, '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z')`,
   ).run();
-  db.prepare(`INSERT INTO user_settings (id, updated_at) VALUES (1, '2025-01-01T00:00:00.000Z')`).run();
+  db.prepare(
+    `INSERT INTO user_settings (id, updated_at) VALUES (1, '2025-01-01T00:00:00.000Z')`,
+  ).run();
 
   return db;
 }
 
 function tableColumns(db: DatabaseSync, table: string): string[] {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+    (c) => c.name,
+  );
 }
 
 describe('versioned ALTER-based schema migrations (cce9749)', () => {
@@ -63,27 +67,33 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     const db = createPreMigration1Database();
     expect(tableColumns(db, 'conversation')).not.toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).not.toContain('soft_word_count_threshold');
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(0);
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      0,
+    );
 
     migrate(db);
 
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
     // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      2,
+    );
 
     // The pre-existing row survived the upgrade untouched, and the newly-added column on it reads
     // back as the migration's own DEFAULT (ALTER TABLE ADD COLUMN ... DEFAULT applies retroactively
     // to existing rows in SQLite).
-    const conversation = db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old') as Record<
-      string,
-      unknown
-    >;
+    const conversation = db
+      .prepare('SELECT * FROM conversation WHERE id = ?')
+      .get('conv_old') as Record<string, unknown>;
     expect(conversation.name).toBe('Main');
     expect(conversation.document_id).toBe('doc_old');
     expect(conversation.forked_from_message_id).toBeNull();
 
-    const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get() as Record<string, unknown>;
+    const settings = db.prepare('SELECT * FROM user_settings WHERE id = 1').get() as Record<
+      string,
+      unknown
+    >;
     expect(settings.updated_at).toBe('2025-01-01T00:00:00.000Z');
     expect(settings.soft_word_count_threshold).toBe(20_000);
 
@@ -107,7 +117,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     );
     expect(tableColumns(db, 'conversation')).toEqual(afterFirst.conversationColumns);
     expect(tableColumns(db, 'user_settings')).toEqual(afterFirst.settingsColumns);
-    expect(db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old')).toEqual(afterFirst.conversation);
+    expect(db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old')).toEqual(
+      afterFirst.conversation,
+    );
 
     db.close();
   });
@@ -118,7 +130,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
     // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      2,
+    );
     db.close();
   });
 });
@@ -129,7 +143,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
  * Main per document.
  */
 function indexNames(db: DatabaseSync, table: string): string[] {
-  return (db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map((i) => i.name);
+  return (db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map(
+    (i) => i.name,
+  );
 }
 
 describe('migration version 2: is_current_main (specs/006-archivable-main-conversation)', () => {
@@ -138,7 +154,9 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      2,
+    );
     db.close();
   });
 
@@ -150,12 +168,13 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
 
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      2,
+    );
 
-    const conversation = db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old') as Record<
-      string,
-      unknown
-    >;
+    const conversation = db
+      .prepare('SELECT * FROM conversation WHERE id = ?')
+      .get('conv_old') as Record<string, unknown>;
     expect(conversation.is_current_main).toBe(1);
 
     db.close();
@@ -167,10 +186,9 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
 
     migrate(db);
 
-    const conversation = db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old') as Record<
-      string,
-      unknown
-    >;
+    const conversation = db
+      .prepare('SELECT * FROM conversation WHERE id = ?')
+      .get('conv_old') as Record<string, unknown>;
     expect(conversation.is_current_main).toBe(0);
   });
 });

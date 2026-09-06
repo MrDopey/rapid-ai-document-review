@@ -12,7 +12,9 @@ import { useConversationsStore } from '../../src/stores/conversations.js';
 // sort by that root's document-offset position ascending, Main always first, with every
 // descendant of a given root grouped contiguously rather than independently re-sorted.
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -43,7 +45,13 @@ describe('HudPanel — root-anchor ordering (FR-010)', () => {
     setActivePinia(pinia);
   });
 
-  function mountHud(overrides: { activeId?: string | null; focusedIds?: ReadonlySet<string>; focusCap?: number } = {}) {
+  function mountHud(
+    overrides: {
+      activeId?: string | null;
+      focusedIds?: ReadonlySet<string>;
+      focusCap?: number;
+    } = {},
+  ) {
     return mount(HudPanel, {
       props: {
         activeId: overrides.activeId ?? null,
@@ -157,7 +165,12 @@ describe('HudPanel — root-anchor ordering (FR-010)', () => {
     // `store.load()` HTTP call this unit test has no server for.
     store.loaded = true;
     store.conversations = [
-      conversationFixture({ id: 'closedOne', name: 'Closed One', status: 'closed', createdAt: '2026-01-01T00:00:00.000Z' }),
+      conversationFixture({
+        id: 'closedOne',
+        name: 'Closed One',
+        status: 'closed',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
       conversationFixture({
         id: 'main',
         name: 'Main',
@@ -188,7 +201,13 @@ describe('HudPanel — focus toggle/cap affordance', () => {
     setActivePinia(pinia);
   });
 
-  function mountHud(overrides: { activeId?: string | null; focusedIds?: ReadonlySet<string>; focusCap?: number } = {}) {
+  function mountHud(
+    overrides: {
+      activeId?: string | null;
+      focusedIds?: ReadonlySet<string>;
+      focusCap?: number;
+    } = {},
+  ) {
     return mount(HudPanel, {
       props: {
         activeId: overrides.activeId ?? null,
@@ -204,7 +223,12 @@ describe('HudPanel — focus toggle/cap affordance', () => {
     const store = useConversationsStore();
     store.loaded = true;
     store.conversations = [
-      conversationFixture({ id: 'main', name: 'Main', kind: 'main', createdAt: '2026-01-01T00:00:00.000Z' }),
+      conversationFixture({
+        id: 'main',
+        name: 'Main',
+        kind: 'main',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
       conversationFixture({
         id: 'branch',
         name: 'Branch',
@@ -216,7 +240,7 @@ describe('HudPanel — focus toggle/cap affordance', () => {
     ];
   }
 
-  it('a row click emits toggle-focus with that conversation\'s id, regardless of current focus state', async () => {
+  it("a row click emits toggle-focus with that conversation's id, regardless of current focus state", async () => {
     seedTwoConversations();
     const wrapper = mountHud();
     await wrapper.find('.conversation-row[data-conversation-id="main"]').trigger('click');
@@ -256,7 +280,9 @@ describe('HudPanel — focus toggle/cap affordance', () => {
     // `onGlobalKeydown` is a `document`-level listener (mounted for the app's whole lifetime, not
     // scoped to this component's own root) — dispatch directly on `document` rather than
     // `wrapper.trigger`, which only dispatches (and bubbles from) the wrapper's own root element.
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true }),
+    );
     expect(wrapper.emitted('cycle-focus')?.[0]).toEqual(['branch']);
     expect(wrapper.emitted('toggle-focus')).toBeUndefined();
   });
@@ -276,7 +302,13 @@ describe('HudPanel — shared status badges, no action buttons', () => {
     setActivePinia(pinia);
   });
 
-  function mountHud(overrides: { activeId?: string | null; focusedIds?: ReadonlySet<string>; focusCap?: number } = {}) {
+  function mountHud(
+    overrides: {
+      activeId?: string | null;
+      focusedIds?: ReadonlySet<string>;
+      focusCap?: number;
+    } = {},
+  ) {
     return mount(HudPanel, {
       props: {
         activeId: overrides.activeId ?? null,
@@ -292,7 +324,13 @@ describe('HudPanel — shared status badges, no action buttons', () => {
     const store = useConversationsStore();
     store.loaded = true;
     store.conversations = [
-      conversationFixture({ id: 'main', name: 'Main', kind: 'main', isStale: true, createdAt: '2026-01-01T00:00:00.000Z' }),
+      conversationFixture({
+        id: 'main',
+        name: 'Main',
+        kind: 'main',
+        isStale: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
     ];
   }
 

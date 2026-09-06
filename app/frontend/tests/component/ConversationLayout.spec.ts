@@ -47,11 +47,21 @@ describe('resolveBaseAnchorY', () => {
   it('inherits the nearest ancestor anchor when branched with no selection of its own (gap #2)', () => {
     const editor = fakeEditor({ 100: 250 });
     const main = conv({ id: 'main', branchDepth: 0 });
-    const highlight = conv({ id: 'h', parentId: 'main', branchDepth: 1, seedSelection: { from: 100, to: 110, text: 'x' } });
+    const highlight = conv({
+      id: 'h',
+      parentId: 'main',
+      branchDepth: 1,
+      seedSelection: { from: 100, to: 110, text: 'x' },
+    });
     // "Branch this conversation" on `h` with no document selection — must inherit h's own 250,
     // not collapse to 0 (data-model.md's literal null-selection rule would otherwise place every
     // such branch at the very top of the document).
-    const branchOfHighlight = conv({ id: 'b1', parentId: 'h', branchDepth: 2, seedSelection: null });
+    const branchOfHighlight = conv({
+      id: 'b1',
+      parentId: 'h',
+      branchDepth: 2,
+      seedSelection: null,
+    });
     const byId = new Map([
       ['main', main],
       ['h', highlight],
@@ -88,8 +98,18 @@ describe('computeConversationLayout', () => {
 
   it('orders siblings sharing a parent by createdAt', () => {
     const parent = conv({ id: 'p', branchDepth: 1 });
-    const first = conv({ id: 's1', parentId: 'p', branchDepth: 2, createdAt: '2026-01-01T00:00:01.000Z' });
-    const second = conv({ id: 's2', parentId: 'p', branchDepth: 2, createdAt: '2026-01-01T00:00:02.000Z' });
+    const first = conv({
+      id: 's1',
+      parentId: 'p',
+      branchDepth: 2,
+      createdAt: '2026-01-01T00:00:01.000Z',
+    });
+    const second = conv({
+      id: 's2',
+      parentId: 'p',
+      branchDepth: 2,
+      createdAt: '2026-01-01T00:00:02.000Z',
+    });
     const entries = computeConversationLayout([parent, second, first], {
       anchorYOf: () => 0,
       heightOf: () => 100,
@@ -100,8 +120,18 @@ describe('computeConversationLayout', () => {
   });
 
   it('pushes a second sibling down by at least minGap instead of overlapping the first (FR-007)', () => {
-    const first = conv({ id: 's1', parentId: 'p', branchDepth: 1, createdAt: '2026-01-01T00:00:01.000Z' });
-    const second = conv({ id: 's2', parentId: 'p', branchDepth: 1, createdAt: '2026-01-01T00:00:02.000Z' });
+    const first = conv({
+      id: 's1',
+      parentId: 'p',
+      branchDepth: 1,
+      createdAt: '2026-01-01T00:00:01.000Z',
+    });
+    const second = conv({
+      id: 's2',
+      parentId: 'p',
+      branchDepth: 1,
+      createdAt: '2026-01-01T00:00:02.000Z',
+    });
     const entries = computeConversationLayout([first, second], {
       anchorYOf: () => 200, // both siblings inherit the same base anchor (their shared parent's)
       heightOf: () => 120,
@@ -147,8 +177,18 @@ describe('computeConversationLayout', () => {
   });
 
   it('separates conversations at the same column that are not siblings but still collide', () => {
-    const a = conv({ id: 'a', parentId: 'p1', branchDepth: 1, createdAt: '2026-01-01T00:00:01.000Z' });
-    const b = conv({ id: 'b', parentId: 'p2', branchDepth: 1, createdAt: '2026-01-01T00:00:02.000Z' });
+    const a = conv({
+      id: 'a',
+      parentId: 'p1',
+      branchDepth: 1,
+      createdAt: '2026-01-01T00:00:01.000Z',
+    });
+    const b = conv({
+      id: 'b',
+      parentId: 'p2',
+      branchDepth: 1,
+      createdAt: '2026-01-01T00:00:02.000Z',
+    });
     const entries = computeConversationLayout([a, b], {
       anchorYOf: () => 100, // unrelated conversations that happen to share a base anchor
       heightOf: () => 80,

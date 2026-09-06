@@ -202,7 +202,11 @@ export class RevisionService {
         documentId,
         conversationId: null,
         at: revisionRow.createdAt,
-        data: { revision: revisionRow.revision, restoredFrom: revisionNumber, content: restoredContent },
+        data: {
+          revision: revisionRow.revision,
+          restoredFrom: revisionNumber,
+          content: restoredContent,
+        },
       });
 
       return {

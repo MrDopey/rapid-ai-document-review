@@ -54,7 +54,9 @@ function toggleFilter(): void {
   emit('update:filter', props.filter === 'active' ? 'all' : 'active');
 }
 const filteredConversations = computed(() =>
-  props.filter === 'active' ? store.conversations.filter((c) => c.status !== 'closed') : store.conversations,
+  props.filter === 'active'
+    ? store.conversations.filter((c) => c.status !== 'closed')
+    : store.conversations,
 );
 
 // 005-canvas-conversation-threads/US4 (T032, data-model.md's "HUD ordering"): shared with App.vue's
@@ -172,7 +174,14 @@ onBeforeUnmount(() => {
           :aria-label="`Show ${props.filter === 'active' ? 'all conversations, including closed ones' : 'active conversations only'} (Alt+A)`"
           @click="toggleFilter"
         >
-          <svg class="filter-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+          <svg
+            class="filter-icon"
+            viewBox="0 0 24 24"
+            width="12"
+            height="12"
+            aria-hidden="true"
+            focusable="false"
+          >
             <path
               d="M3.5 5h17L14 12.5V19l-4 2v-8.5L3.5 5z"
               fill="none"
@@ -208,14 +217,19 @@ onBeforeUnmount(() => {
            of any kind render here (the Make/Clear Primary button that briefly lived as a second row
            beneath `.conversation-row` moved to `ConversationThreadBox.vue`/`ConversationView.vue` —
            see this file's own top-of-script doc comment). -->
-      <li v-for="conv in orderedConversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.3}rem` }">
+      <li
+        v-for="conv in orderedConversations"
+        :key="conv.id"
+        :style="{ paddingLeft: `${conv.branchDepth * 0.3}rem` }"
+      >
         <div
           class="conversation-row"
           :class="{
             selected: conv.id === props.activeId,
             'is-primary': conv.isPrimary,
             'is-focused': props.focusedIds.has(conv.id),
-            'focus-disabled': !props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap,
+            'focus-disabled':
+              !props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap,
           }"
           :data-conversation-id="conv.id"
           :aria-disabled="!props.focusedIds.has(conv.id) && props.focusedIds.size >= props.focusCap"

@@ -128,7 +128,9 @@ export function useFocusPanelState(focusCap: Ref<number> | ComputedRef<number>) 
   // this is shared rather than reimplemented here.
   const orderedFocusedConversations = computed(() => {
     const byId = new Map(conversationsStore.conversations.map((c) => [c.id, c]));
-    const focused = conversationsStore.conversations.filter((c) => focusedConversationIds.value.has(c.id));
+    const focused = conversationsStore.conversations.filter((c) =>
+      focusedConversationIds.value.has(c.id),
+    );
     return orderConversationsByAnchor(focused, byId);
   });
 

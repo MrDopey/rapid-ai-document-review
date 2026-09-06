@@ -8,7 +8,10 @@ import { closeAllFocusedPanels, focusExclusively } from './test-utils.js';
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 const ERROR_DIRECTIVE = '__AGENT_ERROR__';
 
-function proposeEdit(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeEdit(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return `${PROPOSE_EDIT_DIRECTIVE}${JSON.stringify({ summary, operations })}`;
 }
 
@@ -17,7 +20,8 @@ function proposeEdit(summary: string, operations: { old_string: string; new_stri
 // has when this spec runs (it may follow us1-us4 in the same `npm run test:e2e` process).
 const MARKERS = {
   primary: 'US5-MARKER-PRIMARY: This sentence will be improved by the Primary conversation.',
-  stageAfterSwitch: 'US5-MARKER-STAGE: This sentence demonstrates staging once Primary moves elsewhere.',
+  stageAfterSwitch:
+    'US5-MARKER-STAGE: This sentence demonstrates staging once Primary moves elsewhere.',
   conflict: 'US5-MARKER-CONFLICT: This sentence anchors the Primary conflict scenario.',
 };
 
@@ -38,7 +42,10 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
 async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
   const response = await page.request.get('/api/document');
-  const body = (await response.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await response.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   return { currentRevision: body.document.currentRevision, content: body.content };
 }
 
@@ -50,7 +57,10 @@ async function getConversations(request: APIRequestContext): Promise<Conversatio
   return body.conversations;
 }
 
-async function findConversation(request: APIRequestContext, name: string): Promise<ConversationSummary> {
+async function findConversation(
+  request: APIRequestContext,
+  name: string,
+): Promise<ConversationSummary> {
   const conversation = (await getConversations(request)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
@@ -74,11 +84,17 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   const from = before.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
@@ -86,11 +102,9 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 }
 
 async function waitIdle(page: Page): Promise<void> {
-  await expect(page.locator('.conversation-view .conversation-header .badge').first()).toHaveAttribute(
-    'data-status',
-    /idle|closed/,
-    { timeout: 20_000 },
-  );
+  await expect(
+    page.locator('.conversation-view .conversation-header .badge').first(),
+  ).toHaveAttribute('data-status', /idle|closed/, { timeout: 20_000 });
 }
 
 /** Polls the HUD's per-row status badge for `name`, which is visible regardless of which
@@ -106,7 +120,9 @@ function hudStatusBadge(page: Page, name: string) {
  *  selector rather than the bespoke `.primary-button`/`.make-primary-button`/`.clear-primary-button`
  *  classes this used to target.) */
 function primaryButton(page: Page, name: string) {
-  return page.locator('.conversation-thread-box', { hasText: name }).locator('[data-action="primary"]');
+  return page
+    .locator('.conversation-thread-box', { hasText: name })
+    .locator('[data-action="primary"]');
 }
 
 test.describe('US5 — Designate a Primary conversation for automatic edits', () => {
@@ -132,7 +148,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       // The old global "Primary" box's "Primary: {{ name }}" text is gone entirely (006-toolbar-
       // reorg) — assert via the row's own Primary styling (accent + tint via `.is-primary`) and its
       // now-per-row "Clear Primary" button's title/aria-label instead.
-      await expect(page.locator('.conversation-row', { hasText: 'Main' })).toHaveClass(/is-primary/);
+      await expect(page.locator('.conversation-row', { hasText: 'Main' })).toHaveClass(
+        /is-primary/,
+      );
       await expect(primaryButton(page, 'Main')).toHaveAttribute('aria-label', /Main/);
     });
 
@@ -175,7 +193,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await page.keyboard.press('Shift+End');
       await page.keyboard.press(BRANCH_SHORTCUT);
 
-      await expect(page.locator('.conversation-header h2')).toHaveText('US5 Body', { timeout: 10_000 });
+      await expect(page.locator('.conversation-header h2')).toHaveText('US5 Body', {
+        timeout: 10_000,
+      });
       branchName = 'US5 Body';
       await waitIdle(page);
     });
@@ -228,7 +248,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       // tint via `.is-primary`); the old global "Primary" box's own "Primary: {{ name }}" text is
       // gone entirely (006-toolbar-reorg) — assert via the row's class and its own (now sidebar-box)
       // "Clear Primary" button's pressed state/title/aria-label instead.
-      await expect(branchRow.locator('.conversation-row')).toHaveClass(/is-primary/, { timeout: 10_000 });
+      await expect(branchRow.locator('.conversation-row')).toHaveClass(/is-primary/, {
+        timeout: 10_000,
+      });
       const branchPrimaryButton = primaryButton(page, branchName);
       await expect(branchPrimaryButton).toHaveAttribute('aria-pressed', 'true');
       await expect(branchPrimaryButton).toHaveAttribute(
@@ -242,7 +264,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
       // Main's long-running turn was not interrupted by the switch — it settles back to idle and
       // its assistant reply is present, exactly as if the switch had never happened.
-      await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'idle', { timeout: 20_000 });
+      await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'idle', {
+        timeout: 20_000,
+      });
     });
 
     await test.step('5. non-Primary conversations keep staging their proposals (FR-021)', async () => {
@@ -254,7 +278,10 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       const mainComposer = page.getByLabel('Message Main');
       await mainComposer.fill(
         proposeEdit('Stage this now that Main is not Primary', [
-          { old_string: MARKERS.stageAfterSwitch, new_string: `${MARKERS.stageAfterSwitch} STAGED` },
+          {
+            old_string: MARKERS.stageAfterSwitch,
+            new_string: `${MARKERS.stageAfterSwitch} STAGED`,
+          },
         ]),
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -263,7 +290,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await expect(row).toBeVisible({ timeout: 15_000 });
       await expect(row.locator('.status-badge')).toHaveText('pending', { timeout: 10_000 });
       await expect(row.getByRole('button', { name: 'Accept' })).toBeVisible();
-      await expect(page.locator('.editor-host')).not.toContainText(`${MARKERS.stageAfterSwitch} STAGED`);
+      await expect(page.locator('.editor-host')).not.toContainText(
+        `${MARKERS.stageAfterSwitch} STAGED`,
+      );
 
       // Clean up so this proposal doesn't block anything later in the run.
       await row.getByRole('button', { name: 'Accept' }).click();
@@ -275,7 +304,11 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       // Select the (now-Primary) branch conversation exclusively — Main's panel from the previous
       // step is still open otherwise, and a plain toggle-click here would only add the branch
       // alongside it rather than replacing it.
-      await focusExclusively(page, page.locator('.conversation-row', { hasText: branchName }), branchName);
+      await focusExclusively(
+        page,
+        page.locator('.conversation-row', { hasText: branchName }),
+        branchName,
+      );
       await waitIdle(page);
 
       // "Edit the document manually mid-run": mutate a word inside the anchor text (rather than
@@ -291,10 +324,16 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       const mutated = before.content.replace(MARKERS.conflict, mutatedConflictMarker);
       expect(mutated).not.toBe(before.content);
       await page.request.patch('/api/document', {
-        data: { baseRevision: before.currentRevision, changes: [{ from: 0, to: before.content.length, insert: mutated }] },
+        data: {
+          baseRevision: before.currentRevision,
+          changes: [{ from: 0, to: before.content.length, insert: mutated }],
+        },
       });
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+        .poll(async () => (await getDocumentState(page)).currentRevision, {
+          timeout: 10_000,
+          intervals: [300],
+        })
         .toBeGreaterThan(before.currentRevision);
 
       const composer = page.getByLabel(`Message ${branchName}`);
@@ -305,9 +344,13 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
 
-      const originalRow = page.locator('.edit-row', { hasText: 'Primary edit against a stale anchor' });
+      const originalRow = page.locator('.edit-row', {
+        hasText: 'Primary edit against a stale anchor',
+      });
       await expect(originalRow).toBeVisible({ timeout: 15_000 });
-      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
+      await expect(originalRow.locator('.status-badge')).toHaveText('superseded', {
+        timeout: 10_000,
+      });
       // Not applied, and not silently dropped either — the document is unchanged from the mutation.
       await expect(page.locator('.editor-host')).not.toContainText(`${MARKERS.conflict} EDITED`);
       await waitIdle(page);
@@ -321,15 +364,23 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       );
       await page.getByRole('button', { name: 'Send', exact: true }).click();
 
-      const replacementRow = page.locator('.edit-row', { hasText: 'Replacement for the stale anchor' });
+      const replacementRow = page.locator('.edit-row', {
+        hasText: 'Replacement for the stale anchor',
+      });
       await expect(replacementRow).toBeVisible({ timeout: 15_000 });
-      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('pending', {
+        timeout: 10_000,
+      });
       await expect(replacementRow.getByRole('button', { name: 'Accept' })).toBeVisible();
       await expect(replacementRow.locator('.chain-indicator')).toBeVisible();
-      await expect(page.locator('.editor-host')).not.toContainText(`${mutatedConflictMarker} REPLACED`);
+      await expect(page.locator('.editor-host')).not.toContainText(
+        `${mutatedConflictMarker} REPLACED`,
+      );
 
       await replacementRow.getByRole('button', { name: 'Drop' }).click();
-      await expect(replacementRow.locator('.status-badge')).toHaveText('dropped', { timeout: 10_000 });
+      await expect(replacementRow.locator('.status-badge')).toHaveText('dropped', {
+        timeout: 10_000,
+      });
       await waitIdle(page);
     });
   });
@@ -350,7 +401,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     expect(branchResponse.ok()).toBe(true);
     const targetConversation = (await branchResponse.json()) as { id: string };
     await expect
-      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, { timeout: 10_000 })
+      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, {
+        timeout: 10_000,
+      })
       .not.toBe('working');
 
     // Make the current Primary busy for long enough to run the rest of this step.
@@ -359,40 +412,57 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     });
     expect(sendResponse.ok()).toBe(true);
     await expect
-      .poll(async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status, {
-        timeout: 5_000,
-      })
+      .poll(
+        async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status,
+        {
+          timeout: 5_000,
+        },
+      )
       .toBe('working');
 
     // First attempt with no `whenBusy` choice is rejected with PRIMARY_TARGET_BUSY.
-    const busyResponse = await page.request.post(`/api/conversations/${targetConversation.id}/primary`, { data: {} });
+    const busyResponse = await page.request.post(
+      `/api/conversations/${targetConversation.id}/primary`,
+      { data: {} },
+    );
     expect(busyResponse.status()).toBe(409);
     const busyBody = (await busyResponse.json()) as { error: { code: string } };
     expect(busyBody.error.code).toBe('PRIMARY_TARGET_BUSY');
 
     // "Switch when idle" schedules the deferred switch.
-    const deferResponse = await page.request.post(`/api/conversations/${targetConversation.id}/primary`, {
-      data: { whenBusy: 'switch_when_idle' },
-    });
+    const deferResponse = await page.request.post(
+      `/api/conversations/${targetConversation.id}/primary`,
+      {
+        data: { whenBusy: 'switch_when_idle' },
+      },
+    );
     expect(deferResponse.ok()).toBe(true);
     const deferBody = (await deferResponse.json()) as { applied: string };
     expect(deferBody.applied).toBe('deferred_until_idle');
 
     // The target errors out before the busy Primary settles.
-    const errorResponse = await page.request.post(`/api/conversations/${targetConversation.id}/send`, {
-      data: { message: ERROR_DIRECTIVE },
-    });
+    const errorResponse = await page.request.post(
+      `/api/conversations/${targetConversation.id}/send`,
+      {
+        data: { message: ERROR_DIRECTIVE },
+      },
+    );
     expect(errorResponse.ok()).toBe(true);
     await expect
-      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, { timeout: 10_000 })
+      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, {
+        timeout: 10_000,
+      })
       .toBe('errored');
 
     // Once the busy Primary settles, the deferred switch is cancelled without effect: Primary is
     // unchanged, and the errored target never became Primary.
     await expect
-      .poll(async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status, {
-        timeout: 15_000,
-      })
+      .poll(
+        async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status,
+        {
+          timeout: 15_000,
+        },
+      )
       .toBe('idle');
 
     const finalTarget = await findConversation(page.request, 'US5 Deferred Target');
@@ -401,7 +471,10 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     expect(finalPrimary?.id).toBe(primaryId);
 
     await test.step('8. designating the now-errored conversation Primary is rejected (FR-038a)', async () => {
-      const response = await page.request.post(`/api/conversations/${targetConversation.id}/primary`, { data: {} });
+      const response = await page.request.post(
+        `/api/conversations/${targetConversation.id}/primary`,
+        { data: {} },
+      );
       expect(response.status()).toBe(409);
       const body = (await response.json()) as { error: { code: string } };
       expect(body.error.code).toBe('CONVERSATION_ERRORED');

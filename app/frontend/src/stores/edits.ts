@@ -79,7 +79,10 @@ export const useEditsStore = defineStore('edits', {
           // above; the conversation's display name comes from the sibling conversations store
           // rather than duplicating any conversation state in this store.
           const conversation = useConversationsStore().findConversation(conversationId);
-          announceStagedEditCreated(conversation ? conversation.name : 'Conversation', event.data.summary);
+          announceStagedEditCreated(
+            conversation ? conversation.name : 'Conversation',
+            event.data.summary,
+          );
           break;
         }
 

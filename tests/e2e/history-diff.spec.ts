@@ -24,13 +24,17 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
     await test.step('create a fresh document (revision 1)', async () => {
       await page.goto('/');
       await expect(page.getByRole('heading', { name: 'Paste your document' })).toBeVisible();
-      await page.getByLabel('Document content').fill(`# History Diff Fixture\n\n${MARKER_REMOVED}\n`);
+      await page
+        .getByLabel('Document content')
+        .fill(`# History Diff Fixture\n\n${MARKER_REMOVED}\n`);
       await page.getByRole('button', { name: 'Start reviewing' }).click();
       // Fix: `.toolbar h1` no longer exists (006-toolbar-reorg moved the document title out of
       // the topbar into the browser tab only — see App.vue's `document.title` watch comment) —
       // this assertion was stale from before that refactor. `.preview-pane`'s own rendered
       // heading is the resilient replacement already used a few lines below in this same file.
-      await expect(page.locator('.preview-pane').getByRole('heading', { name: 'History Diff Fixture' })).toBeVisible();
+      await expect(
+        page.locator('.preview-pane').getByRole('heading', { name: 'History Diff Fixture' }),
+      ).toBeVisible();
     });
 
     await test.step('edit the document and wait for the debounce to create revision 2', async () => {
@@ -46,7 +50,9 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
       // revisionDebounceMs is seeded to 2000ms for this e2e run (see playwright.config.ts).
       await page.waitForTimeout(3000);
       await page.reload();
-      await expect(page.locator('.preview-pane')).toContainText('replacement sentence after the edit');
+      await expect(page.locator('.preview-pane')).toContainText(
+        'replacement sentence after the edit',
+      );
     });
 
     let historyEntryCountBeforeDiff = 0;
@@ -83,7 +89,10 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
       expect(dialogHeaderBox).not.toBeNull();
       const topElementHandle = await page.evaluateHandle(
         ({ x, y }) => document.elementFromPoint(x, y),
-        { x: dialogHeaderBox!.x + dialogHeaderBox!.width / 2, y: dialogHeaderBox!.y + dialogHeaderBox!.height / 2 },
+        {
+          x: dialogHeaderBox!.x + dialogHeaderBox!.width / 2,
+          y: dialogHeaderBox!.y + dialogHeaderBox!.height / 2,
+        },
       );
       const topElementInDialog = await page.evaluate(
         ([el, dialogEl]) => !!el && !!dialogEl && dialogEl.contains(el),

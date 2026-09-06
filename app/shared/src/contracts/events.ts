@@ -37,7 +37,9 @@ export const DocumentCreatedEvent = base(
 export const DocumentContentChangedEvent = base(
   'document_content_changed',
   z.object({
-    changes: z.array(z.object({ from: z.number().int(), to: z.number().int(), insert: z.string() })),
+    changes: z.array(
+      z.object({ from: z.number().int(), to: z.number().int(), insert: z.string() }),
+    ),
     currentRevision: z.number().int(),
     originConversationId: z.string().nullable(),
     contentHash: z.string(),
@@ -88,7 +90,9 @@ export const ConversationStartedEvent = base(
     parentId: z.string().nullable(),
     branchDepth: z.number().int(),
     contextRevision: z.number().int(),
-    seedSelection: z.object({ from: z.number().int(), to: z.number().int(), text: z.string() }).nullable(),
+    seedSelection: z
+      .object({ from: z.number().int(), to: z.number().int(), text: z.string() })
+      .nullable(),
   }),
 );
 
@@ -114,7 +118,10 @@ export const ConversationStaleEvent = base(
   z.object({ contextRevision: z.number().int(), currentRevision: z.number().int() }),
 );
 
-export const ConversationRenamedEvent = base('conversation_renamed', z.object({ name: z.string() }));
+export const ConversationRenamedEvent = base(
+  'conversation_renamed',
+  z.object({ name: z.string() }),
+);
 
 export const ConversationClosedEvent = base(
   'conversation_closed',

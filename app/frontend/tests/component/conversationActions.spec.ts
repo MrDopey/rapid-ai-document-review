@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
-import { useConversationBranchAction, useBulkToggleAction } from '../../src/composables/conversationActions.js';
-import { useConversationsStore, type ConversationMessageState } from '../../src/stores/conversations.js';
+import {
+  useConversationBranchAction,
+  useBulkToggleAction,
+} from '../../src/composables/conversationActions.js';
+import {
+  useConversationsStore,
+  type ConversationMessageState,
+} from '../../src/stores/conversations.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // Extracted from `ConversationThreadBox.vue` and `ConversationView.vue`, both of which hand-
@@ -26,7 +32,9 @@ vi.mock('../../src/transport/http-client.js', () => ({
   },
 }));
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -59,7 +67,11 @@ describe('useConversationBranchAction', () => {
     vi.mocked(httpClient.branchConversation).mockReset();
   });
 
-  function setup(conversationOverrides: Partial<ConversationDto> = {}, atFocusCap = false, maxFocused = 3) {
+  function setup(
+    conversationOverrides: Partial<ConversationDto> = {},
+    atFocusCap = false,
+    maxFocused = 3,
+  ) {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1', ...conversationOverrides })];
     const onBranchCreated = vi.fn();
@@ -103,7 +115,9 @@ describe('useConversationBranchAction', () => {
   });
 
   it('branches successfully and calls onBranchCreated with the new id', async () => {
-    vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
+    vi.mocked(httpClient.branchConversation).mockResolvedValue(
+      conversationFixture({ id: 'branch-9' }),
+    );
     const { action, onBranchCreated } = setup({ canBranch: true });
     action.value.onClick();
     await flushPromises();
@@ -113,7 +127,9 @@ describe('useConversationBranchAction', () => {
 
   it('surfaces a failed branch attempt via the returned error ref', async () => {
     const { ApiError } = await import('../../src/transport/http-client.js');
-    vi.mocked(httpClient.branchConversation).mockRejectedValue(new ApiError(500, 'UNKNOWN', 'Server exploded'));
+    vi.mocked(httpClient.branchConversation).mockRejectedValue(
+      new ApiError(500, 'UNKNOWN', 'Server exploded'),
+    );
     const { action, error } = setup({ canBranch: true });
     action.value.onClick();
     await flushPromises();
@@ -129,7 +145,9 @@ describe('useBulkToggleAction', () => {
     setActivePinia(pinia);
   });
 
-  function makeMessage(overrides: Partial<ConversationMessageState> & { id: string }): ConversationMessageState {
+  function makeMessage(
+    overrides: Partial<ConversationMessageState> & { id: string },
+  ): ConversationMessageState {
     return {
       role: 'user',
       text: 'hi',

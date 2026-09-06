@@ -1,6 +1,9 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import { proposeDocumentEditParams, readDocumentParams } from '@rapid-ai-document-review/shared/contracts/agent-tools';
+import {
+  proposeDocumentEditParams,
+  readDocumentParams,
+} from '@rapid-ai-document-review/shared/contracts/agent-tools';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
 import type { EditService } from '../edit/edit-service.ts';
 import type { PrimaryMutex } from './primary-mutex.ts';
@@ -14,10 +17,16 @@ import type { StorageAdapter } from '../storage/storage-adapter.ts';
  */
 const ReadDocumentToolParams = Type.Object({
   from_line: Type.Optional(
-    Type.Integer({ minimum: 1, description: '1-based first line to return. Omit to read from the beginning.' }),
+    Type.Integer({
+      minimum: 1,
+      description: '1-based first line to return. Omit to read from the beginning.',
+    }),
   ),
   to_line: Type.Optional(
-    Type.Integer({ minimum: 1, description: '1-based last line to return, inclusive. Omit to read to the end.' }),
+    Type.Integer({
+      minimum: 1,
+      description: '1-based last line to return, inclusive. Omit to read to the end.',
+    }),
   ),
 });
 
@@ -62,7 +71,9 @@ function renderReadResult(
 
   const selected = lines.slice(from - 1, to);
   const width = String(to).length;
-  const body = selected.map((line, i) => `${String(from + i).padStart(width, ' ')}  ${line}`).join('\n');
+  const body = selected
+    .map((line, i) => `${String(from + i).padStart(width, ' ')}  ${line}`)
+    .join('\n');
   const noteSuffix = notes.length > 0 ? ` (${notes.join('; ')})` : '';
 
   return [
@@ -174,7 +185,8 @@ export function createProposeDocumentEditTool(deps: ProposeDocumentEditToolDeps)
       'document — it creates a proposal the user reviews and accepts or drops (or, in the Primary ' +
       'conversation, applies immediately through the same review-audited pipeline). Call ' +
       'read_document first so every old_string is copied verbatim and unique.',
-    promptSnippet: 'propose_document_edit(summary, operations[]) — propose a reviewable document change',
+    promptSnippet:
+      'propose_document_edit(summary, operations[]) — propose a reviewable document change',
     parameters: ProposeDocumentEditToolParams,
     execute: async (toolCallId, rawParams) => {
       const params = proposeDocumentEditParams.parse(rawParams);
@@ -182,7 +194,9 @@ export function createProposeDocumentEditTool(deps: ProposeDocumentEditToolDeps)
       const document = deps.storage.getDocument();
       if (!conversation || !document) {
         return {
-          content: [{ type: 'text' as const, text: 'No document is available to propose an edit against.' }],
+          content: [
+            { type: 'text' as const, text: 'No document is available to propose an edit against.' },
+          ],
           details: undefined,
         };
       }

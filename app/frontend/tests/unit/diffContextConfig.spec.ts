@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_DIFF_CONTEXT_LINES, resolveDiffContextLines } from '../../src/composables/diffContextConfig.js';
+import {
+  DEFAULT_DIFF_CONTEXT_LINES,
+  resolveDiffContextLines,
+} from '../../src/composables/diffContextConfig.js';
 
 describe('resolveDiffContextLines', () => {
   it('falls back to the default when unset or empty', () => {

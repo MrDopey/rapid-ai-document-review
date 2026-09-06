@@ -146,6 +146,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
  * `text`/`reasoning` over the wire) call this one function, so a live-streamed update and a page
  * reload can never classify the same message differently.
  */
-export function computeIsToolCallCarrier(data: { text: string; reasoning: string | null | undefined }): boolean {
+export function computeIsToolCallCarrier(data: {
+  text: string;
+  reasoning: string | null | undefined;
+}): boolean {
   return data.text === '' && !data.reasoning;
 }

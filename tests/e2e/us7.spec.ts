@@ -34,7 +34,10 @@ const MARKER_BLOCK = [
 
 async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
   const response = await page.request.get('/api/document');
-  const body = (await response.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await response.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   return { currentRevision: body.document.currentRevision, content: body.content };
 }
 
@@ -53,7 +56,10 @@ async function getConversations(request: APIRequestContext): Promise<Conversatio
   return body.conversations;
 }
 
-async function findConversation(request: APIRequestContext, name: string): Promise<ConversationSummary> {
+async function findConversation(
+  request: APIRequestContext,
+  name: string,
+): Promise<ConversationSummary> {
   const conversation = (await getConversations(request)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
@@ -64,7 +70,10 @@ async function getConversationDetail(
   id: string,
 ): Promise<{ conversation: ConversationSummary & { readOnly?: boolean }; messages: unknown[] }> {
   const response = await request.get(`/api/conversations/${id}`);
-  return (await response.json()) as { conversation: ConversationSummary & { readOnly?: boolean }; messages: unknown[] };
+  return (await response.json()) as {
+    conversation: ConversationSummary & { readOnly?: boolean };
+    messages: unknown[];
+  };
 }
 
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
@@ -85,11 +94,17 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   const from = before.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
@@ -97,11 +112,9 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 }
 
 async function waitIdle(page: Page): Promise<void> {
-  await expect(page.locator('.conversation-view .conversation-header .badge').first()).toHaveAttribute(
-    'data-status',
-    /idle|closed/,
-    { timeout: 20_000 },
-  );
+  await expect(
+    page.locator('.conversation-view .conversation-header .badge').first(),
+  ).toHaveAttribute('data-status', /idle|closed/, { timeout: 20_000 });
 }
 
 /** Selects `name`'s row in the HUD, regardless of which conversation(s) are currently open.
@@ -110,7 +123,11 @@ async function waitIdle(page: Page): Promise<void> {
  *  so this closes every other open panel first via `focusExclusively` — this file's assertions
  *  throughout assume exactly one detail panel (`name`'s) is open afterward. */
 async function selectConversation(page: Page, name: string): Promise<void> {
-  await focusExclusively(page, page.locator('.hud-panel .conversation-row', { hasText: name }), name);
+  await focusExclusively(
+    page,
+    page.locator('.hud-panel .conversation-row', { hasText: name }),
+    name,
+  );
 }
 
 /** Branches from the line containing `markerText`, selected via the keyboard (FR-043a), and
@@ -120,7 +137,11 @@ async function selectConversation(page: Page, name: string): Promise<void> {
  *  virtualized rendering has not put these markers — appended at the very end — into the DOM yet.
  *  `Control+End` moves the caret to the document end and scrolls it into view first, a standard
  *  keyboard-only editor command, which renders the tail lines this spec's markers live in. */
-async function branchFromMarker(page: Page, markerText: string, expectedName: string): Promise<void> {
+async function branchFromMarker(
+  page: Page,
+  markerText: string,
+  expectedName: string,
+): Promise<void> {
   await page.locator('.editor-host').click();
   await page.keyboard.press('Control+End');
   const line = page.locator('.cm-line', { hasText: markerText });
@@ -130,7 +151,9 @@ async function branchFromMarker(page: Page, markerText: string, expectedName: st
   await page.keyboard.press('Shift+End');
   await page.keyboard.press(BRANCH_SHORTCUT);
 
-  await expect(page.locator('.conversation-header h2')).toHaveText(expectedName, { timeout: 10_000 });
+  await expect(page.locator('.conversation-header h2')).toHaveText(expectedName, {
+    timeout: 10_000,
+  });
   await waitIdle(page);
 }
 
@@ -165,9 +188,13 @@ test.describe('US7 — Review closed conversations', () => {
       await dialog.getByRole('button', { name: 'Close conversation' }).click();
       await expect(dialog).toHaveCount(0);
 
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'closed', {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'closed',
+        {
+          timeout: 10_000,
+        },
+      );
 
       // The close() HTTP call already returned above — the summary is generated and delivered
       // asynchronously (research R1's `sendCustomMessage(..., { deliverAs: 'nextTurn' })`), so this
@@ -193,8 +220,12 @@ test.describe('US7 — Review closed conversations', () => {
       const mainComposer = page.getByLabel('Message Main');
       await mainComposer.fill('What happened in that conversation?');
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(page.locator('.message-list')).toContainText('Noted custom context', { timeout: 15_000 });
-      await expect(page.locator('.message-list')).toContainText(`closed conversation "${branchName}"`);
+      await expect(page.locator('.message-list')).toContainText('Noted custom context', {
+        timeout: 15_000,
+      });
+      await expect(page.locator('.message-list')).toContainText(
+        `closed conversation "${branchName}"`,
+      );
       await waitIdle(page);
     });
 
@@ -218,17 +249,24 @@ test.describe('US7 — Review closed conversations', () => {
 
       // History and proposals remain intact and visible (SC-009) — the conversation view still
       // renders its prior messages rather than going blank.
-      await expect(page.locator('.message-list')).toContainText('What do you make of this passage?');
+      await expect(page.locator('.message-list')).toContainText(
+        'What do you make of this passage?',
+      );
     });
 
     await test.step('3. requesting a review produces an independent conversation without altering the closed one (FR-036)', async () => {
-      const before = await getConversationDetail(page.request, (await findConversation(page.request, branchName)).id);
+      const before = await getConversationDetail(
+        page.request,
+        (await findConversation(page.request, branchName)).id,
+      );
       const messageCountBefore = before.messages.length;
 
       await page.getByRole('button', { name: 'Request review' }).click();
 
       const reviewName = `Review: ${branchName}`;
-      await expect(page.locator('.conversation-header h2')).toHaveText(reviewName, { timeout: 10_000 });
+      await expect(page.locator('.conversation-header h2')).toHaveText(reviewName, {
+        timeout: 10_000,
+      });
 
       const reviewConversation = await findConversation(page.request, reviewName);
       expect(reviewConversation.kind).toBe('review');
@@ -238,9 +276,13 @@ test.describe('US7 — Review closed conversations', () => {
       const reviewComposer = page.getByLabel(`Message ${reviewName}`);
       await reviewComposer.fill('Summarize your findings.');
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'working', {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'working',
+        {
+          timeout: 10_000,
+        },
+      );
       await waitIdle(page);
 
       // The reviewed (closed) conversation is byte-identical: same message count, still closed.
@@ -251,7 +293,9 @@ test.describe('US7 — Review closed conversations', () => {
     });
   });
 
-  test('4. closing a parent conversation leaves its still-open child fully usable (FR-035a)', async ({ page }) => {
+  test('4. closing a parent conversation leaves its still-open child fully usable (FR-035a)', async ({
+    page,
+  }) => {
     await ensureFixtureDocument(page);
 
     await test.step('branch a parent conversation, then branch a child from it', async () => {
@@ -267,7 +311,9 @@ test.describe('US7 — Review closed conversations', () => {
     const child = (await branchResponse.json()) as ConversationSummary;
     expect(child.parentId).toBe(parent.id);
     await expect
-      .poll(async () => (await findConversation(page.request, 'US7 Open Child')).status, { timeout: 10_000 })
+      .poll(async () => (await findConversation(page.request, 'US7 Open Child')).status, {
+        timeout: 10_000,
+      })
       .not.toBe('working');
 
     await test.step('close the parent (no fold needed for this scenario)', async () => {
@@ -276,9 +322,13 @@ test.describe('US7 — Review closed conversations', () => {
       const dialog = page.getByRole('alertdialog', { name: 'Close conversation' });
       await expect(dialog).toBeVisible();
       await dialog.getByRole('button', { name: 'Close conversation' }).click();
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', 'closed', {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        'closed',
+        {
+          timeout: 10_000,
+        },
+      );
     });
 
     await test.step('the child remains open, unaffected, and fully usable: send, branch (FR-035a)', async () => {

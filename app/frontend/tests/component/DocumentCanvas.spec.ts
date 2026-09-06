@@ -71,9 +71,13 @@ describe('DocumentCanvas.vue — editorVisible prop (editor-vs-canvas scope fix)
 
   it('re-shows the editor (without disturbing the sidebar) when editorVisible flips back to true', async () => {
     const wrapper = mountCanvas(pinia, false);
-    expect((wrapper.findComponent(EditorComponent).element as HTMLElement).style.display).toBe('none');
+    expect((wrapper.findComponent(EditorComponent).element as HTMLElement).style.display).toBe(
+      'none',
+    );
     await wrapper.setProps({ editorVisible: true });
-    expect((wrapper.findComponent(EditorComponent).element as HTMLElement).style.display).not.toBe('none');
+    expect((wrapper.findComponent(EditorComponent).element as HTMLElement).style.display).not.toBe(
+      'none',
+    );
     expect(wrapper.find('.thread-columns').isVisible()).toBe(true);
   });
 });
@@ -107,7 +111,17 @@ describe('DocumentCanvas.vue — Editor|Conversation-sidebar resize handle', () 
   function stubCanvasWidth(wrapper: VueWrapper, width: number): void {
     const el = wrapper.get('.document-canvas').element as HTMLDivElement;
     el.getBoundingClientRect = () =>
-      ({ width, height: 600, top: 0, left: 0, right: width, bottom: 600, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      ({
+        width,
+        height: 600,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
   }
 
   /** Reads the editor pane's own rendered `width` percentage straight off `EditorComponent`'s root
@@ -123,7 +137,8 @@ describe('DocumentCanvas.vue — Editor|Conversation-sidebar resize handle', () 
   function readThreadColumnsWidthPercent(wrapper: VueWrapper): number {
     const style = (wrapper.get('.thread-columns').element as HTMLElement).style.width;
     const match = style.match(/^([\d.]+)%$/);
-    if (!match) throw new Error(`Could not parse a .thread-columns width percentage from: "${style}"`);
+    if (!match)
+      throw new Error(`Could not parse a .thread-columns width percentage from: "${style}"`);
     return Number(match[1]);
   }
 

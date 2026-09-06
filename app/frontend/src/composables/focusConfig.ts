@@ -31,7 +31,9 @@ export const maxFocusedConversationsFromEnv = resolveMaxFocusedConversations(
  * its own container's measured width — see App.vue's `.panes` `ResizeObserver`).
  */
 export function useFocusCap(viewportFitCount: Ref<number>) {
-  return computed(() => Math.max(1, Math.min(maxFocusedConversationsFromEnv, viewportFitCount.value)));
+  return computed(() =>
+    Math.max(1, Math.min(maxFocusedConversationsFromEnv, viewportFitCount.value)),
+  );
 }
 
 /**

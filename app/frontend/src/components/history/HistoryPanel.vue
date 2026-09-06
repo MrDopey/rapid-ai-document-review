@@ -75,7 +75,9 @@ async function onRestore(revision: number): Promise<void> {
   // entry below can be shown by summary/conversation rather than a bare id. A normal GET, same as
   // opening that conversation would trigger — never mutates any proposal's status.
   await Promise.all(
-    conversationsStore.conversations.filter((c) => c.pendingEditCount > 0).map((c) => editsStore.load(c.id)),
+    conversationsStore.conversations
+      .filter((c) => c.pendingEditCount > 0)
+      .map((c) => editsStore.load(c.id)),
   );
   restoreReconciliation.value = entries;
 }
@@ -84,9 +86,13 @@ function dismissReconciliation(): void {
   restoreReconciliation.value = null;
 }
 
-function describeProposal(stagedEditId: string): { summary: string; conversationName: string } | null {
+function describeProposal(
+  stagedEditId: string,
+): { summary: string; conversationName: string } | null {
   for (const conversation of conversationsStore.conversations) {
-    const edit = (editsStore.byConversation[conversation.id] ?? []).find((e) => e.id === stagedEditId);
+    const edit = (editsStore.byConversation[conversation.id] ?? []).find(
+      (e) => e.id === stagedEditId,
+    );
     if (edit) return { summary: edit.summary, conversationName: conversation.name };
   }
   return null;
@@ -106,7 +112,12 @@ async function onCopy(revision: number): Promise<void> {
   <div class="history-panel" role="region" aria-label="Revision history">
     <div class="history-panel-header">
       <h2>History</h2>
-      <button type="button" class="close-drawer-button" aria-label="Dismiss panel" @click="emit('close')">
+      <button
+        type="button"
+        class="close-drawer-button"
+        aria-label="Dismiss panel"
+        @click="emit('close')"
+      >
         Close
       </button>
     </div>
@@ -121,15 +132,25 @@ async function onCopy(revision: number): Promise<void> {
         decide per-proposal whether to keep waiting, apply, or drop it.
       </p>
       <ul class="reconciliation-list">
-        <li v-for="entry in restoreReconciliation" :key="entry.stagedEditId" :data-reconcilable="entry.reconcilable">
+        <li
+          v-for="entry in restoreReconciliation"
+          :key="entry.stagedEditId"
+          :data-reconcilable="entry.reconcilable"
+        >
           <span class="badge" :data-reconcilable="entry.reconcilable">
             {{ entry.reconcilable ? 'Still applies' : 'No longer applies' }}
           </span>
           <template v-if="describeProposal(entry.stagedEditId)">
-            <span class="summary-text text-wrap-safe">{{ describeProposal(entry.stagedEditId)!.summary }}</span>
-            <span class="conversation-name text-wrap-safe">({{ describeProposal(entry.stagedEditId)!.conversationName }})</span>
+            <span class="summary-text text-wrap-safe">{{
+              describeProposal(entry.stagedEditId)!.summary
+            }}</span>
+            <span class="conversation-name text-wrap-safe"
+              >({{ describeProposal(entry.stagedEditId)!.conversationName }})</span
+            >
           </template>
-          <span v-else class="summary-text text-wrap-safe">Proposal {{ entry.stagedEditId.slice(0, 12) }}…</span>
+          <span v-else class="summary-text text-wrap-safe"
+            >Proposal {{ entry.stagedEditId.slice(0, 12) }}…</span
+          >
         </li>
       </ul>
     </div>
@@ -140,14 +161,20 @@ async function onCopy(revision: number): Promise<void> {
           <span class="badge" :data-source="rev.source">{{ rev.source }}</span>
           <span class="origin text-wrap-safe">{{ rev.origin }}</span>
         </div>
-        <div v-if="rev.conversationName" class="conversation-name text-wrap-safe">{{ rev.conversationName }}</div>
+        <div v-if="rev.conversationName" class="conversation-name text-wrap-safe">
+          {{ rev.conversationName }}
+        </div>
         <div v-if="rev.note" class="note text-wrap-safe">{{ rev.note }}</div>
         <time :datetime="rev.createdAt">{{ formatLocal(rev.createdAt) }}</time>
         <div class="actions">
-          <button type="button" class="restore-button" @click="openRestoreDialog(rev.revision)">Restore</button>
+          <button type="button" class="restore-button" @click="openRestoreDialog(rev.revision)">
+            Restore
+          </button>
           <a :href="exportUrl(rev.revision)" download>Download</a>
           <button type="button" @click="onCopy(rev.revision)">Copy</button>
-          <button v-if="rev.revision > 1" type="button" @click="diffingRevision = rev.revision">Diff</button>
+          <button v-if="rev.revision > 1" type="button" @click="diffingRevision = rev.revision">
+            Diff
+          </button>
         </div>
       </li>
     </ul>
@@ -164,10 +191,23 @@ async function onCopy(revision: number): Promise<void> {
       </div>
     </Transition>
     <div v-if="restoreDialogOpen" class="modal-overlay restore-dialog-overlay">
-      <div ref="restoreDialogEl" class="restore-dialog" role="alertdialog" aria-modal="true" aria-label="Restore revision">
-        <p>Restore to revision {{ restoreTarget }}? This will overwrite the current document content.</p>
+      <div
+        ref="restoreDialogEl"
+        class="restore-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Restore revision"
+      >
+        <p>
+          Restore to revision {{ restoreTarget }}? This will overwrite the current document content.
+        </p>
         <div class="restore-dialog-actions">
-          <button type="button" class="restore-button" :disabled="restoring" @click="confirmRestore">
+          <button
+            type="button"
+            class="restore-button"
+            :disabled="restoring"
+            @click="confirmRestore"
+          >
             {{ restoring ? 'Restoring…' : 'Restore' }}
           </button>
           <button type="button" :disabled="restoring" @click="cancelRestoreDialog">Cancel</button>

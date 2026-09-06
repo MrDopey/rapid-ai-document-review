@@ -7,7 +7,13 @@ function ctrlF(): KeyboardEvent {
   // jsdom (unlike a real browser) doesn't set `event.code` from `key` alone — CodeMirror's
   // keymap matching keys off `code` (`KeyF`) as well as `key`, so both need to be present for the
   // dispatched event to actually match the searchKeymap's `Mod-f` binding below.
-  return new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', ctrlKey: true, bubbles: true, cancelable: true });
+  return new KeyboardEvent('keydown', {
+    key: 'f',
+    code: 'KeyF',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
 }
 
 // Spec: specs/005-canvas-conversation-threads. Confirmed design: the single "Start conversation
@@ -28,13 +34,18 @@ function ctrlF(): KeyboardEvent {
 function findView(wrapper: ReturnType<typeof mount>): EditorView {
   const host = wrapper.find('.editor-host').element as HTMLElement;
   const view = EditorView.findFromDOM(host);
-  if (!view) throw new Error('EditorView not found from DOM — component may not have mounted CodeMirror yet');
+  if (!view)
+    throw new Error(
+      'EditorView not found from DOM — component may not have mounted CodeMirror yet',
+    );
   return view;
 }
 
 describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
   it('both buttons are disabled with no selection, and enabled once one is made', async () => {
-    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const wrapper = mount(EditorComponent, {
+      props: { modelValue: 'Hello world, this is a document.' },
+    });
     const branchButton = wrapper.findAll('button.branch-button')[0];
     const seedButton = wrapper.findAll('button.branch-button')[1];
 
@@ -50,7 +61,9 @@ describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
   });
 
   it('"Branch (New)" emits branch-from-selection with includeSeedMessage: false', async () => {
-    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const wrapper = mount(EditorComponent, {
+      props: { modelValue: 'Hello world, this is a document.' },
+    });
     const view = findView(wrapper);
     view.dispatch({ selection: { anchor: 0, head: 5 } });
     await wrapper.vm.$nextTick();
@@ -65,7 +78,9 @@ describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
   });
 
   it('"Branch (Main)" emits branch-from-selection with includeSeedMessage: true', async () => {
-    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const wrapper = mount(EditorComponent, {
+      props: { modelValue: 'Hello world, this is a document.' },
+    });
     const view = findView(wrapper);
     view.dispatch({ selection: { anchor: 0, head: 5 } });
     await wrapper.vm.$nextTick();
@@ -80,7 +95,9 @@ describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
   });
 
   it('clicking either button while disabled (no selection) emits nothing', async () => {
-    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const wrapper = mount(EditorComponent, {
+      props: { modelValue: 'Hello world, this is a document.' },
+    });
 
     await wrapper.findAll('button.branch-button')[0].trigger('click');
     await wrapper.findAll('button.branch-button')[1].trigger('click');
@@ -162,7 +179,9 @@ describe('EditorComponent — Branch buttons at the focus cap', () => {
 // browser would: dispatching a real KeyboardEvent, not calling openSearchPanel directly.
 describe('EditorComponent — Ctrl+F opens the in-editor search panel', () => {
   it('opens the CodeMirror search panel when the event reaches the focused editor', () => {
-    const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world, this is a document.' } });
+    const wrapper = mount(EditorComponent, {
+      props: { modelValue: 'Hello world, this is a document.' },
+    });
     const view = findView(wrapper);
 
     expect(wrapper.find('.cm-search').exists()).toBe(false);

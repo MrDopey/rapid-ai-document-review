@@ -17,7 +17,12 @@ import ConversationView from './ConversationView.vue';
 // at cap) so existing tests that mount this panel directly without them (e.g.
 // MessageBubble.spec.ts) are unaffected.
 const props = withDefaults(
-  defineProps<{ conversationId: string; active: boolean; atFocusCap?: boolean; maxFocused?: number }>(),
+  defineProps<{
+    conversationId: string;
+    active: boolean;
+    atFocusCap?: boolean;
+    maxFocused?: number;
+  }>(),
   { atFocusCap: false, maxFocused: 3 },
 );
 const emit = defineEmits<{
@@ -57,11 +62,14 @@ const dialogEl = ref<HTMLElement | null>(null);
 // right back and undoes the very switch that just happened).
 useFocusTrap(dialogEl, () => props.active, {
   onEscape: () => emit('close'),
-  getPreferredInitialFocus: () => dialogEl.value?.querySelector<HTMLElement>(`#composer-${props.conversationId}`) ?? null,
+  getPreferredInitialFocus: () =>
+    dialogEl.value?.querySelector<HTMLElement>(`#composer-${props.conversationId}`) ?? null,
   restoreFocusOnExit: false,
 });
 
-const name = computed(() => store.conversations.find((c) => c.id === props.conversationId)?.name ?? 'Conversation');
+const name = computed(
+  () => store.conversations.find((c) => c.id === props.conversationId)?.name ?? 'Conversation',
+);
 </script>
 
 <template>
@@ -75,7 +83,14 @@ const name = computed(() => store.conversations.find((c) => c.id === props.conve
       @focusin="emit('interact')"
       @mousedown.capture="emit('interact')"
     >
-      <button type="button" class="close-detail-button" aria-label="Close full view" @click="emit('close')">×</button>
+      <button
+        type="button"
+        class="close-detail-button"
+        aria-label="Close full view"
+        @click="emit('close')"
+      >
+        ×
+      </button>
       <!-- `ConversationView.vue`'s own `select` emit must still reach App.vue — see the `select`
            emit's doc comment above. -->
       <ConversationView

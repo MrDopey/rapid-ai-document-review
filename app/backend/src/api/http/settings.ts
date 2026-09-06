@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { UserSettingsDto, UserSettingsPatch } from '@rapid-ai-document-review/shared/contracts/http';
+import {
+  UserSettingsDto,
+  UserSettingsPatch,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import type { EventHub } from '../../events/event-hub.ts';
 import type { EventService } from '../../events/event-service.ts';
 import { EventPublisher } from '../../events/event-publisher.ts';

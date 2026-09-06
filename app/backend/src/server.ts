@@ -75,7 +75,13 @@ export function buildApp() {
   // as the one per-document write lock every document-mutating path serializes against,
   // `RevisionService.restore` included (see primary-mutex.ts).
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automergeHolder, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automergeHolder,
+    primaryMutex,
+  );
   const documentService = new DocumentService(
     storage,
     eventService,
@@ -101,7 +107,14 @@ export function buildApp() {
   // EditService (requestReplacement) and ConversationService (send) instead of each independently
   // duplicating that construction — see turn-runner.ts's doc comment for why this is a plain
   // collaborator rather than either service depending on the other.
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
 
   // ConflictService never depends on PiService/ConversationService — a conflict discovered
   // synchronously within an active turn (the Primary path) is reported as that same tool call's
@@ -127,7 +140,11 @@ export function buildApp() {
   // Fold-summary delivery and closed-conversation review are separate collaborators, sharing the
   // same storage/piService/publisher primitives ConversationService itself gets injected below.
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,

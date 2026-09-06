@@ -145,7 +145,8 @@ export function useFocusTrap(
       // trapped container" containment check is sufficient: every caller only ever returns an
       // element it just rendered (or null), never a stale/disabled one.
       const preferred = options.getPreferredInitialFocus?.() ?? null;
-      const target = preferred && container.contains(preferred) ? preferred : (focusables[0] ?? container);
+      const target =
+        preferred && container.contains(preferred) ? preferred : (focusables[0] ?? container);
       target.focus();
     });
   }

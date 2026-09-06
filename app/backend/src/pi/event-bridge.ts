@@ -45,7 +45,9 @@ function extractAssistantText(content: RealAgentContentBlock[] | undefined): str
 
 function extractAssistantReasoning(content: RealAgentContentBlock[] | undefined): string | null {
   if (!content) return null;
-  const parts = content.filter((block) => block.type === 'thinking').map((block) => block.thinking ?? '');
+  const parts = content
+    .filter((block) => block.type === 'thinking')
+    .map((block) => block.thinking ?? '');
   return parts.length > 0 ? parts.join('') : null;
 }
 
@@ -349,10 +351,18 @@ export class EventBridge {
       const messageId = this.realAssistantMessageId;
       const ame = event.assistantMessageEvent;
       if (ame.type === 'text_delta') {
-        return { type: 'message_update', messageId, update: { type: 'text_delta', delta: ame.delta ?? '' } };
+        return {
+          type: 'message_update',
+          messageId,
+          update: { type: 'text_delta', delta: ame.delta ?? '' },
+        };
       }
       if (ame.type === 'thinking_delta') {
-        return { type: 'message_update', messageId, update: { type: 'thinking_delta', delta: ame.delta ?? '' } };
+        return {
+          type: 'message_update',
+          messageId,
+          update: { type: 'thinking_delta', delta: ame.delta ?? '' },
+        };
       }
       return null;
     }
@@ -370,7 +380,9 @@ export class EventBridge {
       if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
         return {
           type: 'agent_error',
-          message: event.message.errorMessage ?? `The agent's turn ended without a response (${event.message.stopReason}).`,
+          message:
+            event.message.errorMessage ??
+            `The agent's turn ended without a response (${event.message.stopReason}).`,
         };
       }
       return {
@@ -425,7 +437,12 @@ export class EventBridge {
   }
 
   private publish(frame: ApplicationEvent): void {
-    const persisted = this.eventService.append(this.ctx.documentId, frame.conversationId, frame.type, frame.data);
+    const persisted = this.eventService.append(
+      this.ctx.documentId,
+      frame.conversationId,
+      frame.type,
+      frame.data,
+    );
     this.eventHub.broadcast(this.ctx.documentId, {
       ...frame,
       sequence: persisted.sequence,

@@ -55,14 +55,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -78,7 +98,11 @@ function buildHarness(): Harness {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,
@@ -99,13 +123,27 @@ function buildHarness(): Harness {
     conversationReviewService,
   );
 
-  return { storage, eventService, eventHub, automerge, documentService, piService, concurrencyLimiter, conversationService };
+  return {
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    documentService,
+    piService,
+    concurrencyLimiter,
+    conversationService,
+  };
 }
 
 /** Bypasses `ConversationService.branch()` (no fire-and-forget seed message) — this suite drives
  *  `send()` directly against plain storage-level conversation rows, exactly like
  *  `reconcile.test.ts`'s `createBranchConversation` helper. */
-function createConversation(storage: StorageAdapter, documentId: string, contextRevision: number, name: string): ConversationRow {
+function createConversation(
+  storage: StorageAdapter,
+  documentId: string,
+  contextRevision: number,
+  name: string,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -130,8 +168,15 @@ function createConversation(storage: StorageAdapter, documentId: string, context
 
 /** Same test-only seam `reconcile.test.ts` uses to pre-register a `FakePiSession` per
  *  conversation, so `PiService.getOrCreateSession` never falls through to the real Pi SDK. */
-function registerFakeSession(piService: PiService, conversationId: string, session: FakePiSession): void {
-  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(conversationId, session);
+function registerFakeSession(
+  piService: PiService,
+  conversationId: string,
+  session: FakePiSession,
+): void {
+  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(
+    conversationId,
+    session,
+  );
 }
 
 function flushMicrotasks(): Promise<void> {
@@ -191,7 +236,9 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
     // runs synchronously through `ConcurrencyLimiter.acquire()` before its first internal await
     // (PiService.getOrCreateSession), so submission order is exactly what determines who runs
     // immediately versus who queues, and in what FIFO order (FR-015a).
-    const sendPromises = conversations.map((conv, i) => h.conversationService.send(conv.id, `hello ${i + 1}`));
+    const sendPromises = conversations.map((conv, i) =>
+      h.conversationService.send(conv.id, `hello ${i + 1}`),
+    );
     await flushMicrotasks();
     await flushMicrotasks();
 
@@ -249,7 +296,9 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
     expect(sessions[3]!.prompts).toEqual(['hello 4']);
     expect(sessions[4]!.prompts).toEqual([]);
 
-    const dequeuedEvents = h.storage.listEventsSince(documentId, null).filter((e) => e.eventType === 'agent_dequeued');
+    const dequeuedEvents = h.storage
+      .listEventsSince(documentId, null)
+      .filter((e) => e.eventType === 'agent_dequeued');
     expect(dequeuedEvents).toHaveLength(1);
     expect(dequeuedEvents[0]!.conversationId).toBe(conversations[3]!.id);
 
@@ -300,7 +349,9 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
     expect(statusOf(conversations[4]!.id)).toBe('idle');
     expect(sessions[4]!.prompts).toEqual([]);
 
-    const dequeuedEvents = h.storage.listEventsSince(documentId, null).filter((e) => e.eventType === 'agent_dequeued');
+    const dequeuedEvents = h.storage
+      .listEventsSince(documentId, null)
+      .filter((e) => e.eventType === 'agent_dequeued');
     expect(dequeuedEvents).toHaveLength(1);
     expect(dequeuedEvents[0]!.conversationId).toBe(conversations[3]!.id);
 

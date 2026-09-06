@@ -53,7 +53,9 @@ export function useConversationStatusBadges(
   variant: StatusBadgeVariant = 'full',
 ): ConversationStatusBadges {
   const store = useConversationsStore();
-  const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const conversation = computed(
+    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
+  );
   const isPrimary = computed(() => conversation.value?.isPrimary ?? false);
 
   const badges = computed<StatusBadge[]>(() => {
@@ -93,11 +95,19 @@ export function useConversationStatusBadges(
       list.push({ key: 'archived-main', className: 'archived-main-badge', label: 'Archived Main' });
     }
     if (variant === 'full' && conv.pendingEditCount > 0) {
-      list.push({ key: 'pending', className: 'pending-badge', label: String(conv.pendingEditCount) });
+      list.push({
+        key: 'pending',
+        className: 'pending-badge',
+        label: String(conv.pendingEditCount),
+      });
     }
     const queue = variant === 'full' ? store.queueInfo[conv.id] : undefined;
     if (queue) {
-      list.push({ key: 'queue', className: 'queue-badge', label: `Queued #${queue.queuePosition}` });
+      list.push({
+        key: 'queue',
+        className: 'queue-badge',
+        label: `Queued #${queue.queuePosition}`,
+      });
     }
     return list;
   });

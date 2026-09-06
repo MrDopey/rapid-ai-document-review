@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia';
-import type { UserSettingsDto, UserSettingsPatch } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  UserSettingsDto,
+  UserSettingsPatch,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 
@@ -24,7 +27,8 @@ export const useSettingsStore = defineStore('settings', {
   state: (): SettingsState => ({ settings: null, loaded: false }),
 
   getters: {
-    thinkingVisible: (state): boolean => state.settings?.thinkingVisible ?? DEFAULTS.thinkingVisible,
+    thinkingVisible: (state): boolean =>
+      state.settings?.thinkingVisible ?? DEFAULTS.thinkingVisible,
   },
 
   actions: {
@@ -45,7 +49,8 @@ export const useSettingsStore = defineStore('settings', {
         // (falling back to the same default used elsewhere in this store) rather than dropping it.
         this.settings = {
           ...frame.frame.data,
-          softWordCountThreshold: this.settings?.softWordCountThreshold ?? DEFAULTS.softWordCountThreshold,
+          softWordCountThreshold:
+            this.settings?.softWordCountThreshold ?? DEFAULTS.softWordCountThreshold,
         };
       }
     },

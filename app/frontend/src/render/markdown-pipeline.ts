@@ -16,7 +16,10 @@ function makeMarkdownIt(html: boolean): InstanceType<typeof MarkdownIt> {
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const defaultFenceRenderer: any = instance.renderer.rules.fence ?? ((tokens: any, idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options));
+  const defaultFenceRenderer: any =
+    instance.renderer.rules.fence ??
+    ((tokens: any, idx: number, options: any, _env: any, self: any) =>
+      self.renderToken(tokens, idx, options));
 
   instance.renderer.rules.fence = (tokens, idx, options, env, self) => {
     const token = tokens[idx]!;

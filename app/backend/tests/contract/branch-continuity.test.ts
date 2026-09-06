@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { CreateDocumentResponse, GetConversationResponse } from '@rapid-ai-document-review/shared/contracts/http';
+import {
+  CreateDocumentResponse,
+  GetConversationResponse,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { createTestApp, sleep, waitFor } from './test-app.js';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
 import type { PiService } from '../../src/pi/pi-service.js';
@@ -66,7 +69,11 @@ async function call(
   return { status: res.statusCode, json };
 }
 
-async function createDoc(app: FastifyInstance, storage: StorageAdapter, content: string): Promise<CreateDocumentResponse> {
+async function createDoc(
+  app: FastifyInstance,
+  storage: StorageAdapter,
+  content: string,
+): Promise<CreateDocumentResponse> {
   const res = await call(app, 'POST', '/api/document', { content });
   expect(res.status).toBe(201);
   const parsed = CreateDocumentResponse.parse(res.json);
@@ -77,13 +84,21 @@ async function createDoc(app: FastifyInstance, storage: StorageAdapter, content:
 /** Sends a real user message into `conversationId` and waits for the (fake) agent's reply to
  *  settle, so "the last message shown at the point of branching" is unambiguous — a message this
  *  test itself sent, not merely Main's own creation-time document-seed message. */
-async function sendAndSettle(app: FastifyInstance, storage: StorageAdapter, conversationId: string, message: string): Promise<void> {
+async function sendAndSettle(
+  app: FastifyInstance,
+  storage: StorageAdapter,
+  conversationId: string,
+  message: string,
+): Promise<void> {
   const res = await call(app, 'POST', `/api/conversations/${conversationId}/send`, { message });
   expect(res.status).toBe(202);
   await waitFor(() => storage.getConversation(conversationId)?.status === 'idle');
 }
 
-async function getDetail(app: FastifyInstance, conversationId: string): Promise<GetConversationResponse> {
+async function getDetail(
+  app: FastifyInstance,
+  conversationId: string,
+): Promise<GetConversationResponse> {
   const res = await call(app, 'GET', `/api/conversations/${conversationId}`);
   expect(res.status).toBe(200);
   return GetConversationResponse.parse(res.json);
@@ -113,7 +128,9 @@ describe('Branch creation: message-level fork anchor (forkedFromMessageId)', () 
     const lastParentMessageId = mainDetailBeforeBranch.messages.at(-1)?.id;
     expect(lastParentMessageId).toBeTruthy();
 
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+    });
     expect(branchRes.status).toBe(201);
     const branchDto = branchRes.json as ConversationDtoWithFork;
 
@@ -179,7 +196,8 @@ describe('Branch creation: seed message content per path', () => {
   });
 
   it('"Branch (New)" seeds the branch with BOTH the full document and the highlighted selection, XML-wrapped', async () => {
-    const content = '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
+    const content =
+      '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
 
@@ -212,7 +230,8 @@ describe('Branch creation: seed message content per path', () => {
   });
 
   it('"Branch (Main)" seeds the branch with ONLY the highlighted selection — no full document', async () => {
-    const content = '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
+    const content =
+      '# Doc\n\nHighlight this passage please, it matters.\n\nSome trailing content, unrelated.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
 
@@ -246,7 +265,9 @@ describe('Branch creation: seed message content per path', () => {
     const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
     const mainId = created.mainConversation.id;
 
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+    });
     const branchId = (branchRes.json as { id: string }).id;
 
     await sleep(200);
@@ -257,7 +278,7 @@ describe('Branch creation: seed message content per path', () => {
   });
 });
 
-describe('Branch creation: the seed message reaches the underlying Pi session\'s own context, not just the app event log', () => {
+describe("Branch creation: the seed message reaches the underlying Pi session's own context, not just the app event log", () => {
   let ctx: Ctx;
 
   beforeEach(async () => {
@@ -268,10 +289,14 @@ describe('Branch creation: the seed message reaches the underlying Pi session\'s
    *  at least one seeded entry — the seed is delivered by `ConversationService.send()`'s `isSeed`
    *  branch awaiting `piService.seedSession(...)`, but `branch()`/`sendBranchSeedMessage` itself
    *  is fire-and-forget, so the branch's own HTTP response can return before that completes. */
-  async function waitForSeededSession(piService: PiService, conversationId: string): Promise<FakeAgentSession> {
+  async function waitForSeededSession(
+    piService: PiService,
+    conversationId: string,
+  ): Promise<FakeAgentSession> {
     await waitFor(
       () => {
-        const session = piService.getSessionForTesting(conversationId) as FakeAgentSession | undefined;
+        const session = piService.getSessionForTesting(conversationId) as
+          FakeAgentSession | undefined;
         return (session?.getSeededHistory().length ?? 0) > 0;
       },
       { message: `expected a seeded Pi session for conversation ${conversationId}` },
@@ -345,7 +370,9 @@ describe('Branch creation: the seed message reaches the underlying Pi session\'s
     const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
     const mainId = created.mainConversation.id;
 
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+    });
     expect(branchRes.status).toBe(201);
     const branchId = (branchRes.json as { id: string }).id;
 
@@ -355,7 +382,7 @@ describe('Branch creation: the seed message reaches the underlying Pi session\'s
     expect(ctx.piService.getSessionForTesting(branchId)).toBeUndefined();
   });
 
-  it('the branch\'s own real turn still works normally once the user replies, reusing the exact session the seed already created', async () => {
+  it("the branch's own real turn still works normally once the user replies, reusing the exact session the seed already created", async () => {
     const content = '# Doc\n\nHighlight this passage please, it matters.';
     const created = await createDoc(ctx.app, ctx.storage, content);
     const mainId = created.mainConversation.id;
@@ -461,7 +488,9 @@ describe('Empty-branch auto-discard: an auto-sent seed message does not count as
     const created = await createDoc(ctx.app, ctx.storage, '# Doc\n\nSome content to review.');
     const mainId = created.mainConversation.id;
 
-    const branchRes = await call(ctx.app, 'POST', '/api/conversations', { parentConversationId: mainId });
+    const branchRes = await call(ctx.app, 'POST', '/api/conversations', {
+      parentConversationId: mainId,
+    });
     const branchId = (branchRes.json as { id: string }).id;
 
     const discardRes = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);

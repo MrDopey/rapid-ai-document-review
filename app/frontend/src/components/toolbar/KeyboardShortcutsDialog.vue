@@ -18,7 +18,7 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 // from a11y/keymap-registry.ts (the single source of truth for every shortcut) rather than
 // re-deriving the list here.
 const groups = computed(() => {
-  const byScope = new Map<string, typeof KEYBOARD_SHORTCUTS[number][]>();
+  const byScope = new Map<string, (typeof KEYBOARD_SHORTCUTS)[number][]>();
   for (const shortcut of KEYBOARD_SHORTCUTS) {
     const list = byScope.get(shortcut.scope);
     if (list) {

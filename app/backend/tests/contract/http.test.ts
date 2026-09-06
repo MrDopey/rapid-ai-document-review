@@ -46,7 +46,10 @@ import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
 
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 
-function proposeDirective(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeDirective(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return PROPOSE_EDIT_DIRECTIVE + JSON.stringify({ summary, operations });
 }
 
@@ -68,7 +71,12 @@ async function call(
   } catch {
     json = undefined;
   }
-  return { status: res.statusCode, json, text: res.body, headers: res.headers as Record<string, unknown> };
+  return {
+    status: res.statusCode,
+    json,
+    text: res.body,
+    headers: res.headers as Record<string, unknown>,
+  };
 }
 
 const DOC_WITH_HEADING = [
@@ -164,13 +172,18 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('defaults the title to "Untitled" when there is no H1 heading and none is given (FR-001a)', async () => {
-      const res = await call(ctx.app, 'POST', '/api/document', { content: 'Just a paragraph, no heading at all.' });
+      const res = await call(ctx.app, 'POST', '/api/document', {
+        content: 'Just a paragraph, no heading at all.',
+      });
       const parsed = CreateDocumentResponse.parse(res.json);
       expect(parsed.document.title).toBe('Untitled');
     });
 
     it('honors an explicit title over the derived one', async () => {
-      const res = await call(ctx.app, 'POST', '/api/document', { title: 'Explicit', content: DOC_WITH_HEADING });
+      const res = await call(ctx.app, 'POST', '/api/document', {
+        title: 'Explicit',
+        content: DOC_WITH_HEADING,
+      });
       const parsed = CreateDocumentResponse.parse(res.json);
       expect(parsed.document.title).toBe('Explicit');
     });
@@ -244,7 +257,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('404 DOCUMENT_NOT_FOUND before creation', async () => {
-      const res = await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 0, insert: 'x' }] });
+      const res = await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [{ from: 0, to: 0, insert: 'x' }],
+      });
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('DOCUMENT_NOT_FOUND');
     });
@@ -261,7 +276,11 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
     it('exports a specific revision by number', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'GET', `/api/document/export?revision=${created.document.currentRevision}`);
+      const res = await call(
+        ctx.app,
+        'GET',
+        `/api/document/export?revision=${created.document.currentRevision}`,
+      );
       expect(res.status).toBe(200);
       expect(res.text).toBe(DOC_WITH_HEADING);
     });
@@ -311,7 +330,12 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const created = await createDoc(ctx.app, ctx.storage);
       const totalRestores = 55;
       for (let i = 0; i < totalRestores; i += 1) {
-        const res = await call(ctx.app, 'POST', `/api/revisions/${created.document.currentRevision}/restore`, {});
+        const res = await call(
+          ctx.app,
+          'POST',
+          `/api/revisions/${created.document.currentRevision}/restore`,
+          {},
+        );
         expect(res.status).toBe(200);
       }
       // 1 (creation) + 55 (restores) = 56 revisions total.
@@ -319,7 +343,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       let cursor: string | null = null;
       let pages = 0;
       do {
-        const url: string = cursor ? `/api/revisions?limit=20&cursor=${encodeURIComponent(cursor)}` : '/api/revisions?limit=20';
+        const url: string = cursor
+          ? `/api/revisions?limit=20&cursor=${encodeURIComponent(cursor)}`
+          : '/api/revisions?limit=20';
         const res = await call(ctx.app, 'GET', url);
         expect(res.status).toBe(200);
         const parsed = ListRevisionsResponse.parse(res.json);
@@ -354,7 +380,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
       // agent-attributed revision (conversationId = mainId) rather than a pending proposal.
       const edits = [
         { old_string: 'The opening paragraph anchors everything else.', new_string: 'Edit one.' },
-        { old_string: 'A second paragraph stays constant across scenarios.', new_string: 'Edit two.' },
+        {
+          old_string: 'A second paragraph stays constant across scenarios.',
+          new_string: 'Edit two.',
+        },
         { old_string: 'Edit one.', new_string: 'Edit three.' },
       ];
       let currentRevision = created.document.currentRevision;
@@ -396,7 +425,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('POST /api/revisions/:revision/restore', () => {
     it('restores as a new forward revision and validates the response shape', async () => {
       await createDoc(ctx.app, ctx.storage);
-      await call(ctx.app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 1, insert: '##' }] });
+      await call(ctx.app, 'PATCH', '/api/document', {
+        changes: [{ from: 0, to: 1, insert: '##' }],
+      });
       const restoreRes = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
       expect(restoreRes.status).toBe(200);
       const parsed = RestoreRevisionResponse.parse(restoreRes.json);
@@ -415,7 +446,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
         message: proposeDirective('Anchor tweak', [
-          { old_string: 'The opening paragraph anchors everything else.', new_string: 'The opening paragraph now reads differently.' },
+          {
+            old_string: 'The opening paragraph anchors everything else.',
+            new_string: 'The opening paragraph now reads differently.',
+          },
         ]),
       });
       await waitFor(() => {
@@ -428,7 +462,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       // intact — reconcilable: true — since nothing has changed the document since it was staged.
       const restoreRes = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
       const parsed = RestoreRevisionResponse.parse(restoreRes.json);
-      expect(parsed.pendingProposalReconciliation).toEqual([{ stagedEditId: editId, reconcilable: true }]);
+      expect(parsed.pendingProposalReconciliation).toEqual([
+        { stagedEditId: editId, reconcilable: true },
+      ]);
 
       // Read-only: the proposal is still pending after the dry run.
       expect(ctx.storage.getStagedEdit(editId)?.status).toBe('pending');
@@ -454,11 +490,13 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const created = await createDoc(ctx.app, ctx.storage);
       const main = created.mainConversation;
       const bRes = await branchAndSettle(ctx.app, ctx.storage, main.id);
-      const branchConv = (bRes.json as { id: string; branchDepth: number });
+      const branchConv = bRes.json as { id: string; branchDepth: number };
 
       // Baseline: fresh branch — not stale, can edit (depth 1 <= default max 2), can branch
       // (depth 1 < default max 3), no pending edits.
-      let list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      let list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       let b = list.conversations.find((c) => c.id === branchConv.id)!;
       expect(b.isStale).toBe(false);
       expect(b.canEdit).toBe(true);
@@ -467,7 +505,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       // Stage two proposals on the branch -> pendingEditCount 2.
       for (const [oldStr, newStr] of [
-        ['The opening paragraph anchors everything else.', 'The opening paragraph now anchors everything else.'],
+        [
+          'The opening paragraph anchors everything else.',
+          'The opening paragraph now anchors everything else.',
+        ],
         ['Trailing unique tail xyz123.', 'Trailing unique tail xyz999.'],
       ]) {
         // One turn per conversation at a time (FakeAgentSession throws "already streaming"
@@ -478,7 +519,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         await waitFor(() => ctx.storage.getConversation(branchConv.id)?.status === 'idle');
       }
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchConv.id).length === 2);
-      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       b = list.conversations.find((c) => c.id === branchConv.id)!;
       expect(b.pendingEditCount).toBe(2);
 
@@ -489,7 +532,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const restore = await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
       expect(RestoreRevisionResponse.parse(restore.json).currentRevision).toBeGreaterThan(1);
 
-      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       b = list.conversations.find((c) => c.id === branchConv.id)!;
       expect(b.isStale).toBe(true);
       expect(b.pendingEditCount).toBe(2); // unaffected by the restore
@@ -497,7 +542,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       // FR-032c: superseding one of the two pending edits (conflict) excludes it from the count.
       const edits = ctx.storage.listStagedEditsByConversation(branchConv.id);
       const target = edits.find((e) => e.summary === 'tweak')!;
-      const applyRes = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${target.id}/apply`, {})).json);
+      const applyRes = ApplyEditResponse.parse(
+        (await call(ctx.app, 'POST', `/api/edits/${target.id}/apply`, {})).json,
+      );
       // The restore above reset content back to revision 1's text, so both anchors are intact —
       // this specific apply should actually be a conflict only if the anchor moved; to
       // deterministically exercise FR-032c here we conflict it directly via a manual edit first.
@@ -506,7 +553,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         // conflict deliberately instead of relying on incidental drift.
         return;
       }
-      list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       b = list.conversations.find((c) => c.id === branchConv.id)!;
       expect(b.pendingEditCount).toBe(1);
     });
@@ -520,7 +569,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         expect(res.status).toBe(201);
         lastId = (res.json as { id: string }).id;
       }
-      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       const deepest = list.conversations.find((c) => c.id === lastId)!;
       expect(deepest.branchDepth).toBe(3);
       expect(deepest.canBranch).toBe(false);
@@ -599,9 +650,15 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const created = await createDoc(ctx.app, ctx.storage);
       const selection = { from: 0, to: DOC_WITH_HEADING.indexOf('\n') };
 
-      const first = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
-      const second = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
-      const third = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
+      const first = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, {
+        selection,
+      });
+      const second = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, {
+        selection,
+      });
+      const third = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, {
+        selection,
+      });
 
       const firstName = (first.json as { name: string }).name;
       expect((second.json as { name: string }).name).toBe(`${firstName} (2)`);
@@ -625,10 +682,15 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       const res = await call(ctx.app, 'DELETE', `/api/conversations/${branchId}`);
       expect(res.status).toBe(200);
-      expect(DiscardConversationResponse.parse(res.json)).toEqual({ conversationId: branchId, discarded: true });
+      expect(DiscardConversationResponse.parse(res.json)).toEqual({
+        conversationId: branchId,
+        discarded: true,
+      });
       expect(ctx.storage.getConversation(branchId)).toBeNull();
 
-      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       expect(list.conversations.some((c) => c.id === branchId)).toBe(false);
     });
 
@@ -653,7 +715,11 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
     it('409 CONVERSATION_NOT_EMPTY for Main (never a branch, even with zero messages)', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'DELETE', `/api/conversations/${created.mainConversation.id}`);
+      const res = await call(
+        ctx.app,
+        'DELETE',
+        `/api/conversations/${created.mainConversation.id}`,
+      );
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_EMPTY');
     });
@@ -699,9 +765,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('PATCH /api/conversations/:id (rename)', () => {
     it('renames and validates the response shape', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
-        name: 'Renamed conversation',
-      });
+      const res = await call(
+        ctx.app,
+        'PATCH',
+        `/api/conversations/${created.mainConversation.id}`,
+        {
+          name: 'Renamed conversation',
+        },
+      );
       expect(res.status).toBe(200);
       const parsed = ConversationDto.parse(res.json);
       expect(parsed.name).toBe('Renamed conversation');
@@ -711,34 +782,53 @@ describe('Contract: HTTP API (http-api.md)', () => {
         (await call(ctx.app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
       );
       expect(refetched.conversation.name).toBe('Renamed conversation');
-      expect(ctx.storage.getConversation(created.mainConversation.id)?.name).toBe('Renamed conversation');
+      expect(ctx.storage.getConversation(created.mainConversation.id)?.name).toBe(
+        'Renamed conversation',
+      );
     });
 
     it('trims surrounding whitespace before saving', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
-        name: '  Spacey Name  ',
-      });
+      const res = await call(
+        ctx.app,
+        'PATCH',
+        `/api/conversations/${created.mainConversation.id}`,
+        {
+          name: '  Spacey Name  ',
+        },
+      );
       expect(res.status).toBe(200);
       expect(ConversationDto.parse(res.json).name).toBe('Spacey Name');
     });
 
     it('400 VALIDATION_FAILED for an empty (or whitespace-only) name', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const emptyRes = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, { name: '' });
+      const emptyRes = await call(
+        ctx.app,
+        'PATCH',
+        `/api/conversations/${created.mainConversation.id}`,
+        { name: '' },
+      );
       expect(emptyRes.status).toBe(400);
       expect(ErrorEnvelope.parse(emptyRes.json).error.code).toBe('VALIDATION_FAILED');
 
-      const whitespaceRes = await call(ctx.app, 'PATCH', `/api/conversations/${created.mainConversation.id}`, {
-        name: '   ',
-      });
+      const whitespaceRes = await call(
+        ctx.app,
+        'PATCH',
+        `/api/conversations/${created.mainConversation.id}`,
+        {
+          name: '   ',
+        },
+      );
       expect(whitespaceRes.status).toBe(400);
       expect(ErrorEnvelope.parse(whitespaceRes.json).error.code).toBe('VALIDATION_FAILED');
     });
 
     it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
       await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'PATCH', '/api/conversations/conv_nope', { name: 'New name' });
+      const res = await call(ctx.app, 'PATCH', '/api/conversations/conv_nope', {
+        name: 'New name',
+      });
       expect(res.status).toBe(404);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
     });
@@ -749,7 +839,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
 
-      const res = await call(ctx.app, 'PATCH', `/api/conversations/${branchId}`, { name: 'Renamed after close' });
+      const res = await call(ctx.app, 'PATCH', `/api/conversations/${branchId}`, {
+        name: 'Renamed after close',
+      });
       expect(res.status).toBe(200);
       expect(ConversationDto.parse(res.json).name).toBe('Renamed after close');
     });
@@ -758,9 +850,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('POST /api/conversations/:id/send', () => {
     it('202 accepted, not queued, with contextRevision', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-        message: 'Hello there',
-      });
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/send`,
+        {
+          message: 'Hello there',
+        },
+      );
       expect(res.status).toBe(202);
       const parsed = SendMessageResponse.parse(res.json);
       expect(parsed.accepted).toBe(true);
@@ -769,7 +866,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
     it('404 CONVERSATION_NOT_FOUND for an unknown id', async () => {
       await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', '/api/conversations/conv_nope/send', { message: 'hi' });
+      const res = await call(ctx.app, 'POST', '/api/conversations/conv_nope/send', {
+        message: 'hi',
+      });
       expect(res.status).toBe(404);
     });
 
@@ -778,14 +877,21 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/close`, {});
-      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, { message: 'hi' });
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: 'hi',
+      });
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_CLOSED');
     });
 
     it('400 VALIDATION_FAILED for an empty message', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, { message: '' });
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/send`,
+        { message: '' },
+      );
       expect(res.status).toBe(400);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
     });
@@ -800,7 +906,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       // Advance the document so the branch is stale.
       await call(ctx.app, 'POST', '/api/revisions/1/restore', {});
 
-      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/refresh-send`, { message: 'refresh please' });
+      const res = await call(ctx.app, 'POST', `/api/conversations/${branchId}/refresh-send`, {
+        message: 'refresh please',
+      });
       expect(res.status).toBe(202);
       const parsed = RefreshSendResponse.parse(res.json);
       expect(parsed.previousContextRevision).toBe(1);
@@ -816,7 +924,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         const res = await branchAndSettle(ctx.app, ctx.storage, lastId);
         lastId = (res.json as { id: string }).id;
       }
-      const res = await call(ctx.app, 'POST', `/api/conversations/${lastId}/refresh-send`, { message: 'go' });
+      const res = await call(ctx.app, 'POST', `/api/conversations/${lastId}/refresh-send`, {
+        message: 'go',
+      });
       expect(res.status).toBe(409);
       const err = ErrorEnvelope.parse(res.json);
       expect(err.error.code).toBe('MAX_EDITING_DEPTH_EXCEEDED');
@@ -827,7 +937,12 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('POST /api/conversations/:id/retry', () => {
     it('409 CONVERSATION_NOT_ERRORED on a conversation that is not currently errored', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/retry`, {});
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/retry`,
+        {},
+      );
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_ERRORED');
     });
@@ -868,7 +983,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
         message: proposeDirective('pending change', [
-          { old_string: 'Trailing unique tail xyz123.', new_string: 'Trailing unique tail changed.' },
+          {
+            old_string: 'Trailing unique tail xyz123.',
+            new_string: 'Trailing unique tail changed.',
+          },
         ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
@@ -895,7 +1013,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const parsed = CloseConversationResponse.parse(res.json);
       expect(parsed.status).toBe('closed');
 
-      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       const archivedMain = list.conversations.find((c) => c.id === oldMainId)!;
       expect(archivedMain.isCurrentMain).toBe(false);
 
@@ -916,7 +1036,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
       await call(ctx.app, 'DELETE', `/api/conversations/${mainId}/primary`, undefined);
       await call(ctx.app, 'POST', `/api/conversations/${mainId}/send`, {
         message: proposeDirective('pending main change', [
-          { old_string: 'Trailing unique tail xyz123.', new_string: 'Trailing unique tail changed.' },
+          {
+            old_string: 'Trailing unique tail xyz123.',
+            new_string: 'Trailing unique tail changed.',
+          },
         ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(mainId).length === 1);
@@ -952,14 +1075,18 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       const firstClose = await call(ctx.app, 'POST', `/api/conversations/${oldMainId}/close`, {});
       expect(firstClose.status).toBe(200);
-      const listAfterFirst = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const listAfterFirst = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       const countAfterFirst = listAfterFirst.conversations.length;
 
       const secondClose = await call(ctx.app, 'POST', `/api/conversations/${oldMainId}/close`, {});
       expect(secondClose.status).toBe(200);
       expect(CloseConversationResponse.parse(secondClose.json).status).toBe('closed');
 
-      const listAfterSecond = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const listAfterSecond = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       expect(listAfterSecond.conversations).toHaveLength(countAfterFirst);
     });
   });
@@ -972,23 +1099,36 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const created = await createDoc(ctx.app, ctx.storage);
       expect(created.mainConversation.isPrimary).toBe(true);
 
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/close`, {});
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/close`,
+        {},
+      );
       expect(res.status).toBe(200);
 
-      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       expect(list.conversations.every((c) => c.isPrimary === false)).toBe(true);
 
-      const newMain = list.conversations.find((c) => c.kind === 'main' && c.isCurrentMain === true)!;
+      const newMain = list.conversations.find(
+        (c) => c.kind === 'main' && c.isCurrentMain === true,
+      )!;
       expect(newMain).toBeDefined();
       expect(newMain.isPrimary).toBe(false);
     });
   });
 
-
   describe('POST /api/conversations/:id/review', () => {
     it('409 CONVERSATION_NOT_CLOSED when the target is not closed', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/review`, {});
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/review`,
+        {},
+      );
       expect(res.status).toBe(409);
       expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_CLOSED');
     });
@@ -1012,7 +1152,12 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('POST /api/conversations/:id/primary', () => {
     it('applied:"already_primary" as a no-op on the conversation already Primary', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/primary`, {});
+      const res = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/primary`,
+        {},
+      );
       expect(res.status).toBe(200);
       const parsed = DesignatePrimaryResponse.parse(res.json);
       expect(parsed.applied).toBe('already_primary');
@@ -1041,9 +1186,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       // Kick off a run on Main (currently Primary) and, without waiting for it to settle,
       // immediately attempt to switch Primary to the branch.
-      const sendRes = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-        message: 'a message that will take a little while to answer',
-      });
+      const sendRes = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${created.mainConversation.id}/send`,
+        {
+          message: 'a message that will take a little while to answer',
+        },
+      );
       expect(sendRes.status).toBe(202);
       expect(ctx.storage.getConversation(created.mainConversation.id)?.status).toBe('working');
 
@@ -1053,7 +1203,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(err.error.code).toBe('PRIMARY_TARGET_BUSY');
       expect(err.error.details?.busyConversationId).toBe(created.mainConversation.id);
 
-      await waitFor(() => ctx.storage.getConversation(created.mainConversation.id)?.status === 'idle');
+      await waitFor(
+        () => ctx.storage.getConversation(created.mainConversation.id)?.status === 'idle',
+      );
     });
 
     it('409 CONVERSATION_CLOSED for a closed target', async () => {
@@ -1070,13 +1222,20 @@ describe('Contract: HTTP API (http-api.md)', () => {
   describe('DELETE /api/conversations/:id/primary', () => {
     it('clears the designation and no conversation is implicitly reassigned Primary (FR-027a)', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'DELETE', `/api/conversations/${created.mainConversation.id}/primary`, undefined);
+      const res = await call(
+        ctx.app,
+        'DELETE',
+        `/api/conversations/${created.mainConversation.id}/primary`,
+        undefined,
+      );
       expect(res.status).toBe(200);
       const parsed = ClearPrimaryResponse.parse(res.json);
       expect(parsed.primaryConversationId).toBeNull();
       expect(parsed.previousPrimaryId).toBe(created.mainConversation.id);
 
-      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const list = ListConversationsResponse.parse(
+        (await call(ctx.app, 'GET', '/api/conversations')).json,
+      );
       expect(list.conversations.every((c) => c.isPrimary === false)).toBe(true);
     });
   });
@@ -1097,7 +1256,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
     }
 
     it('outcome: applied (clean)', async () => {
-      const { editId } = await setupBranchWithProposal('Trailing unique tail xyz123.', 'Trailing unique tail replaced.');
+      const { editId } = await setupBranchWithProposal(
+        'Trailing unique tail xyz123.',
+        'Trailing unique tail replaced.',
+      );
       const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
       expect(res.status).toBe(200);
       const parsed = ApplyEditResponse.parse(res.json);
@@ -1108,9 +1270,16 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
 
     it('outcome: applied again (idempotent replay, FR-040)', async () => {
-      const { editId } = await setupBranchWithProposal('Trailing unique tail xyz123.', 'Trailing unique tail replaced.');
-      const first = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json);
-      const second = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json);
+      const { editId } = await setupBranchWithProposal(
+        'Trailing unique tail xyz123.',
+        'Trailing unique tail replaced.',
+      );
+      const first = ApplyEditResponse.parse(
+        (await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json,
+      );
+      const second = ApplyEditResponse.parse(
+        (await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {})).json,
+      );
       expect(second.outcome).toBe('applied');
       if (first.outcome === 'applied' && second.outcome === 'applied') {
         expect(second.revision).toBe(first.revision);
@@ -1124,7 +1293,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       );
       // Break the anchor before applying.
       await call(ctx.app, 'PATCH', '/api/document', {
-        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' }],
+        changes: [
+          { from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' },
+        ],
       });
       const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
       expect(res.status).toBe(200);
@@ -1148,7 +1319,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         'The opening paragraph now reads differently.',
       );
       await call(ctx.app, 'PATCH', '/api/document', {
-        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' }],
+        changes: [
+          { from: 0, to: DOC_WITH_HEADING.length, insert: 'Completely different content now.' },
+        ],
       });
       const res = await call(ctx.app, 'POST', `/api/edits/${editId}/apply`, {});
       expect(res.status).toBe(200);
@@ -1169,7 +1342,10 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
         message: proposeDirective('first attempt', [
-          { old_string: 'The opening paragraph anchors everything else.', new_string: 'Revision A of the paragraph.' },
+          {
+            old_string: 'The opening paragraph anchors everything else.',
+            new_string: 'Revision A of the paragraph.',
+          },
         ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
@@ -1181,9 +1357,20 @@ describe('Contract: HTTP API (http-api.md)', () => {
 
       // Break edit1's anchor.
       await call(ctx.app, 'PATCH', '/api/document', {
-        changes: [{ from: 0, to: DOC_WITH_HEADING.length, insert: DOC_WITH_HEADING.replace('The opening paragraph anchors everything else.', 'Rev A of the drifting phrase.') }],
+        changes: [
+          {
+            from: 0,
+            to: DOC_WITH_HEADING.length,
+            insert: DOC_WITH_HEADING.replace(
+              'The opening paragraph anchors everything else.',
+              'Rev A of the drifting phrase.',
+            ),
+          },
+        ],
       });
-      const conflict1 = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${edit1.id}/apply`, {})).json);
+      const conflict1 = ApplyEditResponse.parse(
+        (await call(ctx.app, 'POST', `/api/edits/${edit1.id}/apply`, {})).json,
+      );
       expect(conflict1.outcome).toBe('conflict');
       if (conflict1.outcome !== 'conflict') throw new Error('unreachable');
       expect(conflict1.replacementRequested).toBe(true);
@@ -1198,11 +1385,20 @@ describe('Contract: HTTP API (http-api.md)', () => {
       // (agent-tools.md §Conflict recovery: the agent never supplies supersedes_id itself).
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
         message: proposeDirective('replacement', [
-          { old_string: 'Rev A of the drifting phrase.', new_string: 'Rev B of the drifting phrase.' },
+          {
+            old_string: 'Rev A of the drifting phrase.',
+            new_string: 'Rev B of the drifting phrase.',
+          },
         ]),
       });
-      await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).some((e) => e.supersedesId === edit1.id));
-      const edit2 = ctx.storage.listStagedEditsByConversation(branchId).find((e) => e.supersedesId === edit1.id)!;
+      await waitFor(() =>
+        ctx.storage
+          .listStagedEditsByConversation(branchId)
+          .some((e) => e.supersedesId === edit1.id),
+      );
+      const edit2 = ctx.storage
+        .listStagedEditsByConversation(branchId)
+        .find((e) => e.supersedesId === edit1.id)!;
 
       // Break edit2's anchor too — the budget (1) is now spent for this chain.
       await call(ctx.app, 'PATCH', '/api/document', {
@@ -1210,12 +1406,17 @@ describe('Contract: HTTP API (http-api.md)', () => {
           {
             from: 0,
             to: DOC_WITH_HEADING.length,
-            insert: DOC_WITH_HEADING.replace('The opening paragraph anchors everything else.', 'Rev A2 of the drifting phrase.'),
+            insert: DOC_WITH_HEADING.replace(
+              'The opening paragraph anchors everything else.',
+              'Rev A2 of the drifting phrase.',
+            ),
           },
         ],
       });
       const contentBefore = ctx.storage.getDocument();
-      const conflict2 = ApplyEditResponse.parse((await call(ctx.app, 'POST', `/api/edits/${edit2.id}/apply`, {})).json);
+      const conflict2 = ApplyEditResponse.parse(
+        (await call(ctx.app, 'POST', `/api/edits/${edit2.id}/apply`, {})).json,
+      );
       expect(conflict2.outcome).toBe('conflict_exhausted');
       if (conflict2.outcome !== 'conflict_exhausted') throw new Error('unreachable');
       expect(conflict2.replacementRequested).toBe(false);
@@ -1238,7 +1439,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
-        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Something else.' }]),
+        message: proposeDirective('x', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'Something else.' },
+        ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
       const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
@@ -1257,7 +1460,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
-        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Preview target text.' }]),
+        message: proposeDirective('x', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'Preview target text.' },
+        ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
       const editId = ctx.storage.listStagedEditsByConversation(branchId)[0]!.id;
@@ -1275,11 +1480,18 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
-        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'Accepted text.' }]),
+        message: proposeDirective('x', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'Accepted text.' },
+        ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
 
-      const acceptRes = await call(ctx.app, 'POST', `/api/conversations/${branchId}/edits/accept-remaining`, {});
+      const acceptRes = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${branchId}/edits/accept-remaining`,
+        {},
+      );
       expect(acceptRes.status).toBe(200);
       const accepted = AcceptRemainingResponse.parse(acceptRes.json);
       expect(accepted.results).toHaveLength(1);
@@ -1289,10 +1501,20 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b2 = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branch2Id = (b2.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branch2Id}/send`, {
-        message: proposeDirective('y', [{ old_string: 'A second paragraph stays constant across scenarios.', new_string: 'Dropped text.' }]),
+        message: proposeDirective('y', [
+          {
+            old_string: 'A second paragraph stays constant across scenarios.',
+            new_string: 'Dropped text.',
+          },
+        ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branch2Id).length === 1);
-      const dropRes = await call(ctx.app, 'POST', `/api/conversations/${branch2Id}/edits/drop-remaining`, {});
+      const dropRes = await call(
+        ctx.app,
+        'POST',
+        `/api/conversations/${branch2Id}/edits/drop-remaining`,
+        {},
+      );
       expect(dropRes.status).toBe(200);
       const dropped = DropRemainingResponse.parse(dropRes.json);
       expect(dropped.droppedEditIds).toHaveLength(1);
@@ -1305,7 +1527,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
       await call(ctx.app, 'POST', `/api/conversations/${branchId}/send`, {
-        message: proposeDirective('x', [{ old_string: 'Trailing unique tail xyz123.', new_string: 'y' }]),
+        message: proposeDirective('x', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'y' },
+        ]),
       });
       await waitFor(() => ctx.storage.listStagedEditsByConversation(branchId).length === 1);
       const res = await call(ctx.app, 'GET', `/api/conversations/${branchId}/edits`);
@@ -1385,7 +1609,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         const getRes = await call(ctx.app, 'GET', '/api/settings');
         expect(UserSettingsDto.parse(getRes.json).softWordCountThreshold).toBe(20_000);
 
-        const patchRes = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 5_000 });
+        const patchRes = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: 5_000,
+        });
         expect(patchRes.status).toBe(200);
         expect(UserSettingsDto.parse(patchRes.json).softWordCountThreshold).toBe(5_000);
 
@@ -1397,17 +1623,23 @@ describe('Contract: HTTP API (http-api.md)', () => {
       });
 
       it('accepts the floor (1,000) and large values with no fixed upper bound', async () => {
-        const atFloor = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_000 });
+        const atFloor = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: 1_000,
+        });
         expect(atFloor.status).toBe(200);
         expect(UserSettingsDto.parse(atFloor.json).softWordCountThreshold).toBe(1_000);
 
-        const large = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_000_000 });
+        const large = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: 1_000_000,
+        });
         expect(large.status).toBe(200);
         expect(UserSettingsDto.parse(large.json).softWordCountThreshold).toBe(1_000_000);
       });
 
       it('rejects a value below the floor, and rejects non-positive values', async () => {
-        const belowFloor = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 999 });
+        const belowFloor = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: 999,
+        });
         expect(belowFloor.status).toBe(400);
         expect(ErrorEnvelope.parse(belowFloor.json).error.code).toBe('VALIDATION_FAILED');
 
@@ -1415,13 +1647,17 @@ describe('Contract: HTTP API (http-api.md)', () => {
         expect(zero.status).toBe(400);
         expect(ErrorEnvelope.parse(zero.json).error.code).toBe('VALIDATION_FAILED');
 
-        const negative = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: -1 });
+        const negative = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: -1,
+        });
         expect(negative.status).toBe(400);
         expect(ErrorEnvelope.parse(negative.json).error.code).toBe('VALIDATION_FAILED');
       });
 
       it('rejects a non-integer value', async () => {
-        const res = await call(ctx.app, 'PATCH', '/api/settings', { softWordCountThreshold: 1_500.5 });
+        const res = await call(ctx.app, 'PATCH', '/api/settings', {
+          softWordCountThreshold: 1_500.5,
+        });
         expect(res.status).toBe(400);
         expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
       });

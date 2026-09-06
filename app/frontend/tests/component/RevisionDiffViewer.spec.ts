@@ -33,11 +33,13 @@ describe('RevisionDiffViewer', () => {
     const previousText = 'Line one\nLine two\nLine three\n';
     const currentText = 'Line one\nLine two updated\nLine three\nLine four\n';
 
-    const exportSpy = vi.spyOn(store, 'exportRevision').mockImplementation(async (revision?: number) => {
-      if (revision === 1) return previousText;
-      if (revision === 2) return currentText;
-      throw new Error(`unexpected revision requested: ${revision}`);
-    });
+    const exportSpy = vi
+      .spyOn(store, 'exportRevision')
+      .mockImplementation(async (revision?: number) => {
+        if (revision === 1) return previousText;
+        if (revision === 2) return currentText;
+        throw new Error(`unexpected revision requested: ${revision}`);
+      });
 
     const wrapper = mountViewer(pinia, 2, 1);
     await flushPromises();
@@ -198,7 +200,9 @@ describe('RevisionDiffViewer', () => {
     await flushPromises();
 
     expect(freshWrapper.find('#revision-diff-panel-unified').attributes('hidden')).toBeUndefined();
-    expect(freshWrapper.find('#revision-diff-panel-side-by-side').attributes('hidden')).toBeDefined();
+    expect(
+      freshWrapper.find('#revision-diff-panel-side-by-side').attributes('hidden'),
+    ).toBeDefined();
   });
 
   it('Unified view collapses a long unchanged run by default, expands it on click, and "Focus on changes" toggles it off', async () => {

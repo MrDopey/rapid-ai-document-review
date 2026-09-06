@@ -27,7 +27,9 @@ function sleep(ms: number): Promise<void> {
  */
 export const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 
-function parseDirective(text: string): { summary: string; operations: { old_string: string; new_string: string }[] } | null {
+function parseDirective(
+  text: string,
+): { summary: string; operations: { old_string: string; new_string: string }[] } | null {
   if (!text.startsWith(PROPOSE_EDIT_DIRECTIVE)) return null;
   try {
     return JSON.parse(text.slice(PROPOSE_EDIT_DIRECTIVE.length));
@@ -237,7 +239,10 @@ export class FakeAgentSession implements AgentSessionLike {
     });
 
     try {
-      const outcome = await Promise.race([this.runScript(userText).then(() => 'done' as const), timedOut]);
+      const outcome = await Promise.race([
+        this.runScript(userText).then(() => 'done' as const),
+        timedOut,
+      ]);
       if (outcome === 'timed_out') {
         this.emit({
           type: 'agent_error',
@@ -293,9 +298,10 @@ export class FakeAgentSession implements AgentSessionLike {
 
     // Echo back any fold summaries delivered via `sendCustomMessage` since the last turn
     // (FR-034), so a test can assert the parent's next answer reflects the folded content.
-    const noted = this.pendingCustomMessages.length > 0
-      ? `\n\n[Noted custom context: ${this.pendingCustomMessages.join(' | ')}]`
-      : '';
+    const noted =
+      this.pendingCustomMessages.length > 0
+        ? `\n\n[Noted custom context: ${this.pendingCustomMessages.join(' | ')}]`
+        : '';
     this.pendingCustomMessages.length = 0;
 
     const text = `Here is a fake deterministic answer to: "${userText}".${noted}`;
@@ -331,7 +337,13 @@ export class FakeAgentSession implements AgentSessionLike {
     const result = (await tool.execute(toolCallId, directive, undefined, undefined, undefined)) as {
       content?: { type: string; text?: string }[];
     };
-    this.emit({ type: 'tool_execution_end', toolCallId, toolName: 'propose_document_edit', isError: false, result });
+    this.emit({
+      type: 'tool_execution_end',
+      toolCallId,
+      toolName: 'propose_document_edit',
+      isError: false,
+      result,
+    });
 
     const text = result.content?.[0]?.text ?? 'Done.';
     const messageId = `fake_msg_${randomUUID()}`;
@@ -346,7 +358,10 @@ export class FakeAgentSession implements AgentSessionLike {
 
   /** Actually invokes the real `read_document` tool object (document-tools.ts) and echoes its
    * text result as the assistant's answer — see `READ_DOCUMENT_DIRECTIVE` above. */
-  private async runReadDocumentDirective(params: { from_line?: number; to_line?: number }): Promise<string> {
+  private async runReadDocumentDirective(params: {
+    from_line?: number;
+    to_line?: number;
+  }): Promise<string> {
     const toolCallId = `fake_tool_${randomUUID()}`;
     const tool = this.tools.find((t) => t.name === 'read_document');
 
@@ -363,7 +378,13 @@ export class FakeAgentSession implements AgentSessionLike {
     const result = (await tool.execute(toolCallId, params, undefined, undefined, undefined)) as {
       content?: { type: string; text?: string }[];
     };
-    this.emit({ type: 'tool_execution_end', toolCallId, toolName: 'read_document', isError: false, result });
+    this.emit({
+      type: 'tool_execution_end',
+      toolCallId,
+      toolName: 'read_document',
+      isError: false,
+      result,
+    });
 
     const text = result.content?.[0]?.text ?? 'No content.';
     const messageId = `fake_msg_${randomUUID()}`;

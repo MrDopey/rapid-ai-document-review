@@ -17,7 +17,9 @@ import type { ConversationMessageState } from '../../src/stores/conversations.js
  * scroll-to-top was mid-editing) purely to avoid an editing collision — no behavior tested here
  * overlaps that file's own coverage.
  */
-function makeMessage(overrides: Partial<ConversationMessageState> & { id: string }): ConversationMessageState {
+function makeMessage(
+  overrides: Partial<ConversationMessageState> & { id: string },
+): ConversationMessageState {
   return {
     role: 'assistant',
     text: '',
@@ -65,7 +67,9 @@ describe('MessageBubble — tool-call-carrier visibility gating', () => {
   });
 
   it('a normal assistant message (isToolCallCarrier: false) always renders, regardless of the toggle', () => {
-    const wrapper = mountBubble(makeMessage({ id: 'm1', text: 'A real reply.', isToolCallCarrier: false }));
+    const wrapper = mountBubble(
+      makeMessage({ id: 'm1', text: 'A real reply.', isToolCallCarrier: false }),
+    );
     expect(wrapper.find('.message-bubble').exists()).toBe(true);
     expect(wrapper.find('.tool-call-carrier-note').exists()).toBe(false);
     expect(wrapper.text()).toContain('A real reply.');
@@ -73,7 +77,12 @@ describe('MessageBubble — tool-call-carrier visibility gating', () => {
 
   it('a reasoning-only message (no tool call, empty text) is not a carrier and always renders', () => {
     const wrapper = mountBubble(
-      makeMessage({ id: 'm2', text: '', reasoning: 'Thinking it through.', isToolCallCarrier: false }),
+      makeMessage({
+        id: 'm2',
+        text: '',
+        reasoning: 'Thinking it through.',
+        isToolCallCarrier: false,
+      }),
     );
     expect(wrapper.find('.message-bubble').exists()).toBe(true);
     expect(wrapper.find('.reasoning').exists()).toBe(true);

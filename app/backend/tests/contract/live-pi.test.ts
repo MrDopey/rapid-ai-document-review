@@ -19,7 +19,10 @@ import { PiService } from '../../src/pi/pi-service.js';
 import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.js';
 import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
-import { createProposeDocumentEditTool, createReadDocumentTool } from '../../src/pi/document-tools.js';
+import {
+  createProposeDocumentEditTool,
+  createReadDocumentTool,
+} from '../../src/pi/document-tools.js';
 import { buildSystemPrompt } from '../../src/pi/system-prompt.js';
 import { newId } from '../../src/ids.js';
 import type { ConversationRow } from '../../src/storage/storage-adapter.js';
@@ -66,7 +69,14 @@ function buildLiveHarness(): LiveHarness {
   const automerge = new AutomergeStoreHolder();
   const revisionService = new RevisionService(storage, eventService, eventHub, automerge);
   const primaryMutex = new PrimaryMutex();
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
@@ -139,7 +149,11 @@ async function createRealSession(
   const sessionManager = SessionManager.create(cwd, '/tmp', { id: conversation.id });
 
   const tools: ToolDefinition[] = [
-    createReadDocumentTool({ storage: h.storage, automerge: h.automerge, conversationId: conversation.id }) as unknown as ToolDefinition,
+    createReadDocumentTool({
+      storage: h.storage,
+      automerge: h.automerge,
+      conversationId: conversation.id,
+    }) as unknown as ToolDefinition,
     createProposeDocumentEditTool({
       storage: h.storage,
       editService: h.editService,
@@ -173,10 +187,10 @@ async function createRealSession(
   return session;
 }
 
-describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge contract, opt-in)', () => {
-  it(
-    'noTools: "builtin" leaves session.getActiveToolNames() with the custom tools but no Pi built-in tool',
-    async () => {
+describe.skipIf(!LIVE)(
+  'Contract: live Pi SDK (agent-tools.md §Event bridge contract, opt-in)',
+  () => {
+    it('noTools: "builtin" leaves session.getActiveToolNames() with the custom tools but no Pi built-in tool', async () => {
       const h = buildLiveHarness();
       const doc = h.storage.getDocument()!;
       const conversation = createConversationRow(h.storage, doc.id);
@@ -192,13 +206,9 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
       } finally {
         session.dispose();
       }
-    },
-    60_000,
-  );
+    }, 60_000);
 
-  it(
-    'a real turn emits every Pi event type the event-bridge mapping table depends on',
-    async () => {
+    it('a real turn emits every Pi event type the event-bridge mapping table depends on', async () => {
       const h = buildLiveHarness();
       const doc = h.storage.getDocument()!;
       const conversation = createConversationRow(h.storage, doc.id);
@@ -226,15 +236,29 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
 
         // Base turn lifecycle (agent-tools.md §Event bridge contract): every one of these maps to
         // an application event and must be present in any real turn.
-        for (const required of ['agent_start', 'message_start', 'message_end', 'agent_end', 'agent_settled']) {
-          expect(observed.has(required), `expected the real Pi SDK to emit "${required}"`).toBe(true);
+        for (const required of [
+          'agent_start',
+          'message_start',
+          'message_end',
+          'agent_end',
+          'agent_settled',
+        ]) {
+          expect(observed.has(required), `expected the real Pi SDK to emit "${required}"`).toBe(
+            true,
+          );
         }
-        expect(observedUpdateKinds.has('text_delta'), 'expected at least one message_update/text_delta').toBe(true);
+        expect(
+          observedUpdateKinds.has('text_delta'),
+          'expected at least one message_update/text_delta',
+        ).toBe(true);
 
         // Tool events: the prompt above explicitly instructs the model to call both registered
         // tools, so a compliant model run should exercise the full tool lifecycle too.
         for (const required of ['tool_execution_start', 'tool_execution_end']) {
-          expect(observed.has(required), `expected the real Pi SDK to emit "${required}" for a tool-using turn`).toBe(true);
+          expect(
+            observed.has(required),
+            `expected the real Pi SDK to emit "${required}" for a tool-using turn`,
+          ).toBe(true);
         }
 
         // Not asserted: `thinking_delta` (model-dependent — only reasoning-capable models/configs
@@ -247,17 +271,13 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
         unsubscribe();
         session.dispose();
       }
-    },
-    120_000,
-  );
+    }, 120_000);
 
-  it(
-    // T007 (specs/002-pi-agent-model-config, quickstart.md Scenario 1): an operator-configured
+    it(// T007 (specs/002-pi-agent-model-config, quickstart.md Scenario 1): an operator-configured
     // RADR_BE_PI_AGENT_MODEL, once resolved through ModelRuntime exactly as pi-service.ts's eventual
     // override-resolution helper will, produces a session whose own reported model matches the
     // override — not whatever SDK auto-resolution would otherwise have picked.
-    'RADR_BE_PI_AGENT_MODEL override: the resulting session reports the overridden model',
-    async () => {
+    'RADR_BE_PI_AGENT_MODEL override: the resulting session reports the overridden model', async () => {
       const h = buildLiveHarness();
       const doc = h.storage.getDocument()!;
       const conversation = createConversationRow(h.storage, doc.id);
@@ -270,7 +290,10 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
         modelsPath: `${config.piCodingAgentDir}/models.json`,
       });
       const [available] = modelRuntime.getModels();
-      expect(available, 'expected at least one model available to this live-test environment').toBeDefined();
+      expect(
+        available,
+        'expected at least one model available to this live-test environment',
+      ).toBeDefined();
 
       const overrideValue = `${available!.provider}/${available!.id}`;
       const previousOverride = process.env.RADR_BE_PI_AGENT_MODEL;
@@ -291,10 +314,9 @@ describe.skipIf(!LIVE)('Contract: live Pi SDK (agent-tools.md §Event bridge con
         if (previousOverride === undefined) delete process.env.RADR_BE_PI_AGENT_MODEL;
         else process.env.RADR_BE_PI_AGENT_MODEL = previousOverride;
       }
-    },
-    60_000,
-  );
-});
+    }, 60_000);
+  },
+);
 
 if (!LIVE) {
   // Vitest requires at least one test per file to avoid an empty-suite failure when every `it` in

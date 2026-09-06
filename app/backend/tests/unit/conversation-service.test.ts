@@ -13,7 +13,10 @@ import { PrimaryService } from '../../src/conversation/primary-service.js';
 import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.js';
 import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
-import { ConversationBusyError, ConversationService } from '../../src/conversation/conversation-service.js';
+import {
+  ConversationBusyError,
+  ConversationService,
+} from '../../src/conversation/conversation-service.js';
 import { ConversationFoldService } from '../../src/conversation/conversation-fold-service.js';
 import { ConversationReviewService } from '../../src/conversation/conversation-review-service.js';
 import { EventPublisher } from '../../src/events/event-publisher.js';
@@ -45,14 +48,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -68,7 +91,11 @@ function buildHarness(): Harness {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,
@@ -98,7 +125,12 @@ function buildHarness(): Harness {
 /** Bypasses `ConversationService.branch()` (no fire-and-forget seed message) — same seam
  *  `restart.test.ts`/`pi-session-eviction.test.ts` use to create a plain storage-level branch row
  *  directly, which is all a busy-guard test needs. */
-function createBranch(storage: StorageAdapter, documentId: string, parentId: string, contextRevision: number): ConversationRow {
+function createBranch(
+  storage: StorageAdapter,
+  documentId: string,
+  parentId: string,
+  contextRevision: number,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({

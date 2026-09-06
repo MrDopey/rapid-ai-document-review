@@ -5,3 +5,6 @@ playwright-report
 test-results
 package-lock.json
 *.sqlite
+specs
+.specify
+.github

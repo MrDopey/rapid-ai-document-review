@@ -15,10 +15,17 @@ import { attachScrollSync, scrollRatioOf } from '../../src/composables/scrollSyn
 // next frame, so a `setTimeout`-backed stand-in is equivalent for every test below.
 if (typeof globalThis.requestAnimationFrame !== 'function') {
   globalThis.requestAnimationFrame = ((cb: FrameRequestCallback): number =>
-    setTimeout(() => cb(performance.now()), 0) as unknown as number) as typeof requestAnimationFrame;
+    setTimeout(
+      () => cb(performance.now()),
+      0,
+    ) as unknown as number) as typeof requestAnimationFrame;
 }
 
-function makeScrollableEl(overrides: { scrollTop?: number; scrollHeight: number; clientHeight: number }): HTMLDivElement {
+function makeScrollableEl(overrides: {
+  scrollTop?: number;
+  scrollHeight: number;
+  clientHeight: number;
+}): HTMLDivElement {
   const el = document.createElement('div');
   let scrollTop = overrides.scrollTop ?? 0;
   Object.defineProperty(el, 'scrollTop', {

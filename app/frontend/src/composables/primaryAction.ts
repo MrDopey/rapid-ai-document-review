@@ -49,9 +49,14 @@ export interface UsePrimaryAction {
  * scoped right where the triggering button lives (mirroring how `ConversationView.vue`'s own
  * close-confirmation dialog is already scoped per-instance, not shared globally).
  */
-export function usePrimaryAction(conversationId: () => string, dialogEl: Ref<HTMLElement | null>): UsePrimaryAction {
+export function usePrimaryAction(
+  conversationId: () => string,
+  dialogEl: Ref<HTMLElement | null>,
+): UsePrimaryAction {
   const store = useConversationsStore();
-  const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const conversation = computed(
+    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
+  );
   const isPrimary = computed(() => conversation.value?.isPrimary ?? false);
 
   const busyPrompt = ref<PrimaryBusyPrompt | null>(null);
@@ -67,7 +72,9 @@ export function usePrimaryAction(conversationId: () => string, dialogEl: Ref<HTM
     if (!id) return 'none';
     return store.conversations.find((c) => c.id === id)?.name ?? id;
   }
-  const busyConversationName = computed(() => conversationName(busyPrompt.value?.busyConversationId ?? null));
+  const busyConversationName = computed(() =>
+    conversationName(busyPrompt.value?.busyConversationId ?? null),
+  );
 
   /** Issues (or re-issues, with an explicit choice) a designation request for this composable's own
    *  conversation. On `409 PRIMARY_TARGET_BUSY`, opens the three-choice warning instead of
@@ -81,7 +88,10 @@ export function usePrimaryAction(conversationId: () => string, dialogEl: Ref<HTM
       if (result.applied !== 'cancelled') busyPrompt.value = null;
     } catch (err) {
       if (err instanceof ApiError && err.code === 'PRIMARY_TARGET_BUSY') {
-        const details = (err.details ?? {}) as { currentPrimaryId?: string | null; busyConversationId?: string };
+        const details = (err.details ?? {}) as {
+          currentPrimaryId?: string | null;
+          busyConversationId?: string;
+        };
         busyPrompt.value = {
           conversationId: id,
           currentPrimaryId: details.currentPrimaryId ?? null,
@@ -113,9 +123,12 @@ export function usePrimaryAction(conversationId: () => string, dialogEl: Ref<HTM
   /** Always rendered (never a bare disabled control with no explanation) — same convention every
    *  other action's `title` in this app follows. */
   const title = computed(() => {
-    if (isPrimary.value) return `Clear Primary (${conversation.value?.name ?? ''}) — ${PRIMARY_EXPLANATION}`;
-    if (conversation.value?.status === 'closed') return "Closed conversations can't be made Primary";
-    if (conversation.value?.status === 'errored') return 'An errored conversation cannot be designated Primary';
+    if (isPrimary.value)
+      return `Clear Primary (${conversation.value?.name ?? ''}) — ${PRIMARY_EXPLANATION}`;
+    if (conversation.value?.status === 'closed')
+      return "Closed conversations can't be made Primary";
+    if (conversation.value?.status === 'errored')
+      return 'An errored conversation cannot be designated Primary';
     return `Make Primary — ${PRIMARY_EXPLANATION}`;
   });
 

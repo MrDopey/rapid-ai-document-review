@@ -26,7 +26,11 @@ export class AutomergeStore {
     this.lastSavedHeads = Automerge.getHeads(doc);
   }
 
-  static create(storage: StorageAdapter, documentId: string, initialContent: string): AutomergeStore {
+  static create(
+    storage: StorageAdapter,
+    documentId: string,
+    initialContent: string,
+  ): AutomergeStore {
     const doc = Automerge.change(Automerge.init<DocShape>(), (d) => {
       d.content = initialContent;
     });
@@ -37,9 +41,7 @@ export class AutomergeStore {
 
   static load(storage: StorageAdapter, documentId: string): AutomergeStore {
     const snapshot = storage.getLatestSnapshot(documentId);
-    let doc = snapshot
-      ? Automerge.load<DocShape>(snapshot.data)
-      : Automerge.init<DocShape>();
+    let doc = snapshot ? Automerge.load<DocShape>(snapshot.data) : Automerge.init<DocShape>();
     const afterId = 0; // document_change rows are pruned only when a snapshot provably covers them
     const changes = storage.listChangesSince(documentId, afterId);
     for (const change of changes) {

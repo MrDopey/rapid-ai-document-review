@@ -56,7 +56,9 @@ const emit = defineEmits<{
 }>();
 const store = useConversationsStore();
 
-const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+const conversation = computed(
+  () => store.conversations.find((c) => c.id === props.conversationId) ?? null,
+);
 const messages = computed(() => store.messagesFor(props.conversationId));
 const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
@@ -68,8 +70,15 @@ const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 // `useConversationRename` (same store action, `store.rename`, so renaming from either view updates
 // both — they share the same Pinia store).
 const nameInputEl = ref<HTMLInputElement | null>(null);
-const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName } =
-  useConversationRename(() => props.conversationId, nameInputEl);
+const {
+  isEditingName,
+  nameDraft,
+  renameError,
+  renameSaving,
+  startEditingName,
+  cancelEditingName,
+  saveName,
+} = useConversationRename(() => props.conversationId, nameInputEl);
 
 // Branch-lineage cue (sidebar list view): a plain-text breadcrumb naming this conversation's
 // parent, if any. This data model has no message-level fork-point field at all —
@@ -90,7 +99,9 @@ const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, c
 // This logic (and `parentConversation` above it) is shared with `ConversationView.vue`'s
 // focus/detail view via `useConversationContinuity` — see that composable's doc comment — so both
 // call sites stay in lockstep rather than risk drifting apart.
-const { parentConversation, continuityMessages } = useConversationContinuity(() => props.conversationId);
+const { parentConversation, continuityMessages } = useConversationContinuity(
+  () => props.conversationId,
+);
 
 // This box — not `MessageBubble.vue` itself — owns every one of its messages' `expanded` state,
 // since the bulk toggle below needs to read/set all of them at once (data-model.md's
@@ -150,11 +161,14 @@ const rootEl = ref<HTMLElement | null>(null);
 // Shared with `ConversationView.vue`'s focus-view "Branch" button via `useConversationBranchAction`
 // (see that composable's own doc comment): blocked outright while `atFocusCap`, and auto-focuses
 // the new branch via the `branch-created` emit on every success.
-const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
-  atFocusCap: () => props.atFocusCap,
-  maxFocused: () => props.maxFocused,
-  onBranchCreated: (id) => emit('branch-created', id),
-});
+const { action: branchAction, error: branchError } = useConversationBranchAction(
+  () => props.conversationId,
+  {
+    atFocusCap: () => props.atFocusCap,
+    maxFocused: () => props.maxFocused,
+    onBranchCreated: (id) => emit('branch-created', id),
+  },
+);
 
 // 006-toolbar-reorg (second refactor): the HUD's per-row Make/Clear Primary button is gone (the
 // HUD list is purely informational now) — this sidebar/canvas box is one of its two new homes
@@ -299,11 +313,16 @@ defineExpose({ el: rootEl });
           aria-label="Primary conversation is busy"
         >
           <p>
-            {{ primaryBusyConversationName }} is still working. What should happen to the Primary designation?
+            {{ primaryBusyConversationName }} is still working. What should happen to the Primary
+            designation?
           </p>
           <div class="primary-busy-choices">
-            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">Switch now</button>
-            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">
+              Switch now
+            </button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">
+              Switch when idle
+            </button>
             <button type="button" @click="resolvePrimaryBusyPrompt('cancel')">Cancel</button>
           </div>
         </div>
@@ -314,8 +333,15 @@ defineExpose({ el: rootEl });
          `.thread-messages` list below (kept in a visually distinct wrapper, labeled, so it can
          never be mistaken for this conversation's own transcript). -->
     <div v-if="continuityMessages.length > 0" class="continuity-context">
-      <span class="continuity-label">Continued from {{ parentConversation?.name ?? 'parent conversation' }}</span>
-      <MessageBubble v-for="message in continuityMessages" :key="message.id" :message="message" :expanded="true" />
+      <span class="continuity-label"
+        >Continued from {{ parentConversation?.name ?? 'parent conversation' }}</span
+      >
+      <MessageBubble
+        v-for="message in continuityMessages"
+        :key="message.id"
+        :message="message"
+        :expanded="true"
+      />
     </div>
     <div class="thread-messages">
       <MessageBubble

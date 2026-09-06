@@ -37,7 +37,8 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   },
   {
     keys: 'Alt+Shift+C',
-    description: '"Branch (New)": start a conversation branch from the current editor selection, with an empty transcript.',
+    description:
+      '"Branch (New)": start a conversation branch from the current editor selection, with an empty transcript.',
     scope: 'Document editor',
   },
   {
@@ -49,7 +50,8 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   },
   {
     keys: 'Ctrl/Cmd+F',
-    description: 'Open the in-editor find/replace panel (via @codemirror/search\'s searchKeymap), instead of the browser\'s native find-in-page.',
+    description:
+      "Open the in-editor find/replace panel (via @codemirror/search's searchKeymap), instead of the browser's native find-in-page.",
     scope: 'Document editor',
   },
   {
@@ -79,7 +81,8 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   },
   {
     keys: 'Tab / Shift+Tab',
-    description: 'Move focus among the controls of an open dialog — focus is trapped inside it while it is open.',
+    description:
+      'Move focus among the controls of an open dialog — focus is trapped inside it while it is open.',
     scope: 'Dialogs',
   },
   {
@@ -174,11 +177,11 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
     description:
       'Toggle focus for the Nth conversation (1-9) in the conversation list, top to bottom, in the same order ' +
       'and under the same Active/All filter the HUD list is currently showing. No-op if fewer than N ' +
-      'conversations are visible under that filter, if the conversation isn\'t already focused and the ' +
+      "conversations are visible under that filter, if the conversation isn't already focused and the " +
       'simultaneously-focused limit has already been reached (un-focusing an already-focused conversation is ' +
-      'always allowed), or while the History panel\'s diff view, the Help/Keyboard-shortcuts dialog, or any ' +
+      "always allowed), or while the History panel's diff view, the Help/Keyboard-shortcuts dialog, or any " +
       'other modal dialog is open. Also fires while typing in a conversation composer (most commonly used to ' +
-      'un-focus/close the panel you\'re currently typing in, or jump to another), but not from the document ' +
+      "un-focus/close the panel you're currently typing in, or jump to another), but not from the document " +
       'editor, the conversation-rename field, or while any dialog is open.',
     scope: 'Global',
   },
@@ -241,12 +244,17 @@ export interface IsEditingContextOptions {
  * `BLOCKING_DIALOG_SELECTOR` above), a plain form control (`<input>`/`<textarea>`/`<select>`), or a
  * `contenteditable` surface (CodeMirror's document-editor).
  */
-export function isEditingContext(event: KeyboardEvent, options: IsEditingContextOptions = {}): boolean {
+export function isEditingContext(
+  event: KeyboardEvent,
+  options: IsEditingContextOptions = {},
+): boolean {
   const target = event.target as HTMLElement | null;
   if (!target || typeof target.closest !== 'function') return false;
   if (target.closest(BLOCKING_DIALOG_SELECTOR)) return true;
-  if (options.allowComposer && target.tagName === 'TEXTAREA' && target.id.startsWith('composer-')) return false;
-  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
+  if (options.allowComposer && target.tagName === 'TEXTAREA' && target.id.startsWith('composer-'))
+    return false;
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+    return true;
   return target.isContentEditable;
 }
 
@@ -445,7 +453,8 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     code: 'KeyN',
     scope: 'Global',
     composerExempt: true,
-    description: 'Focus the next currently-focused conversation panel (wraps). Alternate for Ctrl+Alt+L, in case the OS/window manager claims that combo (e.g. as a "Lock screen" shortcut).',
+    description:
+      'Focus the next currently-focused conversation panel (wraps). Alternate for Ctrl+Alt+L, in case the OS/window manager claims that combo (e.g. as a "Lock screen" shortcut).',
   },
   {
     id: 'toggle-filter',

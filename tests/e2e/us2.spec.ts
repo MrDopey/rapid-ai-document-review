@@ -6,7 +6,8 @@ import { focusExclusively } from './test-utils.js';
 // with AGENT_UNAVAILABLE). FakeAgentSession (app/backend/src/pi/fake-agent-session.ts) is a
 // deterministic stand-in exercised through the real send -> ConcurrencyLimiter -> PiService ->
 // EventBridge -> EventHub -> WS -> UI path — only the literal model call is replaced.
-const DOC_CONTENT = '# US2 Fixture Document\n\nThis document exists to exercise the Main conversation.';
+const DOC_CONTENT =
+  '# US2 Fixture Document\n\nThis document exists to exercise the Main conversation.';
 
 test.describe('US2 — ask the main conversation about the document', () => {
   test('send message to Main, streamed response, reasoning toggle, SC-001', async ({ page }) => {
@@ -47,9 +48,12 @@ test.describe('US2 — ask the main conversation about the document', () => {
       const assistantBubble = page.locator('.message-bubble[data-role="assistant"]').last();
       await expect(assistantBubble).toBeVisible({ timeout: 15_000 });
       await expect(assistantBubble.locator('.message-text')).not.toBeEmpty({ timeout: 15_000 });
-      await expect(assistantBubble.locator('.message-text')).toContainText('fake deterministic answer', {
-        timeout: 15_000,
-      });
+      await expect(assistantBubble.locator('.message-text')).toContainText(
+        'fake deterministic answer',
+        {
+          timeout: 15_000,
+        },
+      );
 
       expect(Date.now() - sc001Start).toBeLessThan(15_000);
 
@@ -85,9 +89,12 @@ test.describe('US2 — ask the main conversation about the document', () => {
       await page.getByRole('button', { name: 'Send', exact: true }).click();
 
       const assistantBubble = page.locator('.message-bubble[data-role="assistant"]').last();
-      await expect(assistantBubble.locator('.message-text')).toContainText('fake deterministic answer', {
-        timeout: 15_000,
-      });
+      await expect(assistantBubble.locator('.message-text')).toContainText(
+        'fake deterministic answer',
+        {
+          timeout: 15_000,
+        },
+      );
       await expect(assistantBubble.locator('details.reasoning')).toHaveCount(0);
     });
   });

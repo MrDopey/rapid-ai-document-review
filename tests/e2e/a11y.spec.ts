@@ -7,7 +7,10 @@ import { focusExclusively } from './test-utils.js';
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
 const ERROR_DIRECTIVE = '__AGENT_ERROR__';
 
-function proposeEdit(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeEdit(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return `${PROPOSE_EDIT_DIRECTIVE}${JSON.stringify({ summary, operations })}`;
 }
 
@@ -35,10 +38,10 @@ async function getConversations(page: Page): Promise<ConversationSummary[]> {
 
 async function waitIdleApi(page: Page, conversationId: string): Promise<void> {
   await expect
-    .poll(
-      async () => (await getConversations(page)).find((c) => c.id === conversationId)?.status,
-      { timeout: 15_000, intervals: [200] },
-    )
+    .poll(async () => (await getConversations(page)).find((c) => c.id === conversationId)?.status, {
+      timeout: 15_000,
+      intervals: [200],
+    })
     .not.toBe('working');
 }
 
@@ -53,7 +56,15 @@ async function installPointerEventGuard(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as { __pointerEvents: string[] };
     w.__pointerEvents = [];
-    const types = ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'contextmenu', 'wheel'];
+    const types = [
+      'mousedown',
+      'mouseup',
+      'pointerdown',
+      'pointerup',
+      'dblclick',
+      'contextmenu',
+      'wheel',
+    ];
     for (const type of types) {
       window.addEventListener(type, () => w.__pointerEvents.push(type), { capture: true });
     }
@@ -72,7 +83,9 @@ async function getPointerEvents(page: Page): Promise<string[]> {
  */
 async function installLiveRegionRecorder(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const w = window as unknown as { __liveAnnouncements: { polite: string[]; assertive: string[] } };
+    const w = window as unknown as {
+      __liveAnnouncements: { polite: string[]; assertive: string[] };
+    };
     w.__liveAnnouncements = { polite: [], assertive: [] };
     const record = (): void => {
       const polite = document.getElementById('a11y-live-region-polite');
@@ -81,17 +94,28 @@ async function installLiveRegionRecorder(page: Page): Promise<void> {
       if (assertive?.textContent) w.__liveAnnouncements.assertive.push(assertive.textContent);
     };
     const observer = new MutationObserver(record);
-    const start = (): void => observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const start = (): void =>
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start);
   });
 }
 
-async function getLiveAnnouncements(page: Page): Promise<{ polite: string[]; assertive: string[] }> {
-  return page.evaluate(() => (window as unknown as { __liveAnnouncements: { polite: string[]; assertive: string[] } }).__liveAnnouncements);
+async function getLiveAnnouncements(
+  page: Page,
+): Promise<{ polite: string[]; assertive: string[] }> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __liveAnnouncements: { polite: string[]; assertive: string[] } })
+        .__liveAnnouncements,
+  );
 }
 
-async function expectAnnounced(page: Page, politeness: 'polite' | 'assertive', substring: string): Promise<void> {
+async function expectAnnounced(
+  page: Page,
+  politeness: 'polite' | 'assertive',
+  substring: string,
+): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -119,7 +143,10 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
 
   function describe(el: Element): string {
     const id = el.id ? `#${el.id}` : '';
-    const cls = el.className && typeof el.className === 'string' ? `.${el.className.split(' ').join('.')}` : '';
+    const cls =
+      el.className && typeof el.className === 'string'
+        ? `.${el.className.split(' ').join('.')}`
+        : '';
     return `<${el.tagName.toLowerCase()}${id}${cls}>`;
   }
 
@@ -127,7 +154,12 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel && ariaLabel.trim().length > 0) return true;
     const labelledby = el.getAttribute('aria-labelledby');
-    if (labelledby && labelledby.split(/\s+/).some((id) => (document.getElementById(id)?.textContent ?? '').trim().length > 0)) {
+    if (
+      labelledby &&
+      labelledby
+        .split(/\s+/)
+        .some((id) => (document.getElementById(id)?.textContent ?? '').trim().length > 0)
+    ) {
       return true;
     }
     if (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) return true;
@@ -140,27 +172,33 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
   for (const button of Array.from(document.querySelectorAll('button'))) {
     const rect = button.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) continue;
-    if (!hasAccessibleName(button)) roleViolations.push(`Button with no accessible name: ${describe(button)}`);
+    if (!hasAccessibleName(button))
+      roleViolations.push(`Button with no accessible name: ${describe(button)}`);
   }
 
   // 2. Every visible form input/textarea/select has an accessible name.
   for (const field of Array.from(document.querySelectorAll('input, textarea, select'))) {
     const rect = field.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) continue;
-    if (!hasAccessibleName(field)) roleViolations.push(`Form field with no accessible name: ${describe(field)}`);
+    if (!hasAccessibleName(field))
+      roleViolations.push(`Form field with no accessible name: ${describe(field)}`);
   }
 
   // 3. Every dialog/alertdialog declares aria-modal and has an accessible name.
-  for (const dialog of Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))) {
+  for (const dialog of Array.from(
+    document.querySelectorAll('[role="dialog"], [role="alertdialog"]'),
+  )) {
     if (dialog.getAttribute('aria-modal') !== 'true') {
       roleViolations.push(`Dialog missing aria-modal="true": ${describe(dialog)}`);
     }
-    if (!hasAccessibleName(dialog)) roleViolations.push(`Dialog with no accessible name: ${describe(dialog)}`);
+    if (!hasAccessibleName(dialog))
+      roleViolations.push(`Dialog with no accessible name: ${describe(dialog)}`);
   }
 
   // 4. Every img declares alt (empty alt is fine for decorative images; missing is not).
   for (const img of Array.from(document.querySelectorAll('img'))) {
-    if (!img.hasAttribute('alt')) roleViolations.push(`<img> missing alt attribute: ${describe(img)}`);
+    if (!img.hasAttribute('alt'))
+      roleViolations.push(`<img> missing alt attribute: ${describe(img)}`);
   }
 
   // 5. Every tab has an aria-controls pointing at an existing tabpanel.
@@ -176,7 +214,12 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
     const m = value.match(/rgba?\(([^)]+)\)/);
     if (!m) return null;
     const parts = m[1]!.split(',').map((s) => parseFloat(s.trim()));
-    return { r: parts[0] ?? 0, g: parts[1] ?? 0, b: parts[2] ?? 0, a: parts.length > 3 ? parts[3]! : 1 };
+    return {
+      r: parts[0] ?? 0,
+      g: parts[1] ?? 0,
+      b: parts[2] ?? 0,
+      a: parts.length > 3 ? parts[3]! : 1,
+    };
   }
 
   function relLuminance({ r, g, b }: { r: number; g: number; b: number }): number {
@@ -187,7 +230,10 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
 
-  function contrastRatio(fg: { r: number; g: number; b: number }, bg: { r: number; g: number; b: number }): number {
+  function contrastRatio(
+    fg: { r: number; g: number; b: number },
+    bg: { r: number; g: number; b: number },
+  ): number {
     const l1 = relLuminance(fg) + 0.05;
     const l2 = relLuminance(bg) + 0.05;
     return l1 > l2 ? l1 / l2 : l2 / l1;
@@ -272,7 +318,9 @@ function runManualA11yAudit(): { roleViolations: string[]; contrastViolations: s
 }
 
 test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
-  test('core loop is fully keyboard-operable with no mouse/pointer input (FR-043a)', async ({ page }) => {
+  test('core loop is fully keyboard-operable with no mouse/pointer input (FR-043a)', async ({
+    page,
+  }) => {
     await installPointerEventGuard(page);
 
     let branchName = '';
@@ -284,7 +332,9 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       if (await pasteHeading.isVisible().catch(() => false)) {
         const textarea = page.getByLabel('Document content');
         await textarea.focus();
-        await page.keyboard.type(`# A11y Fixture Document\n\n${MARKERS.intro}\n\n${MARKERS.target}`);
+        await page.keyboard.type(
+          `# A11y Fixture Document\n\n${MARKERS.intro}\n\n${MARKERS.target}`,
+        );
 
         await page.keyboard.press('Tab');
         await expect(page.getByRole('button', { name: 'Start reviewing' })).toBeFocused();
@@ -302,7 +352,10 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         // accept) still exercises the real UI keyboard-only.
         await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
         const docRes = await page.request.get('/api/document');
-        const docBody = (await docRes.json()) as { document: { currentRevision: number }; content: string };
+        const docBody = (await docRes.json()) as {
+          document: { currentRevision: number };
+          content: string;
+        };
         await page.request.patch('/api/document', {
           data: {
             baseRevision: docBody.document.currentRevision,
@@ -339,11 +392,17 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       await page.keyboard.press('Shift+End');
       await page.keyboard.press(BRANCH_SHORTCUT);
 
-      await expect(page.locator('.conversation-header h2')).toHaveText('A11y Fixture Document', { timeout: 10_000 });
-      branchName = 'A11y Fixture Document';
-      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute('data-status', /idle/, {
-        timeout: 20_000,
+      await expect(page.locator('.conversation-header h2')).toHaveText('A11y Fixture Document', {
+        timeout: 10_000,
       });
+      branchName = 'A11y Fixture Document';
+      await expect(page.locator('.conversation-header .badge').first()).toHaveAttribute(
+        'data-status',
+        /idle/,
+        {
+          timeout: 20_000,
+        },
+      );
     });
 
     await test.step('propose an edit from the composer via the keyboard', async () => {
@@ -389,7 +448,9 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       await page.keyboard.press('Enter');
 
       await expect(row.locator('.status-badge')).toHaveText('applied', { timeout: 10_000 });
-      await expect(page.locator('.editor-host')).toContainText('A11Y-TARGET-LINE-REVISED', { timeout: 10_000 });
+      await expect(page.locator('.editor-host')).toContainText('A11Y-TARGET-LINE-REVISED', {
+        timeout: 10_000,
+      });
     });
 
     await test.step('no mouse/pointer event was ever dispatched', async () => {
@@ -403,7 +464,10 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
 
     const main = (await getConversations(page)).find((c) => c.kind === 'main');
-    if (!main) throw new Error('expected a Main conversation to already exist (previous test creates the document)');
+    if (!main)
+      throw new Error(
+        'expected a Main conversation to already exist (previous test creates the document)',
+      );
 
     await test.step('agent_started + message_completed (polite)', async () => {
       const res = await page.request.post(`/api/conversations/${main.id}/send`, {
@@ -429,7 +493,9 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     });
 
     await test.step('agent_error (assertive)', async () => {
-      const res = await page.request.post(`/api/conversations/${main.id}/send`, { data: { message: ERROR_DIRECTIVE } });
+      const res = await page.request.post(`/api/conversations/${main.id}/send`, {
+        data: { message: ERROR_DIRECTIVE },
+      });
       expect(res.ok()).toBe(true);
       await expectAnnounced(page, 'assertive', 'agent error');
     });
@@ -442,20 +508,31 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       const branch = (await branchRes.json()) as { id: string };
 
       const docRes = await page.request.get('/api/document');
-      const docBody = (await docRes.json()) as { document: { currentRevision: number }; content: string };
+      const docBody = (await docRes.json()) as {
+        document: { currentRevision: number };
+        content: string;
+      };
       const from = docBody.content.length;
       await page.request.patch('/api/document', {
-        data: { baseRevision: docBody.document.currentRevision, changes: [{ from, to: from, insert: '\n\nA11Y-STALE-ADVANCE' }] },
+        data: {
+          baseRevision: docBody.document.currentRevision,
+          changes: [{ from, to: from, insert: '\n\nA11Y-STALE-ADVANCE' }],
+        },
       });
 
       await expect
-        .poll(async () => (await getConversations(page)).find((c) => c.id === branch.id) !== undefined, { timeout: 5_000 })
+        .poll(
+          async () => (await getConversations(page)).find((c) => c.id === branch.id) !== undefined,
+          { timeout: 5_000 },
+        )
         .toBe(true);
       await expectAnnounced(page, 'polite', 'is now stale');
     });
   });
 
-  test('manual WCAG 2.2 AA audit over each main view (roles/names + contrast)', async ({ page }) => {
+  test('manual WCAG 2.2 AA audit over each main view (roles/names + contrast)', async ({
+    page,
+  }) => {
     await page.goto('/');
     await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
 
@@ -479,11 +556,16 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       // layout rather than the conflict-banner one.
       const anchor = 'A11Y-AUDIT-DIFF-ANCHOR';
       const docRes = await page.request.get('/api/document');
-      const docBody = (await docRes.json()) as { document: { currentRevision: number }; content: string };
+      const docBody = (await docRes.json()) as {
+        document: { currentRevision: number };
+        content: string;
+      };
       await page.request.patch('/api/document', {
         data: {
           baseRevision: docBody.document.currentRevision,
-          changes: [{ from: docBody.content.length, to: docBody.content.length, insert: `\n\n${anchor}` }],
+          changes: [
+            { from: docBody.content.length, to: docBody.content.length, insert: `\n\n${anchor}` },
+          ],
         },
       });
 
@@ -525,7 +607,11 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       // not Main, so the diff-preview step's Main-only edit row is never found. Return to Main
       // explicitly at the top of every iteration rather than relying on leftover selection state.
       await test.step(`select Main [${scheme}]`, async () => {
-        await focusExclusively(page, page.locator('.conversation-row', { hasText: 'Main' }).first(), 'Main');
+        await focusExclusively(
+          page,
+          page.locator('.conversation-row', { hasText: 'Main' }).first(),
+          'Main',
+        );
       });
 
       await test.step(`main editor + HUD + conversation view [${scheme}]`, async () => {
@@ -541,14 +627,18 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
 
       await test.step(`diff preview dialog [${scheme}]`, async () => {
         const row = page.locator('.edit-row', { hasText: 'A11y audit fixture proposal' });
-        const previewButton = row.getByRole('button', { name: 'Preview: A11y audit fixture proposal' });
+        const previewButton = row.getByRole('button', {
+          name: 'Preview: A11y audit fixture proposal',
+        });
         await previewButton.click();
         const dialog = page.getByRole('dialog', { name: 'Review proposed edit' });
         await expect(dialog).toBeVisible();
         // The dialog itself renders synchronously; its preview content arrives from an async fetch
         // (DiffViewer.vue's `load()`) — wait for that to settle (either outcome) before auditing,
         // otherwise the audit can run against the transient "Loading preview…" state.
-        await expect(dialog.locator('[role="tabpanel"], .conflict-banner').first()).toBeVisible({ timeout: 10_000 });
+        await expect(dialog.locator('[role="tabpanel"], .conflict-banner').first()).toBeVisible({
+          timeout: 10_000,
+        });
         await runAuditAndAssert('diff preview dialog', scheme);
         await page.keyboard.press('Escape');
         await expect(dialog).not.toBeVisible();
@@ -578,7 +668,9 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     if (await pasteHeading.isVisible().catch(() => false)) {
       // Mirrors the fallback in the first test above — this test can run standalone (no document
       // yet) or after earlier specs in the same shared-backend e2e run (document already exists).
-      await page.getByLabel('Document content').fill('# A11y Canvas Fixture\n\nA11Y-CANVAS-FIXTURE-INTRO');
+      await page
+        .getByLabel('Document content')
+        .fill('# A11y Canvas Fixture\n\nA11Y-CANVAS-FIXTURE-INTRO');
       await page.getByRole('button', { name: 'Start reviewing' }).click();
     }
     await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
@@ -594,15 +686,24 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       // The canvas has no content taller than the viewport by default — pad it so there is
       // somewhere for keyboard panning to actually move to.
       const docRes = await page.request.get('/api/document');
-      const docBody = (await docRes.json()) as { document: { currentRevision: number }; content: string };
-      const filler = Array(60).fill('A11Y-CANVAS-PAN-FILLER line of text to force real scroll height.').join('\n\n');
+      const docBody = (await docRes.json()) as {
+        document: { currentRevision: number };
+        content: string;
+      };
+      const filler = Array(60)
+        .fill('A11Y-CANVAS-PAN-FILLER line of text to force real scroll height.')
+        .join('\n\n');
       await page.request.patch('/api/document', {
         data: {
           baseRevision: docBody.document.currentRevision,
-          changes: [{ from: docBody.content.length, to: docBody.content.length, insert: `\n\n${filler}` }],
+          changes: [
+            { from: docBody.content.length, to: docBody.content.length, insert: `\n\n${filler}` },
+          ],
         },
       });
-      await expect(page.locator('.editor-host')).toContainText('A11Y-CANVAS-PAN-FILLER', { timeout: 10_000 });
+      await expect(page.locator('.editor-host')).toContainText('A11Y-CANVAS-PAN-FILLER', {
+        timeout: 10_000,
+      });
 
       await canvas.click(); // establishes real DOM focus on the focusable, tabindex="0" container
       await expect(canvas).toBeFocused();
@@ -616,12 +717,17 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     await test.step('keyboard HUD navigation reaches a conversation without a pointer', async () => {
       const main = (await getConversations(page)).find((c) => c.kind === 'main');
       if (!main) throw new Error('expected a Main conversation to already exist');
-      const titleButton = page.locator(`.hud-panel .conversation-row[data-conversation-id="${main.id}"] .conversation-title`);
+      const titleButton = page.locator(
+        `.hud-panel .conversation-row[data-conversation-id="${main.id}"] .conversation-title`,
+      );
       await titleButton.focus();
       await expect(titleButton).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(page.locator('.conversation-detail-overlay')).toBeVisible({ timeout: 10_000 });
-      await expect(page.locator('.conversation-detail-dialog')).toHaveAttribute('aria-label', `${main.name} — full view`);
+      await expect(page.locator('.conversation-detail-dialog')).toHaveAttribute(
+        'aria-label',
+        `${main.name} — full view`,
+      );
       await page.keyboard.press('Escape');
       await expect(page.locator('.conversation-detail-overlay')).toHaveCount(0);
     });

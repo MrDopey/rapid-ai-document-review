@@ -21,7 +21,10 @@ import type { DocumentSnapshot, SocketLike } from '../../src/events/event-hub.js
  */
 
 const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
-function proposeDirective(summary: string, operations: { old_string: string; new_string: string }[]): string {
+function proposeDirective(
+  summary: string,
+  operations: { old_string: string; new_string: string }[],
+): string {
   return PROPOSE_EDIT_DIRECTIVE + JSON.stringify({ summary, operations });
 }
 
@@ -52,7 +55,10 @@ async function call(
 
 /** Opens a real WebSocket to `/events`, sends the initial `subscribe` frame, and waits for the
  *  `subscribed` reply — mirroring the handshake in websocket-events.md §Handshake and replay. */
-async function openSocket(baseUrl: string, sinceSequence: number | null): Promise<{ ws: WebSocket; frames: Frame[] }> {
+async function openSocket(
+  baseUrl: string,
+  sinceSequence: number | null,
+): Promise<{ ws: WebSocket; frames: Frame[] }> {
   const ws = new WebSocket(`${baseUrl}/events`);
   const frames: Frame[] = [];
   ws.addEventListener('message', (ev) => {
@@ -63,7 +69,9 @@ async function openSocket(baseUrl: string, sinceSequence: number | null): Promis
     ws.addEventListener('error', (e) => reject(e), { once: true });
   });
   ws.send(JSON.stringify({ type: 'subscribe', sinceSequence }));
-  await waitFor(() => frames.some((f) => f.type === 'subscribed'), { message: 'never received "subscribed"' });
+  await waitFor(() => frames.some((f) => f.type === 'subscribed'), {
+    message: 'never received "subscribed"',
+  });
   return { ws, frames };
 }
 
@@ -168,202 +176,257 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     ).toThrow();
   });
 
-  it(
-    'end-to-end flow validates every emitted event type, and asserts ordering guarantees 2, 7 and 8',
-    async () => {
-      const { app, storage, baseUrl } = await setup();
-      const created = await createDoc(app);
-      const mainId = created.mainConversation.id;
-      const { ws, frames } = await openSocket(baseUrl, null);
-      try {
-        // thinkingVisible on, to also exercise thinking_delta.
-        await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
-        await waitFor(() => frames.some((f) => f.type === 'settings_changed'));
+  it('end-to-end flow validates every emitted event type, and asserts ordering guarantees 2, 7 and 8', async () => {
+    const { app, storage, baseUrl } = await setup();
+    const created = await createDoc(app);
+    const mainId = created.mainConversation.id;
+    const { ws, frames } = await openSocket(baseUrl, null);
+    try {
+      // thinkingVisible on, to also exercise thinking_delta.
+      await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
+      await waitFor(() => frames.some((f) => f.type === 'settings_changed'));
 
-        // --- Non-Primary staged proposal, applied cleanly ---
-        const branchId = await branchAndSettle(app, storage, mainId);
-        await call(app, 'POST', `/api/conversations/${branchId}/send`, {
-          message: proposeDirective('tweak', [
-            { old_string: 'Trailing unique tail xyz123.', new_string: 'Trailing unique tail changed.' },
-          ]),
-        });
-        await waitFor(() => storage.listStagedEditsByConversation(branchId).length === 1);
-        await waitFor(() => storage.getConversation(branchId)?.status === 'idle');
-        const stagedNonPrimary = storage.listStagedEditsByConversation(branchId)[0]!;
-        await waitFor(() => frames.some((f) => f.type === 'staged_edit_created'));
+      // --- Non-Primary staged proposal, applied cleanly ---
+      const branchId = await branchAndSettle(app, storage, mainId);
+      await call(app, 'POST', `/api/conversations/${branchId}/send`, {
+        message: proposeDirective('tweak', [
+          {
+            old_string: 'Trailing unique tail xyz123.',
+            new_string: 'Trailing unique tail changed.',
+          },
+        ]),
+      });
+      await waitFor(() => storage.listStagedEditsByConversation(branchId).length === 1);
+      await waitFor(() => storage.getConversation(branchId)?.status === 'idle');
+      const stagedNonPrimary = storage.listStagedEditsByConversation(branchId)[0]!;
+      await waitFor(() => frames.some((f) => f.type === 'staged_edit_created'));
 
-        const applyRes = await call(app, 'POST', `/api/edits/${stagedNonPrimary.id}/apply`, {});
-        expect((applyRes.json as { outcome: string }).outcome).toBe('applied');
-        await waitFor(() => frames.some((f) => f.type === 'staged_edit_applied'));
-        await waitFor(() => frames.some((f) => f.type === 'document_content_changed'));
+      const applyRes = await call(app, 'POST', `/api/edits/${stagedNonPrimary.id}/apply`, {});
+      expect((applyRes.json as { outcome: string }).outcome).toBe('applied');
+      await waitFor(() => frames.some((f) => f.type === 'staged_edit_applied'));
+      await waitFor(() => frames.some((f) => f.type === 'document_content_changed'));
 
-        // Guarantee 2 (non-Primary): staged_edit_created precedes staged_edit_applied for the
-        // same stagedEditId.
-        const createdIdxNonPrimary = frames.findIndex(
-          (f) => f.type === 'staged_edit_created' && (f.data as { stagedEditId: string }).stagedEditId === stagedNonPrimary.id,
+      // Guarantee 2 (non-Primary): staged_edit_created precedes staged_edit_applied for the
+      // same stagedEditId.
+      const createdIdxNonPrimary = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_created' &&
+          (f.data as { stagedEditId: string }).stagedEditId === stagedNonPrimary.id,
+      );
+      const appliedIdxNonPrimary = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_applied' &&
+          (f.data as { stagedEditId: string }).stagedEditId === stagedNonPrimary.id,
+      );
+      expect(createdIdxNonPrimary).toBeGreaterThanOrEqual(0);
+      expect(appliedIdxNonPrimary).toBeGreaterThan(createdIdxNonPrimary);
+
+      // Guarantee 4: staged_edit_applied precedes document_content_changed/revision_created it causes.
+      const contentChangedIdx = frames.findIndex((f) => f.type === 'document_content_changed');
+      expect(contentChangedIdx).toBeGreaterThan(appliedIdxNonPrimary);
+
+      // --- Primary auto-apply path (Main is Primary by default) ---
+      await call(app, 'POST', `/api/conversations/${mainId}/send`, {
+        message: proposeDirective('primary tweak', [
+          {
+            old_string: 'A second paragraph stays constant across scenarios.',
+            new_string: 'A second paragraph now differs.',
+          },
+        ]),
+      });
+      await waitFor(() => storage.listStagedEditsByConversation(mainId).length === 1);
+      await waitFor(() => storage.getConversation(mainId)?.status === 'idle');
+      const stagedPrimary = storage.listStagedEditsByConversation(mainId)[0]!;
+      expect(stagedPrimary.autoApplied).toBe(true);
+      expect(stagedPrimary.status).toBe('applied');
+
+      const createdIdxPrimary = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_created' &&
+          (f.data as { stagedEditId: string }).stagedEditId === stagedPrimary.id,
+      );
+      const appliedIdxPrimary = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_applied' &&
+          (f.data as { stagedEditId: string }).stagedEditId === stagedPrimary.id,
+      );
+      // Guarantee 2, Primary auto-apply path: staged_edit_created still precedes the verdict
+      // even though both happen within the same synchronous tool call (SC-004).
+      expect(createdIdxPrimary).toBeGreaterThanOrEqual(0);
+      expect(appliedIdxPrimary).toBeGreaterThan(createdIdxPrimary);
+      expect((frames[appliedIdxPrimary]!.data as { autoApplied: boolean }).autoApplied).toBe(true);
+
+      // Guarantee 8: agent_started precedes any staged_edit_created produced by a tool call in
+      // that same run, for both proposals above (and implicitly every other run in this test).
+      for (const editId of [stagedNonPrimary.id, stagedPrimary.id]) {
+        const scIdx = frames.findIndex(
+          (f) =>
+            f.type === 'staged_edit_created' &&
+            (f.data as { stagedEditId: string }).stagedEditId === editId,
         );
-        const appliedIdxNonPrimary = frames.findIndex(
-          (f) => f.type === 'staged_edit_applied' && (f.data as { stagedEditId: string }).stagedEditId === stagedNonPrimary.id,
-        );
-        expect(createdIdxNonPrimary).toBeGreaterThanOrEqual(0);
-        expect(appliedIdxNonPrimary).toBeGreaterThan(createdIdxNonPrimary);
-
-        // Guarantee 4: staged_edit_applied precedes document_content_changed/revision_created it causes.
-        const contentChangedIdx = frames.findIndex((f) => f.type === 'document_content_changed');
-        expect(contentChangedIdx).toBeGreaterThan(appliedIdxNonPrimary);
-
-        // --- Primary auto-apply path (Main is Primary by default) ---
-        await call(app, 'POST', `/api/conversations/${mainId}/send`, {
-          message: proposeDirective('primary tweak', [
-            { old_string: 'A second paragraph stays constant across scenarios.', new_string: 'A second paragraph now differs.' },
-          ]),
-        });
-        await waitFor(() => storage.listStagedEditsByConversation(mainId).length === 1);
-        await waitFor(() => storage.getConversation(mainId)?.status === 'idle');
-        const stagedPrimary = storage.listStagedEditsByConversation(mainId)[0]!;
-        expect(stagedPrimary.autoApplied).toBe(true);
-        expect(stagedPrimary.status).toBe('applied');
-
-        const createdIdxPrimary = frames.findIndex(
-          (f) => f.type === 'staged_edit_created' && (f.data as { stagedEditId: string }).stagedEditId === stagedPrimary.id,
-        );
-        const appliedIdxPrimary = frames.findIndex(
-          (f) => f.type === 'staged_edit_applied' && (f.data as { stagedEditId: string }).stagedEditId === stagedPrimary.id,
-        );
-        // Guarantee 2, Primary auto-apply path: staged_edit_created still precedes the verdict
-        // even though both happen within the same synchronous tool call (SC-004).
-        expect(createdIdxPrimary).toBeGreaterThanOrEqual(0);
-        expect(appliedIdxPrimary).toBeGreaterThan(createdIdxPrimary);
-        expect((frames[appliedIdxPrimary]!.data as { autoApplied: boolean }).autoApplied).toBe(true);
-
-        // Guarantee 8: agent_started precedes any staged_edit_created produced by a tool call in
-        // that same run, for both proposals above (and implicitly every other run in this test).
-        for (const editId of [stagedNonPrimary.id, stagedPrimary.id]) {
-          const scIdx = frames.findIndex(
-            (f) => f.type === 'staged_edit_created' && (f.data as { stagedEditId: string }).stagedEditId === editId,
-          );
-          const conversationId = frames[scIdx]!.conversationId!;
-          // The most recent agent_started for this conversation before the proposal.
-          let lastAgentStarted = -1;
-          let lastAgentCompleted = -1;
-          for (let i = 0; i < scIdx; i += 1) {
-            const f = frames[i]!;
-            if (f.conversationId !== conversationId) continue;
-            if (f.type === 'agent_started') lastAgentStarted = i;
-            if (f.type === 'agent_completed' || f.type === 'agent_error') lastAgentCompleted = i;
-          }
-          expect(lastAgentStarted).toBeGreaterThanOrEqual(0);
-          expect(lastAgentStarted).toBeGreaterThan(lastAgentCompleted); // still inside that run
+        const conversationId = frames[scIdx]!.conversationId!;
+        // The most recent agent_started for this conversation before the proposal.
+        let lastAgentStarted = -1;
+        let lastAgentCompleted = -1;
+        for (let i = 0; i < scIdx; i += 1) {
+          const f = frames[i]!;
+          if (f.conversationId !== conversationId) continue;
+          if (f.type === 'agent_started') lastAgentStarted = i;
+          if (f.type === 'agent_completed' || f.type === 'agent_error') lastAgentCompleted = i;
         }
-
-        // --- Conflict, budget exhausted on first conflict (maxReplacementAttempts: 0) ---
-        await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 0 });
-        const branch2Id = await branchAndSettle(app, storage, mainId);
-        await call(app, 'POST', `/api/conversations/${branch2Id}/send`, {
-          message: proposeDirective('conflict target', [
-            { old_string: 'The opening paragraph anchors everything else.', new_string: 'Something new.' },
-          ]),
-        });
-        await waitFor(() => storage.listStagedEditsByConversation(branch2Id).length === 1);
-        await waitFor(() => storage.getConversation(branch2Id)?.status === 'idle');
-        const edit1 = storage.listStagedEditsByConversation(branch2Id)[0]!;
-        await call(app, 'PATCH', '/api/document', {
-          changes: [{ from: 0, to: 5000, insert: DOC_WITH_HEADING.replace('The opening paragraph anchors everything else.', 'A drifted paragraph.') }],
-        });
-        const exhaustedRes = await call(app, 'POST', `/api/edits/${edit1.id}/apply`, {});
-        expect((exhaustedRes.json as { outcome: string }).outcome).toBe('conflict_exhausted');
-        await waitFor(() =>
-          frames.some((f) => f.type === 'staged_edit_replacement_exhausted' && (f.data as { stagedEditId: string }).stagedEditId === edit1.id),
-        );
-        const supersededIdx1 = frames.findIndex(
-          (f) => f.type === 'staged_edit_superseded' && (f.data as { stagedEditId: string }).stagedEditId === edit1.id,
-        );
-        const exhaustedIdx = frames.findIndex(
-          (f) => f.type === 'staged_edit_replacement_exhausted' && (f.data as { stagedEditId: string }).stagedEditId === edit1.id,
-        );
-        // Guarantee 7 (exhausted branch): staged_edit_superseded precedes staged_edit_replacement_exhausted.
-        expect(supersededIdx1).toBeGreaterThanOrEqual(0);
-        expect(exhaustedIdx).toBeGreaterThan(supersededIdx1);
-        expect((frames[supersededIdx1]!.data as { replacementRequested: boolean }).replacementRequested).toBe(false);
-
-        // --- Conflict, then an agent-produced replacement (default budget) ---
-        await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 2 });
-        const branch3Id = await branchAndSettle(app, storage, mainId);
-        await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
-          message: proposeDirective('conflict target 2', [
-            { old_string: 'Trailing unique tail changed.', new_string: 'Trailing unique tail from branch3.' },
-          ]),
-        });
-        await waitFor(() => storage.listStagedEditsByConversation(branch3Id).length === 1);
-        await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
-        const edit2 = storage.listStagedEditsByConversation(branch3Id)[0]!;
-        const liveContent = (await call(app, 'GET', '/api/document')) as unknown as { json: { content: string } };
-        const currentContent = (liveContent.json as { content: string }).content;
-        await call(app, 'PATCH', '/api/document', {
-          changes: [{ from: 0, to: currentContent.length, insert: currentContent.replace('Trailing unique tail changed.', 'Drifted again.') }],
-        });
-        const conflictRes = await call(app, 'POST', `/api/edits/${edit2.id}/apply`, {});
-        expect((conflictRes.json as { outcome: string }).outcome).toBe('conflict');
-        await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
-
-        // The conversation's next proposal automatically becomes edit2's replacement.
-        await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
-          message: proposeDirective('replacement', [{ old_string: 'Drifted again.', new_string: 'Drifted again, fixed.' }]),
-        });
-        await waitFor(() =>
-          frames.some(
-            (f) => f.type === 'staged_edit_replacement_created' && (f.data as { supersedesId: string }).supersedesId === edit2.id,
-          ),
-        );
-        const supersededIdx2 = frames.findIndex(
-          (f) => f.type === 'staged_edit_superseded' && (f.data as { stagedEditId: string }).stagedEditId === edit2.id,
-        );
-        const replacementCreatedIdx = frames.findIndex(
-          (f) => f.type === 'staged_edit_replacement_created' && (f.data as { supersedesId: string }).supersedesId === edit2.id,
-        );
-        // Guarantee 7 (replacement branch): staged_edit_superseded precedes staged_edit_replacement_created.
-        expect(supersededIdx2).toBeGreaterThanOrEqual(0);
-        expect(replacementCreatedIdx).toBeGreaterThan(supersededIdx2);
-
-        // --- Every non-control frame observed validates against the discriminated union ---
-        const observedTypes = new Set<string>();
-        for (const frame of frames) {
-          if (frame.type === 'subscribed' || frame.type === 'pong') continue;
-          const parsed = ApplicationEvent.parse(frame); // throws on drift
-          observedTypes.add(parsed.type);
-        }
-        // A representative slice of the vocabulary this flow should have driven end to end.
-        // (document_created is not observable live here — see the handshake test above — since
-        // the document must already exist before a socket's subscribe can complete at all.)
-        for (const expectedType of [
-          'revision_created',
-          'settings_changed',
-          'conversation_started',
-          'conversation_status_changed',
-          'agent_started',
-          'agent_completed',
-          'message_started',
-          'message_completed',
-          'tool_started',
-          'tool_completed',
-          'staged_edit_created',
-          'staged_edit_applied',
-          'staged_edit_superseded',
-          'staged_edit_replacement_created',
-          'staged_edit_replacement_exhausted',
-          'document_content_changed',
-        ]) {
-          expect(observedTypes.has(expectedType), `expected to have observed "${expectedType}"`).toBe(true);
-        }
-        expect(observedTypes.has('thinking_delta')).toBe(true);
-        expect(observedTypes.has('text_delta')).toBe(true);
-      } finally {
-        await closeSocket(ws);
-        await app.close();
+        expect(lastAgentStarted).toBeGreaterThanOrEqual(0);
+        expect(lastAgentStarted).toBeGreaterThan(lastAgentCompleted); // still inside that run
       }
-    },
-    20_000,
-  );
+
+      // --- Conflict, budget exhausted on first conflict (maxReplacementAttempts: 0) ---
+      await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 0 });
+      const branch2Id = await branchAndSettle(app, storage, mainId);
+      await call(app, 'POST', `/api/conversations/${branch2Id}/send`, {
+        message: proposeDirective('conflict target', [
+          {
+            old_string: 'The opening paragraph anchors everything else.',
+            new_string: 'Something new.',
+          },
+        ]),
+      });
+      await waitFor(() => storage.listStagedEditsByConversation(branch2Id).length === 1);
+      await waitFor(() => storage.getConversation(branch2Id)?.status === 'idle');
+      const edit1 = storage.listStagedEditsByConversation(branch2Id)[0]!;
+      await call(app, 'PATCH', '/api/document', {
+        changes: [
+          {
+            from: 0,
+            to: 5000,
+            insert: DOC_WITH_HEADING.replace(
+              'The opening paragraph anchors everything else.',
+              'A drifted paragraph.',
+            ),
+          },
+        ],
+      });
+      const exhaustedRes = await call(app, 'POST', `/api/edits/${edit1.id}/apply`, {});
+      expect((exhaustedRes.json as { outcome: string }).outcome).toBe('conflict_exhausted');
+      await waitFor(() =>
+        frames.some(
+          (f) =>
+            f.type === 'staged_edit_replacement_exhausted' &&
+            (f.data as { stagedEditId: string }).stagedEditId === edit1.id,
+        ),
+      );
+      const supersededIdx1 = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_superseded' &&
+          (f.data as { stagedEditId: string }).stagedEditId === edit1.id,
+      );
+      const exhaustedIdx = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_replacement_exhausted' &&
+          (f.data as { stagedEditId: string }).stagedEditId === edit1.id,
+      );
+      // Guarantee 7 (exhausted branch): staged_edit_superseded precedes staged_edit_replacement_exhausted.
+      expect(supersededIdx1).toBeGreaterThanOrEqual(0);
+      expect(exhaustedIdx).toBeGreaterThan(supersededIdx1);
+      expect(
+        (frames[supersededIdx1]!.data as { replacementRequested: boolean }).replacementRequested,
+      ).toBe(false);
+
+      // --- Conflict, then an agent-produced replacement (default budget) ---
+      await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 2 });
+      const branch3Id = await branchAndSettle(app, storage, mainId);
+      await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
+        message: proposeDirective('conflict target 2', [
+          {
+            old_string: 'Trailing unique tail changed.',
+            new_string: 'Trailing unique tail from branch3.',
+          },
+        ]),
+      });
+      await waitFor(() => storage.listStagedEditsByConversation(branch3Id).length === 1);
+      await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
+      const edit2 = storage.listStagedEditsByConversation(branch3Id)[0]!;
+      const liveContent = (await call(app, 'GET', '/api/document')) as unknown as {
+        json: { content: string };
+      };
+      const currentContent = (liveContent.json as { content: string }).content;
+      await call(app, 'PATCH', '/api/document', {
+        changes: [
+          {
+            from: 0,
+            to: currentContent.length,
+            insert: currentContent.replace('Trailing unique tail changed.', 'Drifted again.'),
+          },
+        ],
+      });
+      const conflictRes = await call(app, 'POST', `/api/edits/${edit2.id}/apply`, {});
+      expect((conflictRes.json as { outcome: string }).outcome).toBe('conflict');
+      await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
+
+      // The conversation's next proposal automatically becomes edit2's replacement.
+      await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
+        message: proposeDirective('replacement', [
+          { old_string: 'Drifted again.', new_string: 'Drifted again, fixed.' },
+        ]),
+      });
+      await waitFor(() =>
+        frames.some(
+          (f) =>
+            f.type === 'staged_edit_replacement_created' &&
+            (f.data as { supersedesId: string }).supersedesId === edit2.id,
+        ),
+      );
+      const supersededIdx2 = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_superseded' &&
+          (f.data as { stagedEditId: string }).stagedEditId === edit2.id,
+      );
+      const replacementCreatedIdx = frames.findIndex(
+        (f) =>
+          f.type === 'staged_edit_replacement_created' &&
+          (f.data as { supersedesId: string }).supersedesId === edit2.id,
+      );
+      // Guarantee 7 (replacement branch): staged_edit_superseded precedes staged_edit_replacement_created.
+      expect(supersededIdx2).toBeGreaterThanOrEqual(0);
+      expect(replacementCreatedIdx).toBeGreaterThan(supersededIdx2);
+
+      // --- Every non-control frame observed validates against the discriminated union ---
+      const observedTypes = new Set<string>();
+      for (const frame of frames) {
+        if (frame.type === 'subscribed' || frame.type === 'pong') continue;
+        const parsed = ApplicationEvent.parse(frame); // throws on drift
+        observedTypes.add(parsed.type);
+      }
+      // A representative slice of the vocabulary this flow should have driven end to end.
+      // (document_created is not observable live here — see the handshake test above — since
+      // the document must already exist before a socket's subscribe can complete at all.)
+      for (const expectedType of [
+        'revision_created',
+        'settings_changed',
+        'conversation_started',
+        'conversation_status_changed',
+        'agent_started',
+        'agent_completed',
+        'message_started',
+        'message_completed',
+        'tool_started',
+        'tool_completed',
+        'staged_edit_created',
+        'staged_edit_applied',
+        'staged_edit_superseded',
+        'staged_edit_replacement_created',
+        'staged_edit_replacement_exhausted',
+        'document_content_changed',
+      ]) {
+        expect(observedTypes.has(expectedType), `expected to have observed "${expectedType}"`).toBe(
+          true,
+        );
+      }
+      expect(observedTypes.has('thinking_delta')).toBe(true);
+      expect(observedTypes.has('text_delta')).toBe(true);
+    } finally {
+      await closeSocket(ws);
+      await app.close();
+    }
+  }, 20_000);
 
   it('document_content_changed.contentHash matches SHA-256 of the resulting content', async () => {
     const { app, storage, baseUrl } = await setup();
@@ -390,7 +453,9 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
     const first = await openSocket(baseUrl, null);
-    const subscribedFirst = SubscribedFrame.parse(first.frames.find((f) => f.type === 'subscribed'));
+    const subscribedFirst = SubscribedFrame.parse(
+      first.frames.find((f) => f.type === 'subscribed'),
+    );
     const lastSeenSequence = subscribedFirst.currentSequence;
 
     // Generate more persisted events while "disconnected" (socket #1 is closed first).
@@ -401,7 +466,9 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     expect(afterSequence).toBeGreaterThan(lastSeenSequence);
 
     const second = await openSocket(baseUrl, lastSeenSequence);
-    const subscribedSecond = SubscribedFrame.parse(second.frames.find((f) => f.type === 'subscribed'));
+    const subscribedSecond = SubscribedFrame.parse(
+      second.frames.find((f) => f.type === 'subscribed'),
+    );
     expect(subscribedSecond.currentSequence).toBe(afterSequence);
     expect(subscribedSecond.replayCount).toBe(afterSequence - lastSeenSequence);
 
@@ -453,7 +520,9 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     try {
       // The synthesized catch-up frame(s) must appear immediately after "subscribed", before any
       // further live delta this new socket receives.
-      await waitFor(() => second.frames.length >= 2, { message: 'no catch-up frame arrived after subscribed' });
+      await waitFor(() => second.frames.length >= 2, {
+        message: 'no catch-up frame arrived after subscribed',
+      });
       const afterSubscribed = second.frames[1]!;
       expect(['text_delta', 'thinking_delta']).toContain(afterSubscribed.type);
       expect(typeof (afterSubscribed.data as { delta: string }).delta).toBe('string');
@@ -467,7 +536,7 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     }
   });
 
-  it('thinkingVisible toggle affects only subsequent frames, not an in-flight run\'s already-emitted deltas', async () => {
+  it("thinkingVisible toggle affects only subsequent frames, not an in-flight run's already-emitted deltas", async () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
@@ -491,9 +560,13 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
       // No thinking_delta may appear after the settings_changed frame — the check happens fresh
       // on every emission (event-bridge.ts), and storage was already updated before that frame
       // went out.
-      const thinkingAfterToggle = frames.slice(toggleIdx + 1).filter((f) => f.type === 'thinking_delta');
+      const thinkingAfterToggle = frames
+        .slice(toggleIdx + 1)
+        .filter((f) => f.type === 'thinking_delta');
       expect(thinkingAfterToggle).toHaveLength(0);
-      const thinkingBeforeToggle = frames.slice(0, toggleIdx).filter((f) => f.type === 'thinking_delta');
+      const thinkingBeforeToggle = frames
+        .slice(0, toggleIdx)
+        .filter((f) => f.type === 'thinking_delta');
       expect(thinkingBeforeToggle.length).toBeGreaterThanOrEqual(1);
     } finally {
       await closeSocket(ws);
@@ -519,7 +592,11 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
       // ...but none of them made it into the persisted event log.
       const persisted = storage.listEventsSince(created.document.id, null);
-      expect(persisted.some((row) => (EPHEMERAL_EVENT_TYPES as readonly string[]).includes(row.eventType))).toBe(false);
+      expect(
+        persisted.some((row) =>
+          (EPHEMERAL_EVENT_TYPES as readonly string[]).includes(row.eventType),
+        ),
+      ).toBe(false);
       expect(persisted.some((row) => row.eventType === 'message_completed')).toBe(true);
     } finally {
       await closeSocket(ws);
@@ -560,7 +637,14 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
       const storage = new SqliteStorageAdapter(':memory:');
       const eventService = new EventService(storage);
       const emptySnapshot: DocumentSnapshot = {
-        document: { id: 'doc_x', title: '', currentRevision: 0, createdAt: '', updatedAt: '', content: '' },
+        document: {
+          id: 'doc_x',
+          title: '',
+          currentRevision: 0,
+          createdAt: '',
+          updatedAt: '',
+          content: '',
+        },
         conversations: [],
       };
       const eventHub = new EventHub(eventService, () => emptySnapshot);

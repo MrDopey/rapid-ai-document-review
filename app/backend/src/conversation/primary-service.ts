@@ -16,7 +16,11 @@ export class PrimaryConversationClosedError extends Error {}
 export class PrimaryConversationErroredError extends Error {}
 
 export class PrimaryTargetBusyError extends Error {
-  readonly details: { currentPrimaryId: string | null; targetId: string; busyConversationId: string };
+  readonly details: {
+    currentPrimaryId: string | null;
+    targetId: string;
+    busyConversationId: string;
+  };
 
   constructor(
     message: string,
@@ -53,7 +57,12 @@ export class PrimaryService {
   private readonly primaryMutex: PrimaryMutex;
   private readonly publisher: EventPublisher;
 
-  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, primaryMutex: PrimaryMutex) {
+  constructor(
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    primaryMutex: PrimaryMutex,
+  ) {
     this.storage = storage;
     this.eventService = eventService;
     this.eventHub = eventHub;
@@ -66,13 +75,20 @@ export class PrimaryService {
    * Primary or the target is `working` at the instant of the call; otherwise the switch is
    * immediate. Never throws for "no Primary yet" — that is a valid state (FR-027a), not an error.
    */
-  async designate(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<DesignatePrimaryResponse> {
+  async designate(
+    conversationId: string,
+    whenBusy?: PrimaryWhenBusy,
+  ): Promise<DesignatePrimaryResponse> {
     const target = this.getOrThrow(conversationId);
     if (target.status === 'closed') {
-      throw new PrimaryConversationClosedError('A closed conversation cannot be designated Primary');
+      throw new PrimaryConversationClosedError(
+        'A closed conversation cannot be designated Primary',
+      );
     }
     if (target.status === 'errored') {
-      throw new PrimaryConversationErroredError('An errored conversation cannot be designated Primary');
+      throw new PrimaryConversationErroredError(
+        'An errored conversation cannot be designated Primary',
+      );
     }
 
     // A new designation request supersedes any pending deferred switch for this document,
@@ -99,11 +115,14 @@ export class PrimaryService {
     const busyConversationId = currentPrimaryBusy ? currentPrimary!.id : target.id;
 
     if (!whenBusy) {
-      throw new PrimaryTargetBusyError('The current Primary or the target conversation is actively working', {
-        currentPrimaryId: currentPrimary?.id ?? null,
-        targetId: target.id,
-        busyConversationId,
-      });
+      throw new PrimaryTargetBusyError(
+        'The current Primary or the target conversation is actively working',
+        {
+          currentPrimaryId: currentPrimary?.id ?? null,
+          targetId: target.id,
+          busyConversationId,
+        },
+      );
     }
 
     if (whenBusy === 'cancel') {
@@ -168,7 +187,11 @@ export class PrimaryService {
    *  re-validates the target before switching — this is what makes FR-029a's cancellation "free":
    *  if the target has closed or errored by then, the switch simply never happens, and nothing
    *  reports it as an error. */
-  private scheduleDeferredSwitch(documentId: string, targetId: string, busyConversationId: string): void {
+  private scheduleDeferredSwitch(
+    documentId: string,
+    targetId: string,
+    busyConversationId: string,
+  ): void {
     const listener: InternalEventListener = (frame) => {
       if (frame.documentId !== documentId) return;
       if (frame.type !== 'agent_completed') return;
@@ -185,7 +208,11 @@ export class PrimaryService {
       });
     };
     this.eventHub.addListener(listener);
-    this.pending.set(documentId, { targetId, busyConversationId, unsubscribe: () => this.eventHub.removeListener(listener) });
+    this.pending.set(documentId, {
+      targetId,
+      busyConversationId,
+      unsubscribe: () => this.eventHub.removeListener(listener),
+    });
   }
 
   private async executeDeferredSwitch(documentId: string, targetId: string): Promise<void> {
@@ -224,9 +251,12 @@ export class PrimaryService {
   ): Promise<DesignatePrimaryResponse> {
     return this.primaryMutex.withLock(documentId, () => {
       const target = this.storage.getConversation(targetId);
-      if (!target) throw new PrimaryConversationNotFoundError(`Conversation not found: ${targetId}`);
+      if (!target)
+        throw new PrimaryConversationNotFoundError(`Conversation not found: ${targetId}`);
 
-      const freshPrevious = previousPrimary ? this.storage.getConversation(previousPrimary.id) : null;
+      const freshPrevious = previousPrimary
+        ? this.storage.getConversation(previousPrimary.id)
+        : null;
       const previousStillWorking = freshPrevious?.status === 'working';
 
       if (freshPrevious && freshPrevious.id !== target.id) {
@@ -252,11 +282,17 @@ export class PrimaryService {
 
   private getOrThrow(conversationId: string): ConversationRow {
     const conversation = this.storage.getConversation(conversationId);
-    if (!conversation) throw new PrimaryConversationNotFoundError(`Conversation not found: ${conversationId}`);
+    if (!conversation)
+      throw new PrimaryConversationNotFoundError(`Conversation not found: ${conversationId}`);
     return conversation;
   }
 
-  private publish(documentId: string, conversationId: string | null, type: ApplicationEvent['type'], data: unknown): void {
+  private publish(
+    documentId: string,
+    conversationId: string | null,
+    type: ApplicationEvent['type'],
+    data: unknown,
+  ): void {
     this.publisher.publish(documentId, conversationId, type, data);
   }
 }

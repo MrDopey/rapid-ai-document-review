@@ -151,14 +151,18 @@ describe('buildMainSeedMessage', () => {
 describe('wrapDocumentRevision', () => {
   it('wraps content in matching opening/closing tags naming the revision, with a blank line on each side', () => {
     const wrapped = wrapDocumentRevision(7, 'Some document content.');
-    expect(wrapped).toBe('<document-revision-7>\n\nSome document content.\n\n</document-revision-7>');
+    expect(wrapped).toBe(
+      '<document-revision-7>\n\nSome document content.\n\n</document-revision-7>',
+    );
   });
 });
 
 describe('wrapHighlightedSelection', () => {
   it('wraps content in matching opening/closing <highlighted-selection> tags, with a blank line on each side', () => {
     const wrapped = wrapHighlightedSelection('Some selected text.');
-    expect(wrapped).toBe('<highlighted-selection>\n\nSome selected text.\n\n</highlighted-selection>');
+    expect(wrapped).toBe(
+      '<highlighted-selection>\n\nSome selected text.\n\n</highlighted-selection>',
+    );
   });
 });
 
@@ -170,12 +174,18 @@ describe('buildBranchSeedMessage', () => {
 
     // Full document, wrapped in the matching <document-revision-N> tag (constitution convention),
     // with a blank line on each side of the content.
-    expect(message).toContain('<document-revision-4>\n\n' + documentContent + '\n\n</document-revision-4>');
+    expect(message).toContain(
+      '<document-revision-4>\n\n' + documentContent + '\n\n</document-revision-4>',
+    );
     // Highlighted selection, wrapped in its own distinctly-named matching tag, same blank-line spacing.
-    expect(message).toContain('<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>');
+    expect(message).toContain(
+      '<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>',
+    );
 
     // Ordering: full document block precedes the highlighted-selection block.
-    expect(message.indexOf('<document-revision-4>')).toBeLessThan(message.indexOf('<highlighted-selection>'));
+    expect(message.indexOf('<document-revision-4>')).toBeLessThan(
+      message.indexOf('<highlighted-selection>'),
+    );
 
     // Closing prose primes the agent for a follow-up user message about the highlighted passage
     // specifically, not the whole document, without issuing an instruction itself.
@@ -191,7 +201,9 @@ describe('buildSelectionOnlySeedMessage', () => {
     const selectionText = 'The specific highlighted passage.';
     const message = buildSelectionOnlySeedMessage(selectionText);
 
-    expect(message).toContain('<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>');
+    expect(message).toContain(
+      '<highlighted-selection>\n\n' + selectionText + '\n\n</highlighted-selection>',
+    );
     expect(message).not.toContain('<document-revision-');
 
     // Same closing-prose convention as buildSeedMessage's selection block: primes the agent for a

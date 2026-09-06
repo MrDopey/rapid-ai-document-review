@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { E2E_BACKEND_PORT, E2E_DATABASE_PATH, E2E_PI_SESSION_PATH, E2E_PI_AGENT_DIR } from './tests/e2e/env.js';
+import {
+  E2E_BACKEND_PORT,
+  E2E_DATABASE_PATH,
+  E2E_PI_SESSION_PATH,
+  E2E_PI_AGENT_DIR,
+} from './tests/e2e/env.js';
 
 export default defineConfig({
   testDir: './tests/e2e',

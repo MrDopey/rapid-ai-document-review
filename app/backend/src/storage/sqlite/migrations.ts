@@ -187,7 +187,9 @@ const MIGRATIONS: Migration[] = [
     version: 2,
     apply: (db) => {
       addColumnIfMissing(db, 'conversation', 'is_current_main', 'INTEGER NOT NULL DEFAULT 0');
-      db.exec(`UPDATE conversation SET is_current_main = 1 WHERE kind = 'main' AND status != 'closed'`);
+      db.exec(
+        `UPDATE conversation SET is_current_main = 1 WHERE kind = 'main' AND status != 'closed'`,
+      );
       db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_current_main
         ON conversation (document_id) WHERE is_current_main = 1`);
     },
@@ -197,7 +199,12 @@ const MIGRATIONS: Migration[] = [
 /** Adds `table.column` with `definition` only if it isn't already there — safe to call whether
  *  the column arrived via the fresh-install `CREATE TABLE` body or a prior run of this same
  *  migration, so a migration's `apply` never has to know which case it's in. */
-function addColumnIfMissing(db: DatabaseSync, table: string, column: string, definition: string): void {
+function addColumnIfMissing(
+  db: DatabaseSync,
+  table: string,
+  column: string,
+  definition: string,
+): void {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (columns.some((c) => c.name === column)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
@@ -245,7 +252,5 @@ export function migrate(db: DatabaseSync): void {
     if (isIndexStatement(statement)) db.exec(statement);
   }
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR IGNORE INTO user_settings (id, updated_at) VALUES (1, ?)`,
-  ).run(now);
+  db.prepare(`INSERT OR IGNORE INTO user_settings (id, updated_at) VALUES (1, ?)`).run(now);
 }

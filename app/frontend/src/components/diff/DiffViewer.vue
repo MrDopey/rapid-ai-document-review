@@ -63,14 +63,18 @@ const wordDiffs = computed(() =>
 
 const fullDocHasNoDiff = computed(
   () =>
-    fullDocDiff.value.length === 1 &&
-    !fullDocDiff.value[0].added &&
-    !fullDocDiff.value[0].removed,
+    fullDocDiff.value.length === 1 && !fullDocDiff.value[0].added && !fullDocDiff.value[0].removed,
 );
 </script>
 
 <template>
-  <div ref="rootEl" class="diff-viewer" role="dialog" aria-label="Review proposed edit" aria-modal="true">
+  <div
+    ref="rootEl"
+    class="diff-viewer"
+    role="dialog"
+    aria-label="Review proposed edit"
+    aria-modal="true"
+  >
     <header class="diff-header">
       <div class="diff-header-left">
         <span class="pane-eyebrow">Proposed edit</span>
@@ -169,8 +173,14 @@ const fullDocHasNoDiff = computed(
           :hidden="view !== 'full'"
         >
           <p v-if="fullDocHasNoDiff">No differences found.</p>
-          <pre v-else-if="!focusedView" class="text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="unified" /></pre>
-          <pre v-else class="text-wrap-safe-pre"><template v-for="(group, i) in fullDocGroups" :key="i"><DiffText v-if="isGroupVisible(group, i)" :parts="groupParts(group)" side="unified" /><button v-else type="button" class="collapsed-marker" @click="expandGroup(i)">⋯ {{ group.lines.length }} unchanged line{{ group.lines.length === 1 ? '' : 's' }} ⋯</button></template></pre>
+          <pre
+            v-else-if="!focusedView"
+            class="text-wrap-safe-pre"
+          ><DiffText :parts="fullDocDiff" side="unified" /></pre>
+          <pre
+            v-else
+            class="text-wrap-safe-pre"
+          ><template v-for="(group, i) in fullDocGroups" :key="i"><DiffText v-if="isGroupVisible(group, i)" :parts="groupParts(group)" side="unified" /><button v-else type="button" class="collapsed-marker" @click="expandGroup(i)">⋯ {{ group.lines.length }} unchanged line{{ group.lines.length === 1 ? '' : 's' }} ⋯</button></template></pre>
         </div>
 
         <div
@@ -183,14 +193,22 @@ const fullDocHasNoDiff = computed(
         >
           <p v-if="fullDocHasNoDiff">No differences found.</p>
           <div v-else-if="!focusedView" class="side-by-side-columns">
-            <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="left" /></pre>
-            <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="right" /></pre>
+            <pre
+              class="diff-column-left text-wrap-safe-pre"
+            ><DiffText :parts="fullDocDiff" side="left" /></pre>
+            <pre
+              class="diff-column-right text-wrap-safe-pre"
+            ><DiffText :parts="fullDocDiff" side="right" /></pre>
           </div>
           <div v-else class="side-by-side-columns">
             <template v-for="(group, i) in fullDocGroups" :key="i">
               <template v-if="isGroupVisible(group, i)">
-                <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="left" /></pre>
-                <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="right" /></pre>
+                <pre
+                  class="diff-column-left text-wrap-safe-pre"
+                ><DiffText :parts="groupParts(group)" side="left" /></pre>
+                <pre
+                  class="diff-column-right text-wrap-safe-pre"
+                ><DiffText :parts="groupParts(group)" side="right" /></pre>
               </template>
               <button
                 v-else

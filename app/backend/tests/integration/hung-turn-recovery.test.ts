@@ -20,11 +20,15 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('FakeAgentSession\'s own internal timeout force-settles the turn as errored, and a later retry/send both succeed', async () => {
+  it("FakeAgentSession's own internal timeout force-settles the turn as errored, and a later retry/send both succeed", async () => {
     process.env.PI_FAKE_TURN_TIMEOUT_MS = '50';
     const { app, storage } = await createTestApp();
 
-    const createRes = await app.inject({ method: 'POST', url: '/api/document', payload: { content: '# Doc\n\nHello.\n' } });
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/document',
+      payload: { content: '# Doc\n\nHello.\n' },
+    });
     expect(createRes.statusCode).toBe(201);
     const created = JSON.parse(createRes.body) as CreateDocumentResponse;
     const conversationId = created.mainConversation.id;
@@ -45,10 +49,15 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     // Retrying re-sends the very same (hanging) message. This must not throw "already streaming"
     // or otherwise fail synchronously — the previous (wedged) session was evicted, so a fresh one
     // is built and the retry is accepted normally; it will time out again the same way.
-    const retryRes = await app.inject({ method: 'POST', url: `/api/conversations/${conversationId}/retry` });
+    const retryRes = await app.inject({
+      method: 'POST',
+      url: `/api/conversations/${conversationId}/retry`,
+    });
     expect(retryRes.statusCode).toBe(202);
     await waitFor(() => storage.getConversation(conversationId)?.status === 'working');
-    await waitFor(() => storage.getConversation(conversationId)?.status === 'errored', { timeoutMs: 3000 });
+    await waitFor(() => storage.getConversation(conversationId)?.status === 'errored', {
+      timeoutMs: 3000,
+    });
 
     // Raise the fake session's own turn timeout back up before sending a real (non-hanging)
     // message below — a fresh `FakeAgentSession` is about to be constructed for it (the previous
@@ -65,7 +74,9 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
       payload: { message: 'hello again' },
     });
     expect(followUp.statusCode).toBe(202);
-    await waitFor(() => storage.getConversation(conversationId)?.status === 'idle', { timeoutMs: 3000 });
+    await waitFor(() => storage.getConversation(conversationId)?.status === 'idle', {
+      timeoutMs: 3000,
+    });
     expect(storage.getConversation(conversationId)?.errorMessage).toBeNull();
   });
 
@@ -76,7 +87,11 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     process.env.PI_AGENT_TURN_TIMEOUT_MS = '50';
     const { app, storage } = await createTestApp();
 
-    const createRes = await app.inject({ method: 'POST', url: '/api/document', payload: { content: '# Doc\n\nHello.\n' } });
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/document',
+      payload: { content: '# Doc\n\nHello.\n' },
+    });
     const created = JSON.parse(createRes.body) as CreateDocumentResponse;
     const conversationId = created.mainConversation.id;
 
@@ -104,6 +119,8 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
       payload: { message: 'hello again' },
     });
     expect(followUp.statusCode).toBe(202);
-    await waitFor(() => storage.getConversation(conversationId)?.status === 'idle', { timeoutMs: 3000 });
+    await waitFor(() => storage.getConversation(conversationId)?.status === 'idle', {
+      timeoutMs: 3000,
+    });
   });
 });

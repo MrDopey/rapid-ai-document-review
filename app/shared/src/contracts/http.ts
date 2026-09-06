@@ -72,7 +72,11 @@ export const DocumentDto = z.object({
 });
 export type DocumentDto = z.infer<typeof DocumentDto>;
 
-export const ConversationSeedSelectionDto = z.object({ from: z.number().int(), to: z.number().int(), text: z.string() });
+export const ConversationSeedSelectionDto = z.object({
+  from: z.number().int(),
+  to: z.number().int(),
+  text: z.string(),
+});
 export type ConversationSeedSelectionDto = z.infer<typeof ConversationSeedSelectionDto>;
 
 export const ConversationDto = z.object({
@@ -241,9 +245,7 @@ export const PendingProposalReconciliationEntry = z.object({
   reconcilable: z.boolean(),
   conflictDetail: ConflictDetail.nullable().optional(),
 });
-export type PendingProposalReconciliationEntry = z.infer<
-  typeof PendingProposalReconciliationEntry
->;
+export type PendingProposalReconciliationEntry = z.infer<typeof PendingProposalReconciliationEntry>;
 
 export const RestoreRevisionResponse = z.object({
   currentRevision: z.number().int(),

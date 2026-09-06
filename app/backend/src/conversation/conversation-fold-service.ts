@@ -36,7 +36,10 @@ export class ConversationFoldService {
 
     let synopsis: string;
     try {
-      synopsis = await this.piService.generateFoldSynopsis(conversation, this.buildFoldSynopsisPrompt());
+      synopsis = await this.piService.generateFoldSynopsis(
+        conversation,
+        this.buildFoldSynopsisPrompt(),
+      );
     } catch (err) {
       // `event: 'agent_error'` — this Pi call failing is exactly what that vocabulary term means
       // (FR-042); no `conversation_summary_folded` frame follows since the fold never completes.

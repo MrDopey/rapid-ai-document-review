@@ -1,5 +1,12 @@
-import type { ConversationDto, ConversationSeedSelectionDto } from '@rapid-ai-document-review/shared/contracts/http';
-import type { ConversationRow, StorageAdapter, UserSettingsRow } from '../storage/storage-adapter.ts';
+import type {
+  ConversationDto,
+  ConversationSeedSelectionDto,
+} from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  ConversationRow,
+  StorageAdapter,
+  UserSettingsRow,
+} from '../storage/storage-adapter.ts';
 
 /**
  * Resolves a stored anchor against the CURRENT document. A naive
@@ -38,7 +45,11 @@ function resolveSeedSelection(
 
 /** Every offset in `haystack` at which `needle` occurs; returns whichever is closest to
  *  `originalFrom`, or `null` when `needle` never occurs. */
-function findClosestOccurrence(haystack: string, needle: string, originalFrom: number): number | null {
+function findClosestOccurrence(
+  haystack: string,
+  needle: string,
+  originalFrom: number,
+): number | null {
   if (needle.length === 0) return null;
   let best: number | null = null;
   let bestDistance = Infinity;
@@ -70,7 +81,10 @@ function buildConversationDto(
 ): ConversationDto {
   const { settings } = ctx;
   const pendingEditCount = ctx.pendingEditCountByConversationId.get(row.id) ?? 0;
-  const { seedSelection, anchorOrphaned } = resolveSeedSelection(documentContent, row.seedSelection);
+  const { seedSelection, anchorOrphaned } = resolveSeedSelection(
+    documentContent,
+    row.seedSelection,
+  );
 
   return {
     id: row.id,

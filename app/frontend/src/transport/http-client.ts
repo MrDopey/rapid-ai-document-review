@@ -71,9 +71,18 @@ async function request<T>(
   if (!response.ok) {
     const envelope = ErrorEnvelope.safeParse(json);
     if (envelope.success) {
-      throw new ApiError(response.status, envelope.data.error.code, envelope.data.error.message, envelope.data.error.details);
+      throw new ApiError(
+        response.status,
+        envelope.data.error.code,
+        envelope.data.error.message,
+        envelope.data.error.details,
+      );
     }
-    throw new ApiError(response.status, 'UNKNOWN', `Request to ${path} failed with ${response.status}`);
+    throw new ApiError(
+      response.status,
+      'UNKNOWN',
+      `Request to ${path} failed with ${response.status}`,
+    );
   }
   return parse(json);
 }
@@ -95,7 +104,11 @@ export const httpClient = {
     }
   },
 
-  async patchDocument(input: { baseRevision?: number; changes?: { from: number; to: number; insert: string }[]; title?: string }) {
+  async patchDocument(input: {
+    baseRevision?: number;
+    changes?: { from: number; to: number; insert: string }[];
+    title?: string;
+  }) {
     PatchDocumentRequest.parse(input);
     return request('/api/document', { method: 'PATCH', body: JSON.stringify(input) }, (j) =>
       PatchDocumentResponse.parse(j),
@@ -139,20 +152,26 @@ export const httpClient = {
 
   async sendMessage(id: string, message: string) {
     const body: SendMessageRequest = { message };
-    return request(`/api/conversations/${id}/send`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
-      SendMessageResponse.parse(j),
+    return request(
+      `/api/conversations/${id}/send`,
+      { method: 'POST', body: JSON.stringify(body) },
+      (j) => SendMessageResponse.parse(j),
     );
   },
 
   async refreshAndSend(id: string, message: string) {
     const body: SendMessageRequest = { message };
-    return request(`/api/conversations/${id}/refresh-send`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
-      RefreshSendResponse.parse(j),
+    return request(
+      `/api/conversations/${id}/refresh-send`,
+      { method: 'POST', body: JSON.stringify(body) },
+      (j) => RefreshSendResponse.parse(j),
     );
   },
 
   async retryConversation(id: string) {
-    return request(`/api/conversations/${id}/retry`, { method: 'POST' }, (j) => RetryResponse.parse(j));
+    return request(`/api/conversations/${id}/retry`, { method: 'POST' }, (j) =>
+      RetryResponse.parse(j),
+    );
   },
 
   async branchConversation(input: CreateConversationRequest) {
@@ -164,15 +183,19 @@ export const httpClient = {
 
   async renameConversation(id: string, name: string) {
     const body: RenameConversationRequest = { name };
-    return request(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, (j) =>
-      ConversationDto.parse(j),
+    return request(
+      `/api/conversations/${id}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+      (j) => ConversationDto.parse(j),
     );
   },
 
   async closeConversation(id: string, foldSummaryIntoParent = false) {
     const body: CloseConversationRequest = { foldSummaryIntoParent };
-    return request(`/api/conversations/${id}/close`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
-      CloseConversationResponse.parse(j),
+    return request(
+      `/api/conversations/${id}/close`,
+      { method: 'POST', body: JSON.stringify(body) },
+      (j) => CloseConversationResponse.parse(j),
     );
   },
 
@@ -184,23 +207,31 @@ export const httpClient = {
 
   async designatePrimary(id: string, whenBusy?: PrimaryWhenBusy) {
     const body: DesignatePrimaryRequest = { whenBusy };
-    return request(`/api/conversations/${id}/primary`, { method: 'POST', body: JSON.stringify(body) }, (j) =>
-      DesignatePrimaryResponse.parse(j),
+    return request(
+      `/api/conversations/${id}/primary`,
+      { method: 'POST', body: JSON.stringify(body) },
+      (j) => DesignatePrimaryResponse.parse(j),
     );
   },
 
   async clearPrimary(id: string) {
-    return request(`/api/conversations/${id}/primary`, { method: 'DELETE' }, (j) => ClearPrimaryResponse.parse(j));
+    return request(`/api/conversations/${id}/primary`, { method: 'DELETE' }, (j) =>
+      ClearPrimaryResponse.parse(j),
+    );
   },
 
   /** 005-canvas-conversation-threads follow-up: physically discards an untouched branch
    *  placeholder — see `ConversationService.discardIfEmpty`'s doc comment for eligibility. */
   async discardConversation(id: string) {
-    return request(`/api/conversations/${id}`, { method: 'DELETE' }, (j) => DiscardConversationResponse.parse(j));
+    return request(`/api/conversations/${id}`, { method: 'DELETE' }, (j) =>
+      DiscardConversationResponse.parse(j),
+    );
   },
 
   async listEdits(conversationId: string) {
-    return request(`/api/conversations/${conversationId}/edits`, undefined, (j) => ListEditsResponse.parse(j));
+    return request(`/api/conversations/${conversationId}/edits`, undefined, (j) =>
+      ListEditsResponse.parse(j),
+    );
   },
 
   async previewEdit(editId: string) {
@@ -208,22 +239,30 @@ export const httpClient = {
   },
 
   async applyEdit(editId: string) {
-    return request(`/api/edits/${editId}/apply`, { method: 'POST' }, (j) => ApplyEditResponse.parse(j));
+    return request(`/api/edits/${editId}/apply`, { method: 'POST' }, (j) =>
+      ApplyEditResponse.parse(j),
+    );
   },
 
   async dropEdit(editId: string) {
-    return request(`/api/edits/${editId}/drop`, { method: 'POST' }, (j) => DropEditResponse.parse(j));
+    return request(`/api/edits/${editId}/drop`, { method: 'POST' }, (j) =>
+      DropEditResponse.parse(j),
+    );
   },
 
   async acceptRemaining(conversationId: string) {
-    return request(`/api/conversations/${conversationId}/edits/accept-remaining`, { method: 'POST' }, (j) =>
-      AcceptRemainingResponse.parse(j),
+    return request(
+      `/api/conversations/${conversationId}/edits/accept-remaining`,
+      { method: 'POST' },
+      (j) => AcceptRemainingResponse.parse(j),
     );
   },
 
   async dropRemaining(conversationId: string) {
-    return request(`/api/conversations/${conversationId}/edits/drop-remaining`, { method: 'POST' }, (j) =>
-      DropRemainingResponse.parse(j),
+    return request(
+      `/api/conversations/${conversationId}/edits/drop-remaining`,
+      { method: 'POST' },
+      (j) => DropRemainingResponse.parse(j),
     );
   },
 

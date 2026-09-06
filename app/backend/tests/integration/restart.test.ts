@@ -10,7 +10,11 @@ import {
   ListConversationsResponse,
   ListRevisionsResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import type { ConversationRow, StagedEditRow, StorageAdapter } from '../../src/storage/storage-adapter.js';
+import type {
+  ConversationRow,
+  StagedEditRow,
+  StorageAdapter,
+} from '../../src/storage/storage-adapter.js';
 import { newId } from '../../src/ids.js';
 import { waitFor } from '../contract/test-app.js';
 
@@ -28,7 +32,9 @@ import { waitFor } from '../contract/test-app.js';
  * once per process, but that's harmless here because both boots use the very same `databasePath`.
  */
 
-async function bootApp(databasePath: string): Promise<{ app: FastifyInstance; storage: StorageAdapter }> {
+async function bootApp(
+  databasePath: string,
+): Promise<{ app: FastifyInstance; storage: StorageAdapter }> {
   process.env.RADR_BE_DATABASE_PATH = databasePath;
   process.env.RADR_BE_PI_FAKE_SESSIONS = '1';
   process.env.RADR_BE_HOST ??= '127.0.0.1';
@@ -174,7 +180,12 @@ describe('restart recovery (FR-039/FR-039a)', () => {
 
     // A second conversation left mid-`working` when the process "stops" — simulating a run
     // interrupted by an unclean stop, per this suite's header comment.
-    const interruptedBranch = createBranchConversation(storage1, documentId, 2, 'Interrupted Branch');
+    const interruptedBranch = createBranchConversation(
+      storage1,
+      documentId,
+      2,
+      'Interrupted Branch',
+    );
     storage1.updateConversation(interruptedBranch.id, { status: 'working' });
     expect(storage1.getConversation(interruptedBranch.id)?.status).toBe('working');
 

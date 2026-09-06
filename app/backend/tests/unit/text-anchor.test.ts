@@ -36,9 +36,7 @@ describe('text-anchor reconcile', () => {
     );
     expect(result.outcome).toBe('conflict');
     if (result.outcome === 'conflict') {
-      expect(result.detail.operations).toEqual([
-        { index: 0, reason: 'not_found', occurrences: 0 },
-      ]);
+      expect(result.detail.operations).toEqual([{ index: 0, reason: 'not_found', occurrences: 0 }]);
     }
   });
 
@@ -49,9 +47,7 @@ describe('text-anchor reconcile', () => {
     );
     expect(result.outcome).toBe('conflict');
     if (result.outcome === 'conflict') {
-      expect(result.detail.operations).toEqual([
-        { index: 0, reason: 'ambiguous', occurrences: 2 },
-      ]);
+      expect(result.detail.operations).toEqual([{ index: 0, reason: 'ambiguous', occurrences: 2 }]);
     }
   });
 
@@ -82,9 +78,7 @@ describe('text-anchor reconcile', () => {
     );
     expect(result.outcome).toBe('conflict');
     if (result.outcome === 'conflict') {
-      expect(result.detail.operations).toEqual([
-        { index: 1, reason: 'not_found', occurrences: 0 },
-      ]);
+      expect(result.detail.operations).toEqual([{ index: 1, reason: 'not_found', occurrences: 0 }]);
     }
   });
 

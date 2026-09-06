@@ -19,7 +19,11 @@ export function sendError(
  *   const data = parseOrFail(reply, Schema, request.body);
  *   if (!data) return;
  */
-export function parseOrFail<T>(reply: FastifyReply, schema: z.ZodType<T>, input: unknown): T | undefined {
+export function parseOrFail<T>(
+  reply: FastifyReply,
+  schema: z.ZodType<T>,
+  input: unknown,
+): T | undefined {
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);

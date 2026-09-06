@@ -149,7 +149,9 @@ export interface ConversationListOptions {
 export interface StorageAdapter {
   // document
   getDocument(): DocumentRow | null;
-  createDocument(row: Omit<DocumentRow, 'currentRevision'> & { currentRevision?: number }): DocumentRow;
+  createDocument(
+    row: Omit<DocumentRow, 'currentRevision'> & { currentRevision?: number },
+  ): DocumentRow;
   updateDocumentRevision(id: string, currentRevision: number, updatedAt: string): void;
   updateDocumentTitle(id: string, title: string, updatedAt: string): void;
 
@@ -201,7 +203,9 @@ export interface StorageAdapter {
   updateStagedEdit(id: string, patch: Partial<StagedEditRow>): StagedEditRow;
 
   // conversation_event
-  appendEvent(row: Omit<ConversationEventRow, 'sequence'> & { sequence: number }): ConversationEventRow;
+  appendEvent(
+    row: Omit<ConversationEventRow, 'sequence'> & { sequence: number },
+  ): ConversationEventRow;
   getNextSequence(documentId: string): number;
   getLatestSequence(documentId: string): number;
   listEventsSince(documentId: string, sinceSequence: number | null): ConversationEventRow[];
@@ -209,7 +213,10 @@ export interface StorageAdapter {
 
   // user_settings
   getSettings(): UserSettingsRow;
-  updateSettings(patch: Partial<Omit<UserSettingsRow, 'updatedAt'>>, updatedAt: string): UserSettingsRow;
+  updateSettings(
+    patch: Partial<Omit<UserSettingsRow, 'updatedAt'>>,
+    updatedAt: string,
+  ): UserSettingsRow;
 
   /**
    * Runs `fn` inside a single SQL transaction: commits if `fn` returns normally, rolls back and

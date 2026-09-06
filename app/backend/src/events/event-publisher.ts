@@ -37,7 +37,16 @@ export class EventPublisher {
   }
 
   publishFrame(frame: ApplicationEvent): void {
-    const persisted = this.eventService.append(frame.documentId, frame.conversationId, frame.type, frame.data);
-    this.eventHub.broadcast(frame.documentId, { ...frame, sequence: persisted.sequence, at: persisted.createdAt });
+    const persisted = this.eventService.append(
+      frame.documentId,
+      frame.conversationId,
+      frame.type,
+      frame.data,
+    );
+    this.eventHub.broadcast(frame.documentId, {
+      ...frame,
+      sequence: persisted.sequence,
+      at: persisted.createdAt,
+    });
   }
 }

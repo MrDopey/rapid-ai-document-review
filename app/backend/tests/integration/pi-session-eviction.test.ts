@@ -49,14 +49,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -72,7 +92,11 @@ function buildHarness(): Harness {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,
@@ -96,7 +120,12 @@ function buildHarness(): Harness {
   return { storage, documentService, conversationService, piService };
 }
 
-function createBranch(storage: StorageAdapter, documentId: string, parentId: string, contextRevision: number): ConversationRow {
+function createBranch(
+  storage: StorageAdapter,
+  documentId: string,
+  parentId: string,
+  contextRevision: number,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -123,7 +152,7 @@ function sessionsMap(piService: PiService): Map<string, AgentSessionLike> {
   return (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions;
 }
 
-describe('FIX 5: PiService evicts a conversation\'s cached session once it closes', () => {
+describe("FIX 5: PiService evicts a conversation's cached session once it closes", () => {
   it('evicts immediately on close() when there is no fold summary pending', () => {
     const h = buildHarness();
     const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
@@ -141,7 +170,7 @@ describe('FIX 5: PiService evicts a conversation\'s cached session once it close
     expect(sessionsMap(h.piService).has(branch.id)).toBe(false);
   });
 
-  it('does not evict the closing conversation\'s session before its fold-summary flow has finished using it, but does evict it once that flow completes', async () => {
+  it("does not evict the closing conversation's session before its fold-summary flow has finished using it, but does evict it once that flow completes", async () => {
     const h = buildHarness();
     const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
     const documentId = created.document.id;
@@ -164,7 +193,8 @@ describe('FIX 5: PiService evicts a conversation\'s cached session once it close
     // is evicted — but the parent's is left alone; it's still an open, live conversation.
     await waitFor(() => !sessionsMap(h.piService).has(branch.id), {
       timeoutMs: 2000,
-      message: "expected the closing conversation's session to be evicted once its fold flow finished",
+      message:
+        "expected the closing conversation's session to be evicted once its fold flow finished",
     });
     expect(sessionsMap(h.piService).has(main.id)).toBe(true);
 

@@ -48,7 +48,8 @@ export class ChangeBatcher<T> {
     this.onFlush = onFlush;
     this.options = options;
     this.setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-    this.clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    this.clearTimer =
+      options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   }
 
   /** Accumulate one change and (re)schedule the debounced flush. */

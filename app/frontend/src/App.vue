@@ -28,7 +28,12 @@ import {
 import { attachScrollSync } from './composables/scrollSync.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { useFocusPanelState } from './composables/focusPanelState.js';
-import { HOTKEY_BINDINGS, matchesBinding, isEditingContext, isOverlayOpen } from './a11y/keymap-registry.js';
+import {
+  HOTKEY_BINDINGS,
+  matchesBinding,
+  isEditingContext,
+  isOverlayOpen,
+} from './a11y/keymap-registry.js';
 import { orderConversationsByAnchor } from './components/canvas/conversationLayout.js';
 
 const store = useDocumentStore();
@@ -81,7 +86,8 @@ const conversationFilter = ref<ConversationFilter>('all');
 // showing".
 const orderedVisibleConversations = computed(() => {
   const all = conversationsStore.conversations;
-  const filtered = conversationFilter.value === 'active' ? all.filter((c) => c.status !== 'closed') : all;
+  const filtered =
+    conversationFilter.value === 'active' ? all.filter((c) => c.status !== 'closed') : all;
   const byId = new Map(all.map((c) => [c.id, c]));
   return orderConversationsByAnchor(filtered, byId);
 });
@@ -96,7 +102,13 @@ const panesWidth = ref(0);
 const viewportFitCount = computed(() =>
   panesWidth.value <= 0
     ? 1
-    : Math.max(1, Math.floor((panesWidth.value + FOCUSED_PANEL_GAP_PX) / (MIN_FOCUSED_PANEL_WIDTH_PX + FOCUSED_PANEL_GAP_PX))),
+    : Math.max(
+        1,
+        Math.floor(
+          (panesWidth.value + FOCUSED_PANEL_GAP_PX) /
+            (MIN_FOCUSED_PANEL_WIDTH_PX + FOCUSED_PANEL_GAP_PX),
+        ),
+      ),
 );
 const focusCap = useFocusCap(viewportFitCount);
 
@@ -350,7 +362,9 @@ const historyGridColumn = computed(() => (isDesktop.value ? '4 / 5' : undefined)
 // `panesStyle` itself only establishes that column layout there; below the breakpoint `.panes`
 // reflows to rows (see the `@media` rules below) where Canvas is no longer a distinct column, so
 // the overlay spans `.panes`' full box.
-const conversationOverlayStyle = computed(() => (isDesktop.value ? { gridColumn: '3 / 4' } : undefined));
+const conversationOverlayStyle = computed(() =>
+  isDesktop.value ? { gridColumn: '3 / 4' } : undefined,
+);
 
 /** Pointer-driven + keyboard-operable resize for the horizontal Preview|Canvas split:
  *  converts a horizontal drag/step delta into a preview/canvas `fr` split, clamped to a sane
@@ -387,7 +401,11 @@ const editorPreviewResize = useResizeHandle({
     // 30% of `remainingPx` would be, so Canvas is never left with less room than intended.
     const minPx = containerRect.width * MIN_PANE_FRACTION;
     return (deltaPx) => {
-      const nextPreviewPx = clamp(startPreviewPx + deltaPx, minPx, Math.max(minPx, remainingPx - minPx));
+      const nextPreviewPx = clamp(
+        startPreviewPx + deltaPx,
+        minPx,
+        Math.max(minPx, remainingPx - minPx),
+      );
       previewFr.value = (nextPreviewPx / remainingPx) * totalFr;
       canvasFr.value = totalFr - previewFr.value;
     };
@@ -471,7 +489,8 @@ function cycleFocusedConversation(offset: number): void {
  *  — its handler needs the matched digit itself, so `onGlobalKeydown` below special-cases it
  *  directly rather than threading the digit through this table. */
 const globalBindingHandlers: Record<string, () => void> = {
-  'toggle-reasoning': () => void settingsStore.update({ thinkingVisible: !settingsStore.thinkingVisible }),
+  'toggle-reasoning': () =>
+    void settingsStore.update({ thinkingVisible: !settingsStore.thinkingVisible }),
   'toggle-history': () => {
     historyOpen.value = !historyOpen.value;
   },
@@ -518,7 +537,11 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 async function loadInitialDocument(): Promise<void> {
   loadError.value = null;
   try {
-    await withTimeout(store.load(), LOAD_TIMEOUT_MS, "Couldn't reach the server. Please check your connection.");
+    await withTimeout(
+      store.load(),
+      LOAD_TIMEOUT_MS,
+      "Couldn't reach the server. Please check your connection.",
+    );
     if (store.document) {
       connectWs();
       await Promise.all([conversationsStore.load(), settingsStore.load()]);
@@ -577,7 +600,10 @@ function onEditorChange(changes: { from: number; to: number; insert: string }[])
  *  buttons/keyboard shortcuts: `false` (Alt+Shift+C, "Branch (New)") keeps the empty-placeholder
  *  default; `true` (Alt+Shift+S, "Branch (Main)") asks the backend to also deliver the
  *  selection excerpt as the branch's first message. */
-async function onBranchFromSelection(range: { from: number; to: number }, includeSeedMessage: boolean): Promise<void> {
+async function onBranchFromSelection(
+  range: { from: number; to: number },
+  includeSeedMessage: boolean,
+): Promise<void> {
   const main = conversationsStore.conversations.find((c) => c.kind === 'main');
   if (!main) return;
   // `EditorComponent.vue`'s own "Branch (New)"/"Branch (Main)" buttons (and their keyboard
@@ -695,7 +721,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
             @click="shortcutsOpen = true"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-              <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <rect
+                x="2"
+                y="5"
+                width="20"
+                height="14"
+                rx="2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
               <path
                 d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
                 stroke="currentColor"
@@ -712,7 +747,14 @@ async function onToggleReasoning(event: Event): Promise<void> {
             @click="helpOpen = true"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-              <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <circle
+                cx="12"
+                cy="12"
+                r="9.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
               <path
                 d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
                 fill="none"
@@ -749,11 +791,22 @@ async function onToggleReasoning(event: Event): Promise<void> {
           <div class="actions-group">
             <div class="actions-col actions-col-checkboxes">
               <label class="reasoning-toggle">
-                <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
+                <input
+                  type="checkbox"
+                  :checked="settingsStore.thinkingVisible"
+                  @change="onToggleReasoning"
+                />
                 Show reasoning
               </label>
-              <label class="reasoning-toggle" title="Scroll the Editor and Preview panes together. Keyboard shortcut: Ctrl+Alt+Y">
-                <input type="checkbox" :checked="syncScrollEnabled" @change="onToggleSyncScrollCheckbox" />
+              <label
+                class="reasoning-toggle"
+                title="Scroll the Editor and Preview panes together. Keyboard shortcut: Ctrl+Alt+Y"
+              >
+                <input
+                  type="checkbox"
+                  :checked="syncScrollEnabled"
+                  @change="onToggleSyncScrollCheckbox"
+                />
                 Sync scroll
               </label>
             </div>

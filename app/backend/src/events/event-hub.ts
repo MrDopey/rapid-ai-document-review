@@ -1,4 +1,7 @@
-import { EPHEMERAL_EVENT_TYPES, type ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
+import {
+  EPHEMERAL_EVENT_TYPES,
+  type ApplicationEvent,
+} from '@rapid-ai-document-review/shared/contracts/events';
 import type { ConversationDto, DocumentDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { EventService } from './event-service.ts';
 import type { RunBuffer } from './run-buffer.ts';
@@ -92,7 +95,8 @@ export class EventHub {
 
   subscribe(socket: SocketLike, documentId: string, sinceSequence: number | null): void {
     const currentSequence = this.eventService.getLatestSequence(documentId);
-    const rows = sinceSequence === null ? [] : this.eventService.getEventsSince(documentId, sinceSequence);
+    const rows =
+      sinceSequence === null ? [] : this.eventService.getEventsSince(documentId, sinceSequence);
 
     const subscribedFrame = {
       type: 'subscribed' as const,
@@ -182,7 +186,10 @@ export class EventHub {
       if (isEphemeral && sub.socket.bufferedAmount > BACKPRESSURE_THRESHOLD_BYTES) {
         // No `event` field: dropping a frame is the absence of an event, not one of the closed
         // vocabulary's own values (FR-042); `frameType` already names what was dropped.
-        logger.warn({ documentId, frameType: frame.type }, 'dropped ephemeral frame under backpressure');
+        logger.warn(
+          { documentId, frameType: frame.type },
+          'dropped ephemeral frame under backpressure',
+        );
         continue;
       }
       sub.socket.send(payload);

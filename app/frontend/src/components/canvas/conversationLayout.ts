@@ -100,7 +100,8 @@ export function orderConversationsByAnchor<T extends ConversationLayoutInput>(
   byId: ReadonlyMap<string, ConversationLayoutInput>,
 ): T[] {
   const indexed = conversations.map((c, i) => ({ c, i, root: resolveAnchorRoot(c, byId) }));
-  const rootKey = (root: ConversationLayoutInput) => (root.seedSelection ? root.seedSelection.from : -1);
+  const rootKey = (root: ConversationLayoutInput) =>
+    root.seedSelection ? root.seedSelection.from : -1;
   indexed.sort((a, b) => {
     const ka = rootKey(a.root);
     const kb = rootKey(b.root);
@@ -123,7 +124,9 @@ function siblingOrdersOf(conversations: readonly ConversationLayoutInput[]): Map
   }
   const orders = new Map<string, number>();
   for (const list of byParent.values()) {
-    const sorted = [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const sorted = [...list].sort(
+      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    );
     sorted.forEach((c, index) => orders.set(c.id, index));
   }
   return orders;
@@ -164,11 +167,19 @@ export function computeConversationLayout(
   for (const [column, entries] of byColumn) {
     const withBase = entries
       .map((c) => ({ c, base: options.anchorYOf(c) }))
-      .sort((a, b) => a.base - b.base || a.c.createdAt.localeCompare(b.c.createdAt) || a.c.id.localeCompare(b.c.id));
+      .sort(
+        (a, b) =>
+          a.base - b.base ||
+          a.c.createdAt.localeCompare(b.c.createdAt) ||
+          a.c.id.localeCompare(b.c.id),
+      );
 
     let cursorBottom = Number.NEGATIVE_INFINITY;
     for (const { c, base } of withBase) {
-      const top = cursorBottom === Number.NEGATIVE_INFINITY ? base : Math.max(base, cursorBottom + options.minGap);
+      const top =
+        cursorBottom === Number.NEGATIVE_INFINITY
+          ? base
+          : Math.max(base, cursorBottom + options.minGap);
       cursorBottom = top + options.heightOf(c.id);
       result.push({ id: c.id, column, siblingOrder: siblingOrders.get(c.id) ?? 0, top });
     }

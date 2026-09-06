@@ -44,14 +44,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -67,7 +87,11 @@ function buildHarness(): Harness {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,
@@ -107,7 +131,12 @@ describe('ConversationService.getOne: isToolCallCarrier is derived at read time'
     const documentId = created.document.id;
     const mainId = created.mainConversation.id;
 
-    appendMessageCompleted(h, documentId, mainId, { messageId: 'msg_carrier', role: 'assistant', text: '', reasoning: null });
+    appendMessageCompleted(h, documentId, mainId, {
+      messageId: 'msg_carrier',
+      role: 'assistant',
+      text: '',
+      reasoning: null,
+    });
 
     const { messages } = h.conversationService.getOne(mainId);
     const carrier = messages.find((m) => m.id === 'msg_carrier');

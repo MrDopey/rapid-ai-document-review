@@ -188,7 +188,10 @@ export const useConversationsStore = defineStore('conversations', {
      *  re-calls with an explicit `whenBusy` choice — this action itself just forwards to the HTTP
      *  client and lets the eventual `primary_changed` WS frame (handleServerFrame below) update
      *  `isPrimary` across the list, exactly as it already does for the close-clears-Primary case. */
-    async designatePrimary(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<DesignatePrimaryResponse> {
+    async designatePrimary(
+      conversationId: string,
+      whenBusy?: PrimaryWhenBusy,
+    ): Promise<DesignatePrimaryResponse> {
       return httpClient.designatePrimary(conversationId, whenBusy);
     },
 

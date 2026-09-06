@@ -13,9 +13,12 @@ import type { ConversationMessageState } from '../../stores/conversations.js';
 // the per-message state itself (data-model.md scopes `MessageDisplayState` by `messageId`, not per-
 // conversation, so the parent — not this component — is the natural owner of "all my messages'"
 // combined state, which `ConversationThreadBox.vue`'s bulk toggle, FR-009, needs).
-const props = withDefaults(defineProps<{ message: ConversationMessageState; seed?: boolean; expanded?: boolean }>(), {
-  expanded: true,
-});
+const props = withDefaults(
+  defineProps<{ message: ConversationMessageState; seed?: boolean; expanded?: boolean }>(),
+  {
+    expanded: true,
+  },
+);
 const emit = defineEmits<{ (e: 'update:expanded', value: boolean): void }>();
 const settings = useSettingsStore();
 
@@ -41,7 +44,9 @@ watch(
 );
 
 const clampStyle = computed(() =>
-  !props.expanded && overflowing.value ? { maxHeight: `${CLAMP_HEIGHT_PX}px`, overflow: 'hidden' } : undefined,
+  !props.expanded && overflowing.value
+    ? { maxHeight: `${CLAMP_HEIGHT_PX}px`, overflow: 'hidden' }
+    : undefined,
 );
 const toggleLabel = computed(() => (props.expanded ? 'Show less' : 'Show more'));
 
@@ -50,9 +55,13 @@ const toggleLabel = computed(() => (props.expanded ? 'Show less' : 'Show more'))
 // html:false here: conversation messages never author raw HTML, and a literal `<tag>` (e.g. a
 // seed message's `<document-revision-N>`) should show as visible text, not be parsed as markup
 // and silently swallowed by the sanitizer as an unknown element.
-const safeText = computed(() => domPurifySanitizer.sanitize(render(props.message.text ?? '', { html: false })));
+const safeText = computed(() =>
+  domPurifySanitizer.sanitize(render(props.message.text ?? '', { html: false })),
+);
 const safeReasoning = computed(() =>
-  props.message.reasoning ? domPurifySanitizer.sanitize(render(props.message.reasoning, { html: false })) : '',
+  props.message.reasoning
+    ? domPurifySanitizer.sanitize(render(props.message.reasoning, { html: false }))
+    : '',
 );
 </script>
 
@@ -79,7 +88,9 @@ const safeReasoning = computed(() =>
   >
     <header class="message-role">
       <span class="message-role-label">
-        {{ seed ? 'Context — discussing this excerpt' : message.role === 'user' ? 'You' : 'Assistant' }}
+        {{
+          seed ? 'Context — discussing this excerpt' : message.role === 'user' ? 'You' : 'Assistant'
+        }}
       </span>
 
       <!-- FR-008/research.md §4: a real <button>, minimum 24x24px hit area, only rendered when
@@ -106,7 +117,12 @@ const safeReasoning = computed(() =>
       Tool call — no reply text (visible because "Show reasoning" is on).
     </p>
 
-    <div ref="textEl" class="message-text text-wrap-safe" :style="clampStyle" v-html="safeText"></div>
+    <div
+      ref="textEl"
+      class="message-text text-wrap-safe"
+      :style="clampStyle"
+      v-html="safeText"
+    ></div>
   </article>
 </template>
 
@@ -234,4 +250,3 @@ const safeReasoning = computed(() =>
   outline-offset: 1px;
 }
 </style>
-

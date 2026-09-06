@@ -64,7 +64,9 @@ describe('computeAnchorY', () => {
 // Focus button's `isFocused`/`focusDisabled`/`maxFocused` props — App.vue/DocumentCanvas.vue own
 // the actual add/remove/cap logic; this only tests what this component itself emits and renders.
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -95,7 +97,9 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
     setActivePinia(pinia);
   });
 
-  function mountBox(props: { isFocused?: boolean; focusDisabled?: boolean; maxFocused?: number } = {}) {
+  function mountBox(
+    props: { isFocused?: boolean; focusDisabled?: boolean; maxFocused?: number } = {},
+  ) {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One' })];
     // Seeds `messagesByConversation` so the component's own `onMounted` guard skips its real
@@ -108,7 +112,7 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
     });
   }
 
-  it('emits toggle-focus with this conversation\'s id when the Focus button is clicked', async () => {
+  it("emits toggle-focus with this conversation's id when the Focus button is clicked", async () => {
     const wrapper = mountBox();
     await wrapper.find('[data-action="focus"]').trigger('click');
     expect(wrapper.emitted('toggle-focus')?.[0]).toEqual(['conv-1']);
@@ -155,12 +159,20 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
     vi.mocked(httpClient.branchConversation).mockReset();
   });
 
-  function mountBox(props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {}) {
+  function mountBox(
+    props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {},
+  ) {
     const store = useConversationsStore();
-    store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One', canBranch: props.canBranch ?? true })];
+    store.conversations = [
+      conversationFixture({ id: 'conv-1', name: 'Conv One', canBranch: props.canBranch ?? true }),
+    ];
     store.messagesByConversation['conv-1'] = [];
     return mount(ConversationThreadBox, {
-      props: { conversationId: 'conv-1', atFocusCap: props.atFocusCap, maxFocused: props.maxFocused },
+      props: {
+        conversationId: 'conv-1',
+        atFocusCap: props.atFocusCap,
+        maxFocused: props.maxFocused,
+      },
       global: { plugins: [pinia] },
     });
   }
@@ -196,7 +208,9 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
   });
 
   it('branches successfully and emits branch-created with the new id when under the cap', async () => {
-    vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
+    vi.mocked(httpClient.branchConversation).mockResolvedValue(
+      conversationFixture({ id: 'branch-9' }),
+    );
     const wrapper = mountBox({ atFocusCap: false });
     await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
@@ -252,7 +266,13 @@ describe('ConversationThreadBox — rename UI', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'conv-1', name: 'Original Name' })];
     store.messagesByConversation['conv-1'] = [];
-    return { store, wrapper: mount(ConversationThreadBox, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } }) };
+    return {
+      store,
+      wrapper: mount(ConversationThreadBox, {
+        props: { conversationId: 'conv-1' },
+        global: { plugins: [pinia] },
+      }),
+    };
   }
 
   it('shows the plain-text title and a rename button by default, no input', () => {

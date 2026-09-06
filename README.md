@@ -58,12 +58,12 @@ column position shifted to make room for the Canvas.
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Node.js | 26.1.0 | Pinned in `.nvmrc` and `package.json` engines; provides the built-in `node:sqlite` module used for persistence. |
-| npm | Bundled with Node 26.1.0 | Used for the workspace scripts below. |
-| Docker | Latest stable | Only required for the containerised deployment path. |
-| Playwright Chromium | Installed via `npx playwright install chromium` | Only required to run the end-to-end test suite. |
+| Tool                | Version                                         | Notes                                                                                                           |
+| ------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Node.js             | 26.1.0                                          | Pinned in `.nvmrc` and `package.json` engines; provides the built-in `node:sqlite` module used for persistence. |
+| npm                 | Bundled with Node 26.1.0                        | Used for the workspace scripts below.                                                                           |
+| Docker              | Latest stable                                   | Only required for the containerised deployment path.                                                            |
+| Playwright Chromium | Installed via `npx playwright install chromium` | Only required to run the end-to-end test suite.                                                                 |
 
 > A model provider credential (for example `ANTHROPIC_API_KEY`, consumed by the Pi Coding Agent SDK) is required for live agent conversations. Without one, document creation, editing, and history still work, but agent scenarios fail with `AGENT_UNAVAILABLE`. Setting `RADR_BE_PI_FAKE_SESSIONS=1` runs agent conversations against a deterministic, credential-free fake session instead — this is what `npm test` and the e2e suite use by default.
 
@@ -83,22 +83,22 @@ This installs and links the three workspaces: `app/shared`, `app/backend`, and `
 
 The backend reads the following environment variables (`app/backend/src/config.ts`), all prefixed `RADR_BE_` (backend) or `RADR_FE_` (frontend, `app/frontend/vite.config.ts`):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `RADR_BE_PORT` | No | `3000` | HTTP and WebSocket port. |
-| `RADR_BE_HOST` | No | `127.0.0.1` | Must remain `127.0.0.1`. The application is loopback-only by design; any other value fails to start. |
-| `RADR_BE_DATABASE_PATH` | No | `./data/document-review.sqlite` | SQLite file location. |
-| `RADR_BE_PI_SESSION_STORAGE_PATH` | No | `./data/pi-sessions` | Directory for Pi's JSONL session files. |
-| `RADR_BE_PI_CODING_AGENT_DIR` | No | `./data/pi-agent` | Pi's config/credential directory. |
-| `RADR_BE_PI_AGENT_MODEL` | **Yes** | none | Pins every new agent conversation to a specific model, in `provider/model` or `provider/model:thinkingLevel` format (e.g. `anthropic/claude-opus-4-5` or `anthropic/claude-opus-4-5:high`). The backend fails fast at startup if this is unset or blank. See precedence note below. |
-| `RADR_BE_LOG_LEVEL` | No | `info` | Pino log level. |
-| `RADR_BE_PI_FAKE_SESSIONS` | No | unset (disabled) | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite. |
-| `RADR_BE_HUNK_CONTEXT_LINES` | No | `3` | Lines of surrounding document context shown around a proposed-edit hunk in the diff preview. |
-| `RADR_FE_BACKEND_PORT` | No | `3000` | Vite dev-server proxy target — must match `RADR_BE_PORT`. |
-| `RADR_FE_HOST` | No | `127.0.0.1` | Vite dev-server bind host. |
-| `RADR_FE_PORT` | No | `3001` | Vite dev-server port. |
-| `VITE_RADR_DIFF_CONTEXT_LINES` | No | `3` | Lines of unchanged context kept visible around each change in the Full document/Side by side/revision-comparison diff views before collapsing the rest (client-side; baked in at build time). |
-| `ANTHROPIC_API_KEY` | Only for live agent use | none | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable. |
+| Variable                          | Required                | Default                         | Description                                                                                                                                                                                                                                                                         |
+| --------------------------------- | ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RADR_BE_PORT`                    | No                      | `3000`                          | HTTP and WebSocket port.                                                                                                                                                                                                                                                            |
+| `RADR_BE_HOST`                    | No                      | `127.0.0.1`                     | Must remain `127.0.0.1`. The application is loopback-only by design; any other value fails to start.                                                                                                                                                                                |
+| `RADR_BE_DATABASE_PATH`           | No                      | `./data/document-review.sqlite` | SQLite file location.                                                                                                                                                                                                                                                               |
+| `RADR_BE_PI_SESSION_STORAGE_PATH` | No                      | `./data/pi-sessions`            | Directory for Pi's JSONL session files.                                                                                                                                                                                                                                             |
+| `RADR_BE_PI_CODING_AGENT_DIR`     | No                      | `./data/pi-agent`               | Pi's config/credential directory.                                                                                                                                                                                                                                                   |
+| `RADR_BE_PI_AGENT_MODEL`          | **Yes**                 | none                            | Pins every new agent conversation to a specific model, in `provider/model` or `provider/model:thinkingLevel` format (e.g. `anthropic/claude-opus-4-5` or `anthropic/claude-opus-4-5:high`). The backend fails fast at startup if this is unset or blank. See precedence note below. |
+| `RADR_BE_LOG_LEVEL`               | No                      | `info`                          | Pino log level.                                                                                                                                                                                                                                                                     |
+| `RADR_BE_PI_FAKE_SESSIONS`        | No                      | unset (disabled)                | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite.                                                                                                                        |
+| `RADR_BE_HUNK_CONTEXT_LINES`      | No                      | `3`                             | Lines of surrounding document context shown around a proposed-edit hunk in the diff preview.                                                                                                                                                                                        |
+| `RADR_FE_BACKEND_PORT`            | No                      | `3000`                          | Vite dev-server proxy target — must match `RADR_BE_PORT`.                                                                                                                                                                                                                           |
+| `RADR_FE_HOST`                    | No                      | `127.0.0.1`                     | Vite dev-server bind host.                                                                                                                                                                                                                                                          |
+| `RADR_FE_PORT`                    | No                      | `3001`                          | Vite dev-server port.                                                                                                                                                                                                                                                               |
+| `VITE_RADR_DIFF_CONTEXT_LINES`    | No                      | `3`                             | Lines of unchanged context kept visible around each change in the Full document/Side by side/revision-comparison diff views before collapsing the rest (client-side; baked in at build time).                                                                                       |
+| `ANTHROPIC_API_KEY`               | Only for live agent use | none                            | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable.                                                                                                                               |
 
 ### Model configuration precedence
 
@@ -137,7 +137,7 @@ npm run dev
 npm run dev:frontend
 
 # To debug pi agent
-export PI_CODING_AGENT_DIR=./app/backend/data/pi-agent 
+export PI_CODING_AGENT_DIR=./app/backend/data/pi-agent
 
 pi --model $RADR_BE_PI_AGENT_MODEL --session ./app/backend/data/pi-sessions/<doc>/<session-id>.jsonl
 ```

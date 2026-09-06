@@ -146,7 +146,12 @@ export class EditService {
     summary: string,
     operations: SharedEditOperation[],
     contextRevision: number,
-  ): Promise<{ edit: StagedEditRow; outcome: ApplyEditResponse['outcome'] | 'pending'; revision?: number; message?: string }> {
+  ): Promise<{
+    edit: StagedEditRow;
+    outcome: ApplyEditResponse['outcome'] | 'pending';
+    revision?: number;
+    message?: string;
+  }> {
     const staged = this.stage(conversationId, piToolCallId, summary, operations, contextRevision);
 
     if (staged.status !== 'pending') {
@@ -157,7 +162,8 @@ export class EditService {
       return {
         edit: staged,
         outcome: 'conflict',
-        message: 'This proposal was already processed and could not be applied; see its status in the review UI.',
+        message:
+          'This proposal was already processed and could not be applied; see its status in the review UI.',
       };
     }
 
@@ -198,7 +204,10 @@ export class EditService {
    * document-tools.ts's own `withLock` — calling back into `apply()` does not deadlock against
    * itself.
    */
-  async apply(editId: string, opts: { requestReplacementViaNewTurn?: boolean } = {}): Promise<ApplyOutcomeInternal> {
+  async apply(
+    editId: string,
+    opts: { requestReplacementViaNewTurn?: boolean } = {},
+  ): Promise<ApplyOutcomeInternal> {
     const requestViaNewTurn = opts.requestReplacementViaNewTurn ?? true;
     const initial = this.storage.getStagedEdit(editId);
     if (!initial) throw new EditNotFoundError(`Staged edit not found: ${editId}`);
@@ -217,7 +226,9 @@ export class EditService {
         };
       }
       if (edit.status !== 'pending') {
-        throw new EditNotPendingError(`Staged edit is not pending: ${editId} (status: ${edit.status})`);
+        throw new EditNotPendingError(
+          `Staged edit is not pending: ${editId} (status: ${edit.status})`,
+        );
       }
 
       const currentText = this.automerge.get().getContent();
@@ -262,29 +273,48 @@ export class EditService {
     const edit = this.storage.getStagedEdit(editId);
     if (!edit) throw new EditNotFoundError(`Staged edit not found: ${editId}`);
     if (edit.status !== 'pending') {
-      throw new EditNotPendingError(`Staged edit is not pending: ${editId} (status: ${edit.status})`);
+      throw new EditNotPendingError(
+        `Staged edit is not pending: ${editId} (status: ${edit.status})`,
+      );
     }
     const resolvedAt = new Date().toISOString();
     const updated = this.storage.updateStagedEdit(editId, { status: 'dropped', resolvedAt });
-    this.publish(edit.documentId, edit.conversationId, 'staged_edit_dropped', { stagedEditId: edit.id });
+    this.publish(edit.documentId, edit.conversationId, 'staged_edit_dropped', {
+      stagedEditId: edit.id,
+    });
     return updated;
   }
 
-  async acceptRemaining(
-    conversationId: string,
-  ): Promise<{ results: { stagedEditId: string; outcome: string; revision?: number; replacementRequested?: boolean }[]; currentRevision: number }> {
+  async acceptRemaining(conversationId: string): Promise<{
+    results: {
+      stagedEditId: string;
+      outcome: string;
+      revision?: number;
+      replacementRequested?: boolean;
+    }[];
+    currentRevision: number;
+  }> {
     const pending = this.storage
       .listStagedEditsByConversation(conversationId)
       .filter((e) => e.status === 'pending')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-    const results: { stagedEditId: string; outcome: string; revision?: number; replacementRequested?: boolean }[] = [];
+    const results: {
+      stagedEditId: string;
+      outcome: string;
+      revision?: number;
+      replacementRequested?: boolean;
+    }[] = [];
     for (const edit of pending) {
       const { response } = await this.apply(edit.id);
       if (response.outcome === 'applied') {
         results.push({ stagedEditId: edit.id, outcome: 'applied', revision: response.revision });
       } else {
-        results.push({ stagedEditId: edit.id, outcome: response.outcome, replacementRequested: response.replacementRequested });
+        results.push({
+          stagedEditId: edit.id,
+          outcome: response.outcome,
+          replacementRequested: response.replacementRequested,
+        });
       }
     }
 
@@ -293,7 +323,9 @@ export class EditService {
   }
 
   dropRemaining(conversationId: string): string[] {
-    const pending = this.storage.listStagedEditsByConversation(conversationId).filter((e) => e.status === 'pending');
+    const pending = this.storage
+      .listStagedEditsByConversation(conversationId)
+      .filter((e) => e.status === 'pending');
     const droppedIds: string[] = [];
     for (const edit of pending) {
       this.drop(edit.id);
@@ -326,7 +358,10 @@ export class EditService {
    * `apply()`'s `PrimaryMutex` lock and inside `createRevision`'s own (redundant but harmless)
    * `storage.transaction()` call.
    */
-  private applyClean(edit: StagedEditRow, patches: { from: number; to: number; insert: string }[]): ApplyEditResponse {
+  private applyClean(
+    edit: StagedEditRow,
+    patches: { from: number; to: number; insert: string }[],
+  ): ApplyEditResponse {
     const document = this.storage.getDocument();
     if (!document) throw new Error('Document not found');
     const conversation = this.storage.getConversation(edit.conversationId);
@@ -336,7 +371,11 @@ export class EditService {
       this.automerge.get().splice(patches);
 
       const resolvedAt = new Date().toISOString();
-      this.storage.updateStagedEdit(edit.id, { status: 'applied', appliedRevision: predictedRevision, resolvedAt });
+      this.storage.updateStagedEdit(edit.id, {
+        status: 'applied',
+        appliedRevision: predictedRevision,
+        resolvedAt,
+      });
 
       // FR-016: applying (or auto-applying) its own proposed edit updates this conversation's own
       // context revision immediately to match — done *before* `revisionService.createRevision`
@@ -387,7 +426,10 @@ export class EditService {
     if (conversation.status === 'closed') {
       // No `event` field: skipping the request means no domain event fires at all for it
       // (FR-042) — `staged_edit_replacement_exhausted` covers a spent budget, not this case.
-      logger.warn({ conversationId: conversation.id }, 'not requesting a replacement on a closed conversation');
+      logger.warn(
+        { conversationId: conversation.id },
+        'not requesting a replacement on a closed conversation',
+      );
       return;
     }
 

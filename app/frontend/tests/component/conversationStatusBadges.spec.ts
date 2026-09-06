@@ -10,7 +10,9 @@ import { useConversationsStore } from '../../src/stores/conversations.js';
 // than through any one component, since it's now the single source of truth all three surfaces
 // render from.
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -57,12 +59,16 @@ describe('useConversationStatusBadges', () => {
     (status) => {
       useConversationsStore().conversations = [conversationFixture({ id: 'c1', status })];
       const { badges } = useConversationStatusBadges(() => 'c1');
-      expect(badges.value).toEqual([{ key: 'status', className: 'status-badge', dataStatus: status, label: status }]);
+      expect(badges.value).toEqual([
+        { key: 'status', className: 'status-badge', dataStatus: status, label: status },
+      ]);
     },
   );
 
   it('adds a Stale badge (in addition to the status badge) when isStale is true', () => {
-    useConversationsStore().conversations = [conversationFixture({ id: 'c1', status: 'idle', isStale: true })];
+    useConversationsStore().conversations = [
+      conversationFixture({ id: 'c1', status: 'idle', isStale: true }),
+    ];
     const { badges } = useConversationStatusBadges(() => 'c1');
     expect(badges.value.map((b) => b.key)).toEqual(['status', 'stale']);
     const stale = badges.value.find((b) => b.key === 'stale')!;
@@ -73,7 +79,9 @@ describe('useConversationStatusBadges', () => {
   });
 
   it('adds an Orphaned badge (in addition to the status badge) when anchorOrphaned is true', () => {
-    useConversationsStore().conversations = [conversationFixture({ id: 'c1', anchorOrphaned: true })];
+    useConversationsStore().conversations = [
+      conversationFixture({ id: 'c1', anchorOrphaned: true }),
+    ];
     const { badges } = useConversationStatusBadges(() => 'c1');
     expect(badges.value.map((b) => b.key)).toEqual(['status', 'orphaned']);
     const orphaned = badges.value.find((b) => b.key === 'orphaned')!;
@@ -96,14 +104,18 @@ describe('useConversationStatusBadges', () => {
   });
 
   it('includes a pending-count badge by default ("full" variant) — parity fix, no longer HudPanel.vue-only', () => {
-    useConversationsStore().conversations = [conversationFixture({ id: 'c1', pendingEditCount: 5 })];
+    useConversationsStore().conversations = [
+      conversationFixture({ id: 'c1', pendingEditCount: 5 }),
+    ];
     const { badges } = useConversationStatusBadges(() => 'c1');
     expect(badges.value.map((b) => b.key)).toEqual(['status', 'pending']);
     expect(badges.value.find((b) => b.key === 'pending')?.label).toBe('5');
   });
 
   it('"compact" variant excludes pendingEditCount/queueInfo badges', () => {
-    useConversationsStore().conversations = [conversationFixture({ id: 'c1', pendingEditCount: 5 })];
+    useConversationsStore().conversations = [
+      conversationFixture({ id: 'c1', pendingEditCount: 5 }),
+    ];
     const { badges } = useConversationStatusBadges(() => 'c1', 'compact');
     expect(badges.value.map((b) => b.key)).toEqual(['status']);
   });

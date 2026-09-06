@@ -226,12 +226,22 @@ export class DocumentService {
     // `ConversationService.ensureMain`'s own call to the same `seedMain` for its (rarer,
     // defensive-only) creation path — see the comment on `conversationService` above for why this
     // is a possibly-null late-bound reference rather than a constructor dependency.
-    this.conversationService?.seedMain(mainConversationRow.id, resolvedTitle, revisionRow.revision, content);
+    this.conversationService?.seedMain(
+      mainConversationRow.id,
+      resolvedTitle,
+      revisionRow.revision,
+      content,
+    );
 
     return {
       document: toDocumentDto({ ...documentRow, currentRevision: revisionRow.revision }),
       content,
-      mainConversation: toConversationDto(this.storage, mainConversationRow, revisionRow.revision, content),
+      mainConversation: toConversationDto(
+        this.storage,
+        mainConversationRow,
+        revisionRow.revision,
+        content,
+      ),
     };
   }
 

@@ -41,14 +41,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -65,7 +85,11 @@ function buildHarness(): Harness {
   return { storage, automerge, documentService, editService, primaryMutex };
 }
 
-function createConversation(storage: StorageAdapter, documentId: string, contextRevision: number): ConversationRow {
+function createConversation(
+  storage: StorageAdapter,
+  documentId: string,
+  contextRevision: number,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -115,7 +139,11 @@ describe('FIX 4: document-mutating writes route through the shared per-document 
     const documentId = created.document.id;
 
     const withLockSpy = vi.spyOn(h.primaryMutex, 'withLock');
-    await h.documentService.applyChanges(undefined, [{ from: 0, to: 5, insert: 'Howdy' }], undefined);
+    await h.documentService.applyChanges(
+      undefined,
+      [{ from: 0, to: 5, insert: 'Howdy' }],
+      undefined,
+    );
 
     expect(withLockSpy).toHaveBeenCalledWith(documentId, expect.any(Function));
   });
@@ -128,18 +156,35 @@ describe('FIX 4: document-mutating writes route through the shared per-document 
 
     // Two disjoint operations, staged as two separate proposals — exactly the "two accepts that
     // would otherwise race on reading/writing document content" scenario FIX 4 targets.
-    const editA = h.editService.stage(conv.id, 'call_a', 'A', [{ old_string: 'One', new_string: 'ONE' }], created.document.currentRevision);
-    const editB = h.editService.stage(conv.id, 'call_b', 'B', [{ old_string: 'four', new_string: 'FOUR' }], created.document.currentRevision);
+    const editA = h.editService.stage(
+      conv.id,
+      'call_a',
+      'A',
+      [{ old_string: 'One', new_string: 'ONE' }],
+      created.document.currentRevision,
+    );
+    const editB = h.editService.stage(
+      conv.id,
+      'call_b',
+      'B',
+      [{ old_string: 'four', new_string: 'FOUR' }],
+      created.document.currentRevision,
+    );
 
     const revisionBefore = created.document.currentRevision;
 
     // Fired concurrently, without awaiting between them.
-    const [resultA, resultB] = await Promise.all([h.editService.apply(editA.id), h.editService.apply(editB.id)]);
+    const [resultA, resultB] = await Promise.all([
+      h.editService.apply(editA.id),
+      h.editService.apply(editB.id),
+    ]);
 
     expect(resultA.response.outcome).toBe('applied');
     expect(resultB.response.outcome).toBe('applied');
 
-    const revisions = [resultA, resultB].map((r) => (r.response.outcome === 'applied' ? r.response.revision : null));
+    const revisions = [resultA, resultB].map((r) =>
+      r.response.outcome === 'applied' ? r.response.revision : null,
+    );
     // Each application produced its own, distinct revision — never the same number claimed twice,
     // which is exactly what would happen if both calls read `document.currentRevision` before
     // either had written its own increment.

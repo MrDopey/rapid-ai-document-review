@@ -5,7 +5,10 @@ import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts
 import MessageBubble from '../../src/components/conversation/MessageBubble.vue';
 import ConversationThreadBox from '../../src/components/conversation/ConversationThreadBox.vue';
 import ConversationDetailPanel from '../../src/components/conversation/ConversationDetailPanel.vue';
-import { useConversationsStore, type ConversationMessageState } from '../../src/stores/conversations.js';
+import {
+  useConversationsStore,
+  type ConversationMessageState,
+} from '../../src/stores/conversations.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // The new "Branch" parity test below (focused-view header action) drives
@@ -36,7 +39,9 @@ vi.mock('../../src/transport/http-client.js', () => ({
 // message to register as "too tall to show in full" overrides `scrollHeight` on the mounted text
 // element before the component's post-flush overflow check runs (see `mockTallScrollHeight`).
 
-function makeMessage(overrides: Partial<ConversationMessageState> & { id: string }): ConversationMessageState {
+function makeMessage(
+  overrides: Partial<ConversationMessageState> & { id: string },
+): ConversationMessageState {
   return {
     role: 'assistant',
     text: 'short text',
@@ -75,13 +80,19 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
   }
 
   it('renders no toggle button when the message is short (nothing to expand/collapse)', async () => {
-    const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'short' }), expanded: false });
+    const wrapper = mountBubble({
+      message: makeMessage({ id: 'm1', text: 'short' }),
+      expanded: false,
+    });
     await wrapper.vm.$nextTick();
     expect(wrapper.find('.expand-toggle-button').exists()).toBe(false);
   });
 
   it('a long message defaults to collapsed and shows a "Show more" toggle', async () => {
-    const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }), expanded: false });
+    const wrapper = mountBubble({
+      message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
+      expanded: false,
+    });
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -92,7 +103,10 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
   });
 
   it('clicking the toggle emits update:expanded so a controlling parent can flip this one message', async () => {
-    const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }), expanded: false });
+    const wrapper = mountBubble({
+      message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
+      expanded: false,
+    });
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -101,7 +115,10 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
   });
 
   it('when expanded=true, the clamp is lifted and the toggle reads "Show less"', async () => {
-    const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }), expanded: true });
+    const wrapper = mountBubble({
+      message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
+      expanded: true,
+    });
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -243,7 +260,9 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
   });
 
   it('an explicit collapse of an assistant message overrides the new expanded-by-default and survives a remount', async () => {
-    const wrapper = mountBox([makeMessage({ id: 'assistant-1', role: 'assistant', text: 'a'.repeat(2000) })]);
+    const wrapper = mountBox([
+      makeMessage({ id: 'assistant-1', role: 'assistant', text: 'a'.repeat(2000) }),
+    ]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await flushPromises();
     expect(wrapper.getComponent(MessageBubble).props('expanded')).toBe(true);
@@ -255,7 +274,9 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     const stored = JSON.parse(localStorage.getItem('raidr:messageExpanded') ?? '{}');
     expect(stored['assistant-1']).toBe(false);
 
-    const remount = mountBox([makeMessage({ id: 'assistant-1', role: 'assistant', text: 'a'.repeat(2000) })]);
+    const remount = mountBox([
+      makeMessage({ id: 'assistant-1', role: 'assistant', text: 'a'.repeat(2000) }),
+    ]);
     expect(remount.getComponent(MessageBubble).props('expanded')).toBe(false);
   });
 
@@ -263,7 +284,7 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
   // top edge becomes visible, offset for the sidebar box's sticky `.thread-header` (composables/
   // messageScroll.ts). Collapsing (the opposite direction) and the bulk toggle both deliberately
   // leave scroll position alone.
-  it('scrolls the expanded message\'s top into view, offset for the sticky thread header, but not on collapse or bulk toggle', async () => {
+  it("scrolls the expanded message's top into view, offset for the sticky thread header, but not on collapse or bulk toggle", async () => {
     const wrapper = mountBox([makeMessage({ id: 'user-1', role: 'user', text: 'a'.repeat(2000) })]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await flushPromises();
@@ -274,7 +295,9 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
     const [target] = vi.mocked(Element.prototype.scrollIntoView).mock.contexts;
     expect((target as HTMLElement).getAttribute('data-message-id')).toBe('user-1');
-    expect(vi.mocked(Element.prototype.scrollIntoView).mock.calls[0]?.[0]).toMatchObject({ block: 'start' });
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.calls[0]?.[0]).toMatchObject({
+      block: 'start',
+    });
 
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
     await wrapper.get('.expand-toggle-button').trigger('click'); // collapse again
@@ -326,7 +349,9 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
   it('a long user message in the focused/detail-panel view defaults collapsed with a working "Show more" toggle', async () => {
     // `role: 'user'` — bug fix (assistant messages expanded by default) only changed the
     // *assistant* default; see the dedicated "assistant defaults to expanded" test below for that.
-    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) })]);
+    const wrapper = mountFocusedPanel([
+      makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) }),
+    ]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -347,8 +372,10 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
     expect((bubbleAfter.get('.message-text').element as HTMLElement).style.maxHeight).toBe('');
   });
 
-  it('persists the focused view\'s toggle to localStorage, keyed by message id (shared with the thread-box view)', async () => {
-    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) })]);
+  it("persists the focused view's toggle to localStorage, keyed by message id (shared with the thread-box view)", async () => {
+    const wrapper = mountFocusedPanel([
+      makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) }),
+    ]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -363,7 +390,9 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
   // expand/collapse (FR-009)`'s own equivalent test above) — an assistant message needs no click to
   // show in full here either.
   it('a long assistant message in the focused/detail-panel view defaults to expanded, no click needed', async () => {
-    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', role: 'assistant', text: 'a'.repeat(2000) })]);
+    const wrapper = mountFocusedPanel([
+      makeMessage({ id: 'm1', role: 'assistant', text: 'a'.repeat(2000) }),
+    ]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await wrapper.vm.$nextTick();
 
@@ -376,7 +405,9 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
   // header inside `.message-list` to offset for (see `ConversationView.vue`'s own
   // `setMessageExpanded` doc comment).
   it("scrolls the expanded message's top into view in the focused view too", async () => {
-    const wrapper = mountFocusedPanel([makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) })]);
+    const wrapper = mountFocusedPanel([
+      makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) }),
+    ]);
     mockTallScrollHeight(wrapper.getComponent(MessageBubble).get('.message-text').element);
     await wrapper.vm.$nextTick();
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
@@ -489,7 +520,9 @@ describe('ConversationThreadBox — continuity context for a freshly-created pla
     const wrapper = mountBranchBox({
       branchOverrides: { forkedFromMessageId: 'm4' } as Partial<ConversationDto>,
       parentMessages: PARENT_HISTORY,
-      branchMessages: [makeMessage({ id: 'own1', role: 'user', text: "the branch's own first message" })],
+      branchMessages: [
+        makeMessage({ id: 'own1', role: 'user', text: "the branch's own first message" }),
+      ],
     });
     await wrapper.vm.$nextTick();
 
@@ -533,10 +566,13 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     store.messagesByConversation['conv1'] = messages;
     vi.spyOn(store, 'loadDetail').mockResolvedValue(undefined);
 
-    return { store, wrapper: mount(ConversationDetailPanel, {
-      props: { conversationId: 'conv1', active: true },
-      global: { plugins: [pinia], stubs: { EditsList: true } },
-    }) };
+    return {
+      store,
+      wrapper: mount(ConversationDetailPanel, {
+        props: { conversationId: 'conv1', active: true },
+        global: { plugins: [pinia], stubs: { EditsList: true } },
+      }),
+    };
   }
 
   it('renders the bulk toggle enabled (not hidden, not disabled) for a conversation with only one message', () => {

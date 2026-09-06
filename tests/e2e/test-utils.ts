@@ -25,8 +25,14 @@ export async function closeAllFocusedPanels(page: Page): Promise<void> {
  * assumption true regardless of what an earlier step (or an app-side auto-open, e.g. branching)
  * left open.
  */
-export async function focusExclusively(page: Page, row: Locator, expectedHeaderText: string): Promise<void> {
+export async function focusExclusively(
+  page: Page,
+  row: Locator,
+  expectedHeaderText: string,
+): Promise<void> {
   await closeAllFocusedPanels(page);
   await row.click();
-  await expect(page.locator('.conversation-header h2')).toHaveText(expectedHeaderText, { timeout: 10_000 });
+  await expect(page.locator('.conversation-header h2')).toHaveText(expectedHeaderText, {
+    timeout: 10_000,
+  });
 }

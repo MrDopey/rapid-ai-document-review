@@ -22,7 +22,10 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
 async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
   const response = await page.request.get('/api/document');
-  const body = (await response.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await response.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   return { currentRevision: body.document.currentRevision, content: body.content };
 }
 
@@ -44,7 +47,10 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   const from = before.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
 
   // Wait for the manual-edit debounce (FR-004) to actually create a revision whose heads include
@@ -52,7 +58,10 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   // could capture an older revision number whose snapshot predates this edit entirely (FR-017),
   // which would make the "old vs. refreshed context" assertions later in this spec meaningless.
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
@@ -87,7 +96,11 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       const markerLine = page.locator('.cm-line', { hasText: 'US4-MARKER-ORIGINAL' });
       await page.locator('.cm-line').first().click();
       await page.keyboard.press('Control+End');
-      for (let attempt = 0; attempt < 10 && !(await markerLine.isVisible().catch(() => false)); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 10 && !(await markerLine.isVisible().catch(() => false));
+        attempt += 1
+      ) {
         await page.keyboard.press('ArrowUp');
       }
       await expect(markerLine).toBeVisible({ timeout: 10_000 });
@@ -100,7 +113,9 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       await page.keyboard.press('Shift+End');
       await page.keyboard.press(BRANCH_SHORTCUT);
 
-      await expect(page.locator('.conversation-header h2')).toHaveText('US4 Body', { timeout: 10_000 });
+      await expect(page.locator('.conversation-header h2')).toHaveText('US4 Body', {
+        timeout: 10_000,
+      });
       branchName = 'US4 Body';
 
       await waitIdle(page);
@@ -123,13 +138,19 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       const { currentRevision, content } = await getDocumentState(page);
       const from = content.length;
       await page.request.patch('/api/document', {
-        data: { baseRevision: currentRevision, changes: [{ from, to: from, insert: `\n\n${MARKERS.advanced}` }] },
+        data: {
+          baseRevision: currentRevision,
+          changes: [{ from, to: from, insert: `\n\n${MARKERS.advanced}` }],
+        },
       });
 
       // The manual-edit debounce (RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS, playwright.config.ts) must fire
       // before document.currentRevision actually advances (FR-004).
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+        .poll(async () => (await getDocumentState(page)).currentRevision, {
+          timeout: 10_000,
+          intervals: [300],
+        })
         .toBeGreaterThan(branchRevision);
     });
 

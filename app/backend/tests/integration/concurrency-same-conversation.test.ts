@@ -51,14 +51,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -74,7 +94,11 @@ function buildHarness(): Harness {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
-  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationFoldService = new ConversationFoldService(
+    storage,
+    piService,
+    conversationEventPublisher,
+  );
   const conversationReviewService = new ConversationReviewService(
     storage,
     piService,
@@ -100,7 +124,11 @@ function buildHarness(): Harness {
   return { storage, piService, conversationService };
 }
 
-function createConversation(storage: StorageAdapter, documentId: string, contextRevision: number): ConversationRow {
+function createConversation(
+  storage: StorageAdapter,
+  documentId: string,
+  contextRevision: number,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -123,8 +151,15 @@ function createConversation(storage: StorageAdapter, documentId: string, context
   });
 }
 
-function registerFakeSession(piService: PiService, conversationId: string, session: FakePiSession): void {
-  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(conversationId, session);
+function registerFakeSession(
+  piService: PiService,
+  conversationId: string,
+  session: FakePiSession,
+): void {
+  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(
+    conversationId,
+    session,
+  );
 }
 
 function flushMicrotasks(): Promise<void> {

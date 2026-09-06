@@ -1,5 +1,8 @@
 import { dirname, join } from 'node:path';
-import type { MessageDto, ReviewConversationResponse } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  MessageDto,
+  ReviewConversationResponse,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { logger } from '../logging.ts';
 import { newId } from '../ids.ts';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
@@ -35,7 +38,12 @@ export class ConversationReviewService {
   private readonly publisher: EventPublisher;
   private readonly automerge: AutomergeStoreHolder;
 
-  constructor(storage: StorageAdapter, piService: PiService, publisher: EventPublisher, automerge: AutomergeStoreHolder) {
+  constructor(
+    storage: StorageAdapter,
+    piService: PiService,
+    publisher: EventPublisher,
+    automerge: AutomergeStoreHolder,
+  ) {
     this.storage = storage;
     this.piService = piService;
     this.publisher = publisher;
@@ -53,7 +61,11 @@ export class ConversationReviewService {
    * is exempt from `maxConversationDepth`/`maxEditingDepth`: it has no `parentId` and
    * `branchDepth: 0`, outside the branching/editing workflow entirely.
    */
-  review(target: ConversationRow, document: DocumentRow, callbacks: ReviewCallbacks): ReviewConversationResponse {
+  review(
+    target: ConversationRow,
+    document: DocumentRow,
+    callbacks: ReviewCallbacks,
+  ): ReviewConversationResponse {
     const reviewedConversationIds = this.collectWithDescendants(document.id, target.id);
     const transcriptLines =
       this.piService.readClosedTranscript(target.piSessionPath) ??
@@ -99,7 +111,9 @@ export class ConversationReviewService {
         'branches, without altering them. You have no tool access to them — this is a read-only ' +
         'review based on the transcript below.',
       '',
-      transcriptLines.length > 0 ? transcriptLines.join('\n\n') : '(No messages were recorded in this conversation.)',
+      transcriptLines.length > 0
+        ? transcriptLines.join('\n\n')
+        : '(No messages were recorded in this conversation.)',
     ].join('\n');
 
     // Fire-and-forget, same convention as branch()'s seed message: POST /api/conversations/:id/review
@@ -109,13 +123,22 @@ export class ConversationReviewService {
       // `event: 'agent_error'` is the vocabulary term for a Pi call failing with no other event
       // of its own (FR-042).
       logger.warn(
-        { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
+        {
+          event: 'agent_error',
+          conversationId: row.id,
+          err: err instanceof Error ? err.message : String(err),
+        },
         'failed to deliver review seed message',
       );
     });
 
     return {
-      conversation: toConversationDto(this.storage, row, document.currentRevision, this.automerge.get().getContent()),
+      conversation: toConversationDto(
+        this.storage,
+        row,
+        document.currentRevision,
+        this.automerge.get().getContent(),
+      ),
       reviewedConversationIds,
     };
   }
@@ -145,7 +168,10 @@ export class ConversationReviewService {
   /** Fallback transcript source when no real Pi session file exists on disk yet — always true
    *  under `RADR_BE_PI_FAKE_SESSIONS=1` (`FakeAgentSession` never persists to disk), in which case the
    *  application's own stored event log is the only record of what was said. */
-  private buildFallbackTranscript(conversationIds: string[], buildMessages: (id: string) => MessageDto[]): string[] {
+  private buildFallbackTranscript(
+    conversationIds: string[],
+    buildMessages: (id: string) => MessageDto[],
+  ): string[] {
     const lines: string[] = [];
     for (const id of conversationIds) {
       const conv = this.storage.getConversation(id);

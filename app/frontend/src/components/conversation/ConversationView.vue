@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useConversationsStore, type ConversationMessageState } from '../../stores/conversations.js';
+import {
+  useConversationsStore,
+  type ConversationMessageState,
+} from '../../stores/conversations.js';
 import { useEditsStore } from '../../stores/edits.js';
 import { ApiError } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
@@ -88,7 +91,9 @@ function dismissDirectEditHint(): void {
 }
 
 const messages = computed(() => store.messagesFor(props.conversationId));
-const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+const conversation = computed(
+  () => store.conversations.find((c) => c.id === props.conversationId) ?? null,
+);
 const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
 // Rename affordance: click-to-edit title (an inline `<input>` replacing the plain-text title, save
@@ -97,13 +102,22 @@ const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 // `useConversationRename` (same store action, `store.rename`, so renaming from either view updates
 // both — they share the same Pinia store).
 const nameInputEl = ref<HTMLInputElement | null>(null);
-const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName } =
-  useConversationRename(() => props.conversationId, nameInputEl);
+const {
+  isEditingName,
+  nameDraft,
+  renameError,
+  renameSaving,
+  startEditingName,
+  cancelEditingName,
+  saveName,
+} = useConversationRename(() => props.conversationId, nameInputEl);
 
 // Shares the exact same computed logic as `ConversationThreadBox.vue`'s continuity-context
 // rendering, via the composable, rather than duplicating it — see `useConversationContinuity`'s
 // doc comment for the full rationale.
-const { parentConversation, continuityMessages } = useConversationContinuity(() => props.conversationId);
+const { parentConversation, continuityMessages } = useConversationContinuity(
+  () => props.conversationId,
+);
 
 // This view owns its own per-message expand state, the same way `ConversationThreadBox.vue` does
 // (data-model.md's `MessageDisplayState` is keyed by `messageId` alone, so both call sites share
@@ -151,11 +165,14 @@ const { action: bulkToggleAction } = useBulkToggleAction(() => props.conversatio
 // callback) on success so App.vue can auto-focus the new branch — creation itself is blocked at
 // the cap, so a free slot is always guaranteed by the time this fires, and App.vue's own no-op
 // guard is only ever defense in depth against a same-tick race.
-const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
-  atFocusCap: () => props.atFocusCap,
-  maxFocused: () => props.maxFocused,
-  onBranchCreated: (id) => emit('branch-created', id),
-});
+const { action: branchAction, error: branchError } = useConversationBranchAction(
+  () => props.conversationId,
+  {
+    atFocusCap: () => props.atFocusCap,
+    maxFocused: () => props.maxFocused,
+    onBranchCreated: (id) => emit('branch-created', id),
+  },
+);
 
 // 006-toolbar-reorg (second refactor): the HUD's per-row Make/Clear Primary button is gone (the
 // HUD list is purely informational now) — this focus/detail view is one of its two new homes
@@ -204,7 +221,10 @@ const MIN_TRANSCRIPT_PX = 120;
 const MIN_EDITS_PX = 100;
 const EDITS_HANDLE_SPACE_PX = 6;
 
-const initialSplit = loadPaneSizes({ transcriptFr: DEFAULT_TRANSCRIPT_FR, editsFr: DEFAULT_EDITS_FR });
+const initialSplit = loadPaneSizes({
+  transcriptFr: DEFAULT_TRANSCRIPT_FR,
+  editsFr: DEFAULT_EDITS_FR,
+});
 const transcriptFr = ref(initialSplit.transcriptFr);
 const editsFr = ref(initialSplit.editsFr);
 const transcriptEditsEl = ref<HTMLDivElement | null>(null);
@@ -227,7 +247,9 @@ const showEditsSection = computed(() => conversation.value?.status !== 'closed' 
 
 const transcriptEditsStyle = computed(() => {
   if (!hasEdits.value) return undefined;
-  return { gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr` };
+  return {
+    gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr`,
+  };
 });
 
 /** This `role="separator"` handle needs `aria-valuenow`/`aria-valuemin`/`aria-valuemax` (WCAG
@@ -235,7 +257,9 @@ const transcriptEditsStyle = computed(() => {
  *  split (same live fraction `transcriptEditsStyle` above already renders), so an assistive-tech
  *  user gets the same "how is this split right now" information sighted users read off the
  *  handle's own position. */
-const editsSplitPercent = computed(() => Math.round((transcriptFr.value / (transcriptFr.value + editsFr.value)) * 100));
+const editsSplitPercent = computed(() =>
+  Math.round((transcriptFr.value / (transcriptFr.value + editsFr.value)) * 100),
+);
 
 const editsResize = useResizeHandle({
   axis: 'vertical',
@@ -507,12 +531,23 @@ async function onRequestReview(): Promise<void> {
 const archiveOrReviewAction = computed<ActionDescriptor | null>(() => {
   if (!conversation.value) return null;
   if (conversation.value.status === 'closed') {
-    return { key: 'request-review', label: 'Request review', disabled: reviewing.value, onClick: () => void onRequestReview() };
+    return {
+      key: 'request-review',
+      label: 'Request review',
+      disabled: reviewing.value,
+      onClick: () => void onRequestReview(),
+    };
   }
   // specs/006-archivable-main-conversation (US1): archiving Main is now a supported operation
   // (it atomically archives the current Main and replaces it with a fresh one) — Main gets the
   // same "Archive" action any other open conversation already has, no `kind` gating.
-  return { key: 'archive', label: 'Archive', disabled: closing.value, danger: true, onClick: openCloseDialog };
+  return {
+    key: 'archive',
+    label: 'Archive',
+    disabled: closing.value,
+    danger: true,
+    onClick: openCloseDialog,
+  };
 });
 
 const actions = computed<ActionDescriptor[]>(() => {
@@ -604,15 +639,28 @@ const actions = computed<ActionDescriptor[]>(() => {
     </div>
 
     <div ref="transcriptEditsEl" class="transcript-edits" :style="transcriptEditsStyle">
-      <div ref="listRef" class="message-list" role="log" aria-live="polite" aria-relevant="additions">
+      <div
+        ref="listRef"
+        class="message-list"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
         <!-- 005-canvas-conversation-threads: read-only continuity context for a freshly-created,
              zero-message branch — borrowed from the parent, never part of this conversation's own
              transcript below (same treatment as `ConversationThreadBox.vue`'s sidebar box, kept in
              a visually distinct wrapper, labeled, so it can never be mistaken for this
              conversation's own messages). -->
         <div v-if="continuityMessages.length > 0" class="continuity-context">
-          <span class="continuity-label">Continued from {{ parentConversation?.name ?? 'parent conversation' }}</span>
-          <MessageBubble v-for="message in continuityMessages" :key="message.id" :message="message" :expanded="true" />
+          <span class="continuity-label"
+            >Continued from {{ parentConversation?.name ?? 'parent conversation' }}</span
+          >
+          <MessageBubble
+            v-for="message in continuityMessages"
+            :key="message.id"
+            :message="message"
+            :expanded="true"
+          />
         </div>
         <MessageBubble
           v-for="(msg, index) in messages"
@@ -648,8 +696,14 @@ const actions = computed<ActionDescriptor[]>(() => {
       <EditsList v-if="showEditsSection" :conversation-id="conversationId" />
     </div>
 
-    <div v-if="conversation?.status === 'errored' && !errorDismissed" class="error-banner" role="alert">
-      <span class="error-banner-message text-wrap-safe">{{ conversation.errorMessage ?? 'The agent hit an error.' }}</span>
+    <div
+      v-if="conversation?.status === 'errored' && !errorDismissed"
+      class="error-banner"
+      role="alert"
+    >
+      <span class="error-banner-message text-wrap-safe">{{
+        conversation.errorMessage ?? 'The agent hit an error.'
+      }}</span>
       <span class="error-banner-actions">
         <button type="button" @click="onRetry">Retry</button>
         <button type="button" aria-label="Dismiss error" @click="dismissError">Dismiss</button>
@@ -666,13 +720,20 @@ const actions = computed<ActionDescriptor[]>(() => {
           Tip: highlight text in the document and click "Branch (Main)" (Alt+Shift+S) to get a
           reviewable edit proposal instead of a direct answer.
         </span>
-        <button type="button" class="dismiss-notice-button" aria-label="Dismiss tip" @click="dismissDirectEditHint">
+        <button
+          type="button"
+          class="dismiss-notice-button"
+          aria-label="Dismiss tip"
+          @click="dismissDirectEditHint"
+        >
           Got it
         </button>
       </div>
 
       <form class="composer" @submit.prevent="onSend">
-        <label class="visually-hidden" :for="`composer-${conversationId}`">Message {{ conversation?.name }}</label>
+        <label class="visually-hidden" :for="`composer-${conversationId}`"
+          >Message {{ conversation?.name }}</label
+        >
         <textarea
           :id="`composer-${conversationId}`"
           v-model="draft"
@@ -702,11 +763,21 @@ const actions = computed<ActionDescriptor[]>(() => {
 
     <Transition name="modal">
       <div v-if="closeDialogOpen" class="modal-overlay close-dialog-overlay">
-        <div ref="closeDialogEl" class="close-dialog dialog-box" role="alertdialog" aria-modal="true" aria-label="Close conversation">
+        <div
+          ref="closeDialogEl"
+          class="close-dialog dialog-box"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Close conversation"
+        >
           <p>Close "{{ conversation?.name }}"? This cannot be undone.</p>
-          <p v-if="conversation && conversation.pendingEditCount > 0" class="pending-warning" role="alert">
-            This conversation has {{ pendingProposalPhrase(conversation.pendingEditCount) }}; resolve
-            {{ conversation.pendingEditCount === 1 ? 'it' : 'them' }} before closing.
+          <p
+            v-if="conversation && conversation.pendingEditCount > 0"
+            class="pending-warning"
+            role="alert"
+          >
+            This conversation has {{ pendingProposalPhrase(conversation.pendingEditCount) }};
+            resolve {{ conversation.pendingEditCount === 1 ? 'it' : 'them' }} before closing.
           </p>
           <label class="fold-summary-option">
             <input v-model="foldSummaryIntoParent" type="checkbox" />
@@ -720,7 +791,9 @@ const actions = computed<ActionDescriptor[]>(() => {
                (`danger: true` in `archiveOrReviewAction` above). -->
           <div class="close-dialog-actions">
             <button type="button" :disabled="closing" @click="cancelCloseDialog">Cancel</button>
-            <button type="button" class="danger" :disabled="closing" @click="confirmClose">Close conversation</button>
+            <button type="button" class="danger" :disabled="closing" @click="confirmClose">
+              Close conversation
+            </button>
           </div>
         </div>
       </div>
@@ -739,11 +812,16 @@ const actions = computed<ActionDescriptor[]>(() => {
           aria-label="Primary conversation is busy"
         >
           <p>
-            {{ primaryBusyConversationName }} is still working. What should happen to the Primary designation?
+            {{ primaryBusyConversationName }} is still working. What should happen to the Primary
+            designation?
           </p>
           <div class="primary-busy-choices">
-            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">Switch now</button>
-            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">
+              Switch now
+            </button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">
+              Switch when idle
+            </button>
             <button type="button" @click="resolvePrimaryBusyPrompt('cancel')">Cancel</button>
           </div>
         </div>

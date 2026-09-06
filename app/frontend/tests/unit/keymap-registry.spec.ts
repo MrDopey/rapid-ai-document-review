@@ -13,7 +13,9 @@ import {
 // `findConflicts` over the actual live list, so a future addition that collides with an existing
 // combo fails here instead of silently shadowing (or being shadowed by) an existing shortcut.
 
-function binding(overrides: Partial<HotkeyBinding> & Pick<HotkeyBinding, 'id' | 'code'>): HotkeyBinding {
+function binding(
+  overrides: Partial<HotkeyBinding> & Pick<HotkeyBinding, 'id' | 'code'>,
+): HotkeyBinding {
   return {
     modifiers: { ctrl: true, alt: true, shift: false },
     scope: 'Global',
@@ -106,19 +108,29 @@ describe('findConflicts', () => {
 
 describe('matchesBinding', () => {
   it('requires an exact match on ctrl/alt/shift and code — a stray extra modifier never matches', () => {
-    const target = binding({ id: 'a', code: 'KeyH', modifiers: { ctrl: true, alt: true, shift: false } });
-    expect(matchesBinding(new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true }), target)).toBe(
-      true,
-    );
+    const target = binding({
+      id: 'a',
+      code: 'KeyH',
+      modifiers: { ctrl: true, alt: true, shift: false },
+    });
+    expect(
+      matchesBinding(
+        new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true }),
+        target,
+      ),
+    ).toBe(true);
     expect(
       matchesBinding(
         new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, shiftKey: true }),
         target,
       ),
     ).toBe(false);
-    expect(matchesBinding(new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true }), target)).toBe(
-      false,
-    );
+    expect(
+      matchesBinding(
+        new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true }),
+        target,
+      ),
+    ).toBe(false);
   });
 });
 

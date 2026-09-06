@@ -33,7 +33,11 @@ const ORIGINAL_ENV = { ...process.env };
 
 /** A stand-in `Model` value — never inspected structurally, only for identity (`toBe`) checks
  *  against whatever `modelRuntime.getModel(...)` was stubbed to return. */
-const FAKE_RESOLVED_MODEL = { provider: 'anthropic', id: 'claude-opus-4-5', kind: 'fake-resolved-model' };
+const FAKE_RESOLVED_MODEL = {
+  provider: 'anthropic',
+  id: 'claude-opus-4-5',
+  kind: 'fake-resolved-model',
+};
 
 /** Builds a minimal `AgentSessionLike`-shaped stub (agent-session-port.ts) sufficient for
  *  `PiService.generateFoldSynopsis`: `subscribe()` captures the listener, and `prompt()`
@@ -161,7 +165,9 @@ describe('Contract: RADR_BE_PI_AGENT_MODEL (pi-service.ts session creation)', ()
 
     const { piService, conversation } = buildHarness(mods);
 
-    await expect(piService.generateFoldSynopsis(conversation, 'hello')).resolves.toEqual(expect.any(String));
+    await expect(piService.generateFoldSynopsis(conversation, 'hello')).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(sdk.createAgentSession).toHaveBeenCalledTimes(1);
     const callArg = sdk.createAgentSession.mock.calls[0]?.[0];
@@ -187,7 +193,12 @@ describe('Contract: RADR_BE_PI_AGENT_MODEL (pi-service.ts session creation)', ()
 
     await expect(piService.generateFoldSynopsis(conversation, 'hello')).rejects.toThrow(
       expect.objectContaining({
-        message: expect.stringMatching(new RegExp(`${badValue}.*RADR_BE_PI_AGENT_MODEL|RADR_BE_PI_AGENT_MODEL.*${badValue}`, 's')),
+        message: expect.stringMatching(
+          new RegExp(
+            `${badValue}.*RADR_BE_PI_AGENT_MODEL|RADR_BE_PI_AGENT_MODEL.*${badValue}`,
+            's',
+          ),
+        ),
       }),
     );
     expect(sdk.createAgentSession).not.toHaveBeenCalled();
@@ -209,7 +220,12 @@ describe('Contract: RADR_BE_PI_AGENT_MODEL (pi-service.ts session creation)', ()
 
     await expect(piService.generateFoldSynopsis(conversation, 'hello')).rejects.toThrow(
       expect.objectContaining({
-        message: expect.stringMatching(new RegExp(`${badValue}.*RADR_BE_PI_AGENT_MODEL|RADR_BE_PI_AGENT_MODEL.*${badValue}`, 's')),
+        message: expect.stringMatching(
+          new RegExp(
+            `${badValue}.*RADR_BE_PI_AGENT_MODEL|RADR_BE_PI_AGENT_MODEL.*${badValue}`,
+            's',
+          ),
+        ),
       }),
     );
     expect(sdk.createAgentSession).not.toHaveBeenCalled();
@@ -234,7 +250,9 @@ describe('Contract: RADR_BE_PI_AGENT_MODEL (pi-service.ts session creation)', ()
     // accidental real-SDK call surfaces loudly rather than silently "working".
     const { piService, conversation } = buildHarness(mods);
 
-    await expect(piService.generateFoldSynopsis(conversation, 'hello')).resolves.toEqual(expect.any(String));
+    await expect(piService.generateFoldSynopsis(conversation, 'hello')).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(sdk.ModelRuntime.create).not.toHaveBeenCalled();
     expect(sdk.createAgentSession).not.toHaveBeenCalled();

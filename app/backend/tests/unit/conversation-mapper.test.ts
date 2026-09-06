@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { toConversationDto } from '../../src/conversation/conversation-mapper.ts';
-import type { ConversationRow, StorageAdapter, UserSettingsRow } from '../../src/storage/storage-adapter.ts';
+import type {
+  ConversationRow,
+  StorageAdapter,
+  UserSettingsRow,
+} from '../../src/storage/storage-adapter.ts';
 
 const SETTINGS: UserSettingsRow = {
   thinkingVisible: false,
@@ -91,7 +95,11 @@ describe('toConversationDto anchorOrphaned', () => {
 
     const dto = toConversationDto(fakeStorage(), row, 1, shiftedContent);
     expect(dto.anchorOrphaned).toBe(false);
-    expect(dto.seedSelection).toEqual({ from: expectedFrom, to: expectedFrom + 'brown fox'.length, text: 'brown fox' });
+    expect(dto.seedSelection).toEqual({
+      from: expectedFrom,
+      to: expectedFrom + 'brown fox'.length,
+      text: 'brown fox',
+    });
   });
 });
 
@@ -120,13 +128,23 @@ describe('toConversationDto forkedFromMessageId (message-level fork anchor — N
       ...baseRow({ kind: 'branch', parentId: 'conv_parent' }),
       forkedFromMessageId: 'msg_42',
     };
-    const dto = toConversationDto(fakeStorage(), row, 1, 'content') as unknown as ConversationDtoWithFork;
+    const dto = toConversationDto(
+      fakeStorage(),
+      row,
+      1,
+      'content',
+    ) as unknown as ConversationDtoWithFork;
     expect(dto.forkedFromMessageId).toBe('msg_42');
   });
 
   it('is null for Main, and for a branch created from a document selection with no message context', () => {
     const row: ConversationRowWithFork = { ...baseRow(), forkedFromMessageId: null };
-    const dto = toConversationDto(fakeStorage(), row, 1, 'content') as unknown as ConversationDtoWithFork;
+    const dto = toConversationDto(
+      fakeStorage(),
+      row,
+      1,
+      'content',
+    ) as unknown as ConversationDtoWithFork;
     expect(dto.forkedFromMessageId).toBeNull();
   });
 });

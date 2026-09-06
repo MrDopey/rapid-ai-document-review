@@ -11,7 +11,10 @@ export const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..
 
 // Skips gracefully if `dist/public` is missing (e.g. a local build that only built the backend) —
 // startup shouldn't crash just because the frontend wasn't bundled.
-export function registerStaticRoutes(app: FastifyInstance, deps: { logger: Logger; dir?: string }): void {
+export function registerStaticRoutes(
+  app: FastifyInstance,
+  deps: { logger: Logger; dir?: string },
+): void {
   const dir = deps.dir ?? publicDir;
 
   if (!existsSync(dir)) {

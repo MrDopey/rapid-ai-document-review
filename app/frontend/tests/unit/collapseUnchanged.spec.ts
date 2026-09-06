@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Change } from 'diff';
-import { splitIntoLines, groupByContext, groupParts } from '../../src/components/diff/collapseUnchanged.js';
+import {
+  splitIntoLines,
+  groupByContext,
+  groupParts,
+} from '../../src/components/diff/collapseUnchanged.js';
 
 describe('splitIntoLines', () => {
   it('re-chunks a multi-line unchanged part into one line each', () => {
@@ -86,8 +90,15 @@ describe('groupParts', () => {
   it('flattens a group back into one ordered Change[]', () => {
     const group = {
       type: 'visible' as const,
-      lines: [{ parts: [{ value: 'a\n' }] }, { parts: [{ value: 'b\n' }, { value: 'c', added: true }] }],
+      lines: [
+        { parts: [{ value: 'a\n' }] },
+        { parts: [{ value: 'b\n' }, { value: 'c', added: true }] },
+      ],
     };
-    expect(groupParts(group)).toEqual([{ value: 'a\n' }, { value: 'b\n' }, { value: 'c', added: true }]);
+    expect(groupParts(group)).toEqual([
+      { value: 'a\n' },
+      { value: 'b\n' },
+      { value: 'c', added: true },
+    ]);
   });
 });

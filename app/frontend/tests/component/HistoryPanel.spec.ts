@@ -53,7 +53,11 @@ describe('HistoryPanel — Diff action', () => {
     // Pre-seed revisions so HistoryPanel's onMounted guard (`revisions.length === 0`) skips the
     // real loadRevisions() HTTP call entirely.
     store.revisions = [
-      makeRevision({ revision: 2, origin: 'manual_debounce', createdAt: '2026-01-02T00:00:00.000Z' }),
+      makeRevision({
+        revision: 2,
+        origin: 'manual_debounce',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      }),
       makeRevision({ revision: 1, origin: 'creation', createdAt: '2026-01-01T00:00:00.000Z' }),
     ];
 
@@ -74,7 +78,10 @@ describe('HistoryPanel — Diff action', () => {
   }
 
   function diffButtonIn(row: ReturnType<typeof rowFor>) {
-    return row.find('.actions').findAll('button').find((btn) => btn.text() === 'Diff');
+    return row
+      .find('.actions')
+      .findAll('button')
+      .find((btn) => btn.text() === 'Diff');
   }
 
   it('revision 1 renders NO Diff button (FR-001/002)', () => {
@@ -123,10 +130,16 @@ describe('HistoryPanel — Restore confirmation dialog', () => {
   function mountPanel() {
     const store = useDocumentStore();
     store.revisions = [
-      makeRevision({ revision: 2, origin: 'manual_debounce', createdAt: '2026-01-02T00:00:00.000Z' }),
+      makeRevision({
+        revision: 2,
+        origin: 'manual_debounce',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      }),
       makeRevision({ revision: 1, origin: 'creation', createdAt: '2026-01-01T00:00:00.000Z' }),
     ];
-    return mount(HistoryPanel, { global: { plugins: [pinia], stubs: { RevisionDiffViewer: true } } });
+    return mount(HistoryPanel, {
+      global: { plugins: [pinia], stubs: { RevisionDiffViewer: true } },
+    });
   }
 
   function restoreButtonForV1(wrapper: ReturnType<typeof mountPanel>) {

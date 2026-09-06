@@ -20,7 +20,17 @@ function subscribedFrame(sequence: number): ServerFrame {
     frame: {
       currentSequence: sequence,
       replayCount: 0,
-      snapshot: { document: { id: 'doc-1', title: '', currentRevision: 1, createdAt: '', updatedAt: '', content: '' }, conversations: [] },
+      snapshot: {
+        document: {
+          id: 'doc-1',
+          title: '',
+          currentRevision: 1,
+          createdAt: '',
+          updatedAt: '',
+          content: '',
+        },
+        conversations: [],
+      },
     },
   } as unknown as ServerFrame;
 }
@@ -96,7 +106,14 @@ describe('conversations store — WS event-sequence gap resync', () => {
         currentSequence: 5,
         replayCount: 0,
         snapshot: {
-          document: { id: 'doc-1', title: '', currentRevision: 1, createdAt: '', updatedAt: '', content: '' },
+          document: {
+            id: 'doc-1',
+            title: '',
+            currentRevision: 1,
+            createdAt: '',
+            updatedAt: '',
+            content: '',
+          },
           conversations: [{ id: 'conv-1', name: 'Conv', kind: 'branch', status: 'idle' } as never],
         },
       },

@@ -79,7 +79,11 @@ function handleConversationError(
     };
   }
   if (err instanceof PendingEditsBlockCloseError) {
-    return { status: 409, code: 'PENDING_EDITS_BLOCK_CLOSE', details: { pendingEditIds: err.pendingEditIds } };
+    return {
+      status: 409,
+      code: 'PENDING_EDITS_BLOCK_CLOSE',
+      details: { pendingEditIds: err.pendingEditIds },
+    };
   }
   if (err instanceof PrimaryTargetBusyError) {
     return { status: 409, code: 'PRIMARY_TARGET_BUSY', details: err.details };
@@ -87,19 +91,27 @@ function handleConversationError(
   return null;
 }
 
-async function withConversationErrors(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
+async function withConversationErrors(
+  reply: FastifyReply,
+  fn: () => Promise<unknown>,
+): Promise<unknown> {
   try {
     return await fn();
   } catch (err) {
     const mapped = handleConversationError(err);
-    if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
+    if (mapped)
+      return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
     throw err;
   }
 }
 
 export function registerConversationRoutes(
   app: FastifyInstance,
-  deps: { conversationService: ConversationService; primaryService: PrimaryService; storage: StorageAdapter },
+  deps: {
+    conversationService: ConversationService;
+    primaryService: PrimaryService;
+    storage: StorageAdapter;
+  },
 ): void {
   const { conversationService, primaryService, storage } = deps;
 
@@ -157,14 +169,17 @@ export function registerConversationRoutes(
     });
   });
 
-  app.post<{ Params: { id: string } }>('/api/conversations/:id/refresh-send', async (request, reply) => {
-    const data = parseOrFail(reply, SendMessageRequest, request.body);
-    if (!data) return;
-    return withConversationErrors(reply, async () => {
-      const result = await conversationService.refreshAndSend(request.params.id, data.message);
-      return reply.status(202).send(result);
-    });
-  });
+  app.post<{ Params: { id: string } }>(
+    '/api/conversations/:id/refresh-send',
+    async (request, reply) => {
+      const data = parseOrFail(reply, SendMessageRequest, request.body);
+      if (!data) return;
+      return withConversationErrors(reply, async () => {
+        const result = await conversationService.refreshAndSend(request.params.id, data.message);
+        return reply.status(202).send(result);
+      });
+    },
+  );
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/retry', async (request, reply) => {
     return withConversationErrors(reply, async () => {
@@ -198,10 +213,13 @@ export function registerConversationRoutes(
     });
   });
 
-  app.delete<{ Params: { id: string } }>('/api/conversations/:id/primary', async (request, reply) => {
-    return withConversationErrors(reply, async () => {
-      const result = await primaryService.clear(request.params.id);
-      return reply.send(result);
-    });
-  });
+  app.delete<{ Params: { id: string } }>(
+    '/api/conversations/:id/primary',
+    async (request, reply) => {
+      return withConversationErrors(reply, async () => {
+        const result = await primaryService.clear(request.params.id);
+        return reply.send(result);
+      });
+    },
+  );
 }

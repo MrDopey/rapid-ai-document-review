@@ -1,4 +1,8 @@
-import type { ConflictDetail, ConflictDetailOperation, EditOperation } from '@rapid-ai-document-review/shared/domain';
+import type {
+  ConflictDetail,
+  ConflictDetailOperation,
+  EditOperation,
+} from '@rapid-ai-document-review/shared/domain';
 
 export type { ConflictDetail, ConflictDetailOperation, EditOperation };
 
@@ -9,8 +13,7 @@ export interface Patch {
 }
 
 export type ReconcileResult =
-  | { outcome: 'clean'; patches: Patch[] }
-  | { outcome: 'conflict'; detail: ConflictDetail };
+  { outcome: 'clean'; patches: Patch[] } | { outcome: 'conflict'; detail: ConflictDetail };
 
 interface ResolvedRange {
   index: number;

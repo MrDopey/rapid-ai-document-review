@@ -222,8 +222,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getDocument(): DocumentRow | null {
     const row = this.db.prepare('SELECT * FROM document LIMIT 1').get() as
-      | DocumentDbRow
-      | undefined;
+      DocumentDbRow | undefined;
     return row ? mapDocument(row) : null;
   }
 
@@ -247,11 +246,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
   }
 
   updateDocumentTitle(id: string, title: string, updatedAt: string): void {
-    this.db.prepare(`UPDATE document SET title = ?, updated_at = ? WHERE id = ?`).run(
-      title,
-      updatedAt,
-      id,
-    );
+    this.db
+      .prepare(`UPDATE document SET title = ?, updated_at = ? WHERE id = ?`)
+      .run(title, updatedAt, id);
   }
 
   // ---- revision ----
@@ -298,20 +295,16 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const beforeRevision = options.cursor
       ? decodeCursor<{ revision: number }>(options.cursor).revision
       : null;
-    const rows = (
-      beforeRevision === null
-        ? this.db
-            .prepare(
-              `SELECT * FROM revision WHERE document_id = ? ORDER BY revision DESC LIMIT ?`,
-            )
-            .all(documentId, options.limit + 1)
-        : this.db
-            .prepare(
-              `SELECT * FROM revision WHERE document_id = ? AND revision < ?
+    const rows = (beforeRevision === null
+      ? this.db
+          .prepare(`SELECT * FROM revision WHERE document_id = ? ORDER BY revision DESC LIMIT ?`)
+          .all(documentId, options.limit + 1)
+      : this.db
+          .prepare(
+            `SELECT * FROM revision WHERE document_id = ? AND revision < ?
                ORDER BY revision DESC LIMIT ?`,
-            )
-            .all(documentId, beforeRevision, options.limit + 1)
-    ) as unknown as RevisionDbRow[];
+          )
+          .all(documentId, beforeRevision, options.limit + 1)) as unknown as RevisionDbRow[];
 
     const hasMore = rows.length > options.limit;
     const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
@@ -369,9 +362,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   listChangesSince(documentId: string, afterChangeId: number): DocumentChangeRow[] {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM document_change WHERE document_id = ? AND id > ? ORDER BY id ASC`,
-      )
+      .prepare(`SELECT * FROM document_change WHERE document_id = ? AND id > ? ORDER BY id ASC`)
       .all(documentId, afterChangeId) as {
       id: number;
       document_id: string;
@@ -421,8 +412,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getConversation(id: string): ConversationRow | null {
     const row = this.db.prepare(`SELECT * FROM conversation WHERE id = ?`).get(id) as
-      | ConversationDbRow
-      | undefined;
+      ConversationDbRow | undefined;
     return row ? mapConversation(row) : null;
   }
 
@@ -439,7 +429,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getMainConversation(documentId: string): ConversationRow | null {
     const row = this.db
-      .prepare(`SELECT * FROM conversation WHERE document_id = ? AND kind = 'main' AND is_current_main = 1 LIMIT 1`)
+      .prepare(
+        `SELECT * FROM conversation WHERE document_id = ? AND kind = 'main' AND is_current_main = 1 LIMIT 1`,
+      )
       .get(documentId) as ConversationDbRow | undefined;
     return row ? mapConversation(row) : null;
   }
@@ -451,29 +443,30 @@ export class SqliteStorageAdapter implements StorageAdapter {
     return row ? mapConversation(row) : null;
   }
 
-  listConversations(
-    documentId: string,
-    options: ConversationListOptions,
-  ): Page<ConversationRow> {
+  listConversations(documentId: string, options: ConversationListOptions): Page<ConversationRow> {
     const after = options.cursor
       ? decodeCursor<{ createdAt: string; id: string }>(options.cursor)
       : null;
-    const rows = (
-      after === null
-        ? this.db
-            .prepare(
-              `SELECT * FROM conversation WHERE document_id = ?
+    const rows = (after === null
+      ? this.db
+          .prepare(
+            `SELECT * FROM conversation WHERE document_id = ?
                ORDER BY created_at ASC, id ASC LIMIT ?`,
-            )
-            .all(documentId, options.limit + 1)
-        : this.db
-            .prepare(
-              `SELECT * FROM conversation WHERE document_id = ?
+          )
+          .all(documentId, options.limit + 1)
+      : this.db
+          .prepare(
+            `SELECT * FROM conversation WHERE document_id = ?
                AND (created_at > ? OR (created_at = ? AND id > ?))
                ORDER BY created_at ASC, id ASC LIMIT ?`,
-            )
-            .all(documentId, after.createdAt, after.createdAt, after.id, options.limit + 1)
-    ) as unknown as ConversationDbRow[];
+          )
+          .all(
+            documentId,
+            after.createdAt,
+            after.createdAt,
+            after.id,
+            options.limit + 1,
+          )) as unknown as ConversationDbRow[];
 
     const hasMore = rows.length > options.limit;
     const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
@@ -526,7 +519,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
   }
 
   deleteConversation(id: string): void {
-    this.db.prepare(`UPDATE conversation_event SET conversation_id = NULL WHERE conversation_id = ?`).run(id);
+    this.db
+      .prepare(`UPDATE conversation_event SET conversation_id = NULL WHERE conversation_id = ?`)
+      .run(id);
     this.db.prepare(`DELETE FROM staged_edit WHERE conversation_id = ?`).run(id);
     this.db.prepare(`DELETE FROM conversation WHERE id = ?`).run(id);
   }
@@ -564,8 +559,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getStagedEdit(id: string): StagedEditRow | null {
     const row = this.db.prepare(`SELECT * FROM staged_edit WHERE id = ?`).get(id) as
-      | StagedEditDbRow
-      | undefined;
+      StagedEditDbRow | undefined;
     return row ? mapStagedEdit(row) : null;
   }
 
@@ -578,9 +572,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   listStagedEditsByConversation(conversationId: string): StagedEditRow[] {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM staged_edit WHERE conversation_id = ? ORDER BY created_at DESC`,
-      )
+      .prepare(`SELECT * FROM staged_edit WHERE conversation_id = ? ORDER BY created_at DESC`)
       .all(conversationId) as unknown as StagedEditDbRow[];
     return rows.map(mapStagedEdit);
   }
@@ -649,26 +641,22 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getLatestSequence(documentId: string): number {
     const row = this.db
-      .prepare(
-        `SELECT MAX(sequence) AS maxSequence FROM conversation_event WHERE document_id = ?`,
-      )
+      .prepare(`SELECT MAX(sequence) AS maxSequence FROM conversation_event WHERE document_id = ?`)
       .get(documentId) as { maxSequence: number | null } | undefined;
     return row?.maxSequence ?? 0;
   }
 
   listEventsSince(documentId: string, sinceSequence: number | null): ConversationEventRow[] {
-    const rows = (
-      sinceSequence === null
-        ? this.db
-            .prepare(`SELECT * FROM conversation_event WHERE document_id = ? ORDER BY sequence ASC`)
-            .all(documentId)
-        : this.db
-            .prepare(
-              `SELECT * FROM conversation_event WHERE document_id = ? AND sequence > ?
+    const rows = (sinceSequence === null
+      ? this.db
+          .prepare(`SELECT * FROM conversation_event WHERE document_id = ? ORDER BY sequence ASC`)
+          .all(documentId)
+      : this.db
+          .prepare(
+            `SELECT * FROM conversation_event WHERE document_id = ? AND sequence > ?
                ORDER BY sequence ASC`,
-            )
-            .all(documentId, sinceSequence)
-    ) as unknown as ConversationEventDbRow[];
+          )
+          .all(documentId, sinceSequence)) as unknown as ConversationEventDbRow[];
     return rows.map(mapEvent);
   }
 
@@ -683,8 +671,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getSettings(): UserSettingsRow {
     const row = this.db.prepare(`SELECT * FROM user_settings WHERE id = 1`).get() as
-      | UserSettingsDbRow
-      | undefined;
+      UserSettingsDbRow | undefined;
     if (!row) {
       throw new Error('user_settings singleton row missing — migration did not run');
     }
@@ -746,7 +733,10 @@ export class SqliteStorageAdapter implements StorageAdapter {
         } catch (rollbackErr) {
           // Best-effort: surfaces the original error, not a rollback failure that would only
           // happen if the connection itself is already broken.
-          throw new AggregateError([err, rollbackErr], 'transaction failed and rollback also failed');
+          throw new AggregateError(
+            [err, rollbackErr],
+            'transaction failed and rollback also failed',
+          );
         }
       }
       throw err;

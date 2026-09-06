@@ -143,7 +143,9 @@ describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
   });
 
   function syncScrollCheckbox(wrapper: VueWrapper) {
-    const label = wrapper.findAll('.reasoning-toggle').find((el) => el.text().includes('Sync scroll'));
+    const label = wrapper
+      .findAll('.reasoning-toggle')
+      .find((el) => el.text().includes('Sync scroll'));
     if (!label) throw new Error('"Sync scroll" control not found in .actions-group');
     return label.find('input[type="checkbox"]');
   }
@@ -184,23 +186,29 @@ describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
     const checkbox = syncScrollCheckbox(wrapper);
     expect((checkbox.element as HTMLInputElement).checked).toBe(true);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect((checkbox.element as HTMLInputElement).checked).toBe(false);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect((checkbox.element as HTMLInputElement).checked).toBe(true);
   });
 
-  it('ignores Ctrl+Alt+Y while focus is in an editing context (matching the sibling shortcuts\' guard)', async () => {
+  it("ignores Ctrl+Alt+Y while focus is in an editing context (matching the sibling shortcuts' guard)", async () => {
     const wrapper = await mountApp(pinia);
     const checkbox = syncScrollCheckbox(wrapper);
 
     const input = document.createElement('input');
     document.body.appendChild(input);
     input.focus();
-    input.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true, bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyY', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await wrapper.vm.$nextTick();
 
     expect((checkbox.element as HTMLInputElement).checked).toBe(true);
@@ -233,7 +241,10 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
   class WideResizeObserverStub {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(target: Element): void {
-      this.callback([{ contentRect: { width: 2000 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.callback(
+        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
     }
     unobserve(): void {}
     disconnect(): void {}
@@ -266,7 +277,9 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     EditsList: true,
   };
 
-  function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+  function conversationFixture(
+    overrides: Partial<ConversationDto> & { id: string },
+  ): ConversationDto {
     return {
       name: overrides.id,
       kind: 'branch',
@@ -326,7 +339,12 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
   }
 
   it('auto-focuses (and marks lastInteractedId) the new branch when the focus set has a free slot under the cap', async () => {
-    const main = conversationFixture({ id: 'main-1', kind: 'main', parentId: null, branchDepth: 0 });
+    const main = conversationFixture({
+      id: 'main-1',
+      kind: 'main',
+      parentId: null,
+      branchDepth: 0,
+    });
     const wrapper = await mountFocusedApp([main], ['main-1']);
     expect(focusedPanelStates(wrapper)).toEqual([{ conversationId: 'main-1', active: true }]);
 
@@ -352,7 +370,11 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
       conversationFixture({ id: 'c3', branchDepth: 1 }),
     ];
     const wrapper = await mountFocusedApp(conversations, ['c1', 'c2', 'c3']);
-    expect(focusedPanelStates(wrapper).map((s) => s.conversationId).sort()).toEqual(['c1', 'c2', 'c3']);
+    expect(
+      focusedPanelStates(wrapper)
+        .map((s) => s.conversationId)
+        .sort(),
+    ).toEqual(['c1', 'c2', 'c3']);
 
     const branch = conversationFixture({ id: 'branch-1', parentId: 'c1', branchDepth: 2 });
     vi.mocked(httpClient.branchConversation).mockResolvedValue(branch);
@@ -361,7 +383,9 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     // the cap, not just auto-focus — the Branch button inside `c1`'s own focus panel is disabled,
     // with a tooltip naming the focus limit, and a click (jsdom, like a real browser, never fires a
     // `click` handler for a `disabled` native button) never reaches the API at all.
-    const c1Panel = wrapper.findAllComponents(ConversationDetailPanel).find((p) => p.props('conversationId') === 'c1')!;
+    const c1Panel = wrapper
+      .findAllComponents(ConversationDetailPanel)
+      .find((p) => p.props('conversationId') === 'c1')!;
     const branchButton = c1Panel.get('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toMatch(/max 3/);
@@ -414,7 +438,17 @@ describe('App.vue — Preview|Canvas resize handle: 30% minimum-width clamp', ()
   function stubPanesWidth(wrapper: VueWrapper, width: number): void {
     const panesEl = wrapper.get('.panes').element as HTMLDivElement;
     panesEl.getBoundingClientRect = () =>
-      ({ width, height: 600, top: 0, left: 0, right: width, bottom: 600, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      ({
+        width,
+        height: 600,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
   }
 
   /** Parses the `previewFr`/`canvasFr` pair straight out of `.panes`' own rendered inline
@@ -423,7 +457,8 @@ describe('App.vue — Preview|Canvas resize handle: 30% minimum-width clamp', ()
   function readPaneFr(wrapper: VueWrapper): { previewFr: number; canvasFr: number } {
     const style = wrapper.get('.panes').attributes('style') ?? '';
     const match = style.match(/grid-template-columns:\s*([\d.]+)fr 6px ([\d.]+)fr/);
-    if (!match) throw new Error(`Could not parse a Preview|Canvas grid-template-columns from: "${style}"`);
+    if (!match)
+      throw new Error(`Could not parse a Preview|Canvas grid-template-columns from: "${style}"`);
     return { previewFr: Number(match[1]), canvasFr: Number(match[2]) };
   }
 
@@ -521,7 +556,10 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
   // attached to `document`; the default detached-container mount `mountApp` uses is fine for every
   // other suite here since none of them call `.isVisible()`.
   async function mountAttachedApp(p: Pinia): Promise<VueWrapper> {
-    currentWrapper = mount(App, { attachTo: document.body, global: { plugins: [p], stubs: STUBS } });
+    currentWrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [p], stubs: STUBS },
+    });
     await flushPromises();
     return currentWrapper;
   }
@@ -550,7 +588,9 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
     // auto-placement bug used to shift Canvas into Preview's own 0-width track).
     expect(wrapper.findComponent(DocumentCanvas).isVisible()).toBe(true);
     expect(wrapper.findComponent(DocumentCanvas).props('editorVisible')).toBe(true);
-    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(/grid-template-columns:\s*0fr 0px [\d.]+fr/);
+    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(
+      /grid-template-columns:\s*0fr 0px [\d.]+fr/,
+    );
     expect(localStorage.getItem('raidr:previewVisible')).toBe('false');
 
     // The button relabels to "Show preview" and toggles back.
@@ -571,7 +611,9 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
     expect(wrapper.findComponent(PreviewComponent).isVisible()).toBe(true);
     // The outer Preview|Canvas grid split is untouched by this toggle — DocumentCanvas's own grid
     // column never collapses any more (only Preview's own track can).
-    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(/grid-template-columns:\s*[\d.]+fr 6px [\d.]+fr/);
+    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(
+      /grid-template-columns:\s*[\d.]+fr 6px [\d.]+fr/,
+    );
     expect(localStorage.getItem('raidr:editorVisible')).toBe('false');
   });
 
@@ -602,15 +644,21 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
   it('Ctrl+Alt+P and Ctrl+Alt+E toggle Preview/editor visibility respectively, without ever hiding the Canvas pane itself', async () => {
     const wrapper = await mountAttachedApp(pinia);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyP', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(wrapper.findComponent(PreviewComponent).isVisible()).toBe(false);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyP', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(wrapper.findComponent(PreviewComponent).isVisible()).toBe(true);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyE', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(wrapper.findComponent(DocumentCanvas).isVisible()).toBe(true);
     expect(wrapper.findComponent(DocumentCanvas).props('editorVisible')).toBe(false);
@@ -760,7 +808,10 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
   class WideResizeObserverStub {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(): void {
-      this.callback([{ contentRect: { width: 2000 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.callback(
+        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
     }
     unobserve(): void {}
     disconnect(): void {}
@@ -776,7 +827,9 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
     EditsList: true,
   };
 
-  function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+  function conversationFixture(
+    overrides: Partial<ConversationDto> & { id: string },
+  ): ConversationDto {
     return {
       name: overrides.id,
       kind: 'branch',
@@ -830,7 +883,10 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
    *  conversation invisible to `isOverlayOpen()`, silently hiding any regression where it wrongly
    *  treats that panel itself as a blocking overlay. */
   async function mountWithConversations(conversations: ConversationDto[]): Promise<VueWrapper> {
-    const wrapper = mount(App, { attachTo: document.body, global: { plugins: [pinia], stubs: FOCUS_DIGIT_STUBS } });
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [pinia], stubs: FOCUS_DIGIT_STUBS },
+    });
     currentWrapper = wrapper;
     await flushPromises();
     const conversationsStore = useConversationsStore();
@@ -845,7 +901,9 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
   }
 
   function pressDigit(n: number): void {
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}`, ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: `Digit${n}`, ctrlKey: true, altKey: true }),
+    );
   }
 
   it('Ctrl+Alt+<N> focuses the Nth conversation in HUD display order', async () => {
@@ -898,7 +956,7 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
   // (`document`) with no `.closest` method, so its `[aria-modal="true"]` check is never actually
   // reached. This test focuses the real close button and dispatches the keydown on it instead, to
   // reach that check for real.
-  it('still un-focuses a conversation on the second press when the event target is the focused element inside that conversation\'s own panel (matching real post-focus-trap keyboard focus)', async () => {
+  it("still un-focuses a conversation on the second press when the event target is the focused element inside that conversation's own panel (matching real post-focus-trap keyboard focus)", async () => {
     const conversations = [conversationFixture({ id: 'c1' }), conversationFixture({ id: 'c2' })];
     const wrapper = await mountWithConversations(conversations);
 
@@ -959,7 +1017,7 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
     expect(focusedIds(wrapper).sort()).toEqual(['c2', 'c3']);
   });
 
-  it('is a no-op while any modal dialog is open, not just App.vue\'s own tracked History/Help/shortcuts dialogs', async () => {
+  it("is a no-op while any modal dialog is open, not just App.vue's own tracked History/Help/shortcuts dialogs", async () => {
     const conversations = [conversationFixture({ id: 'c1' })];
     const wrapper = await mountWithConversations(conversations);
 
@@ -1085,11 +1143,15 @@ describe('App.vue — History panel toggle moved to Ctrl+Alt+Shift+H', () => {
     const wrapper = await mountApp(pinia);
     expect(historyButton(wrapper).text()).toBe('History');
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, shiftKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, shiftKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(historyButton(wrapper).text()).toBe('Hide history');
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, shiftKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, shiftKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(historyButton(wrapper).text()).toBe('History');
   });
@@ -1098,7 +1160,9 @@ describe('App.vue — History panel toggle moved to Ctrl+Alt+Shift+H', () => {
     const wrapper = await mountApp(pinia);
     expect(historyButton(wrapper).text()).toBe('History');
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true }),
+    );
     await wrapper.vm.$nextTick();
     expect(historyButton(wrapper).text()).toBe('History');
   });
@@ -1117,7 +1181,10 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
   class WideResizeObserverStub {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(): void {
-      this.callback([{ contentRect: { width: 2000 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.callback(
+        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
     }
     unobserve(): void {}
     disconnect(): void {}
@@ -1133,7 +1200,9 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     EditsList: true,
   };
 
-  function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+  function conversationFixture(
+    overrides: Partial<ConversationDto> & { id: string },
+  ): ConversationDto {
     return {
       name: overrides.id,
       kind: 'branch',
@@ -1179,8 +1248,14 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
    *  focuses each of `focusedIds` in turn via the same Ctrl+Alt+<N> digit shortcut the
    *  Ctrl+Alt+1..9 suite above drives (so `lastInteractedId` ends up on the last id in the list,
    *  same as a user clicking/focusing them in that order would). */
-  async function mountWithFocused(conversations: ConversationDto[], focusedIds: string[]): Promise<VueWrapper> {
-    const wrapper = mount(App, { attachTo: document.body, global: { plugins: [pinia], stubs: CYCLE_STUBS } });
+  async function mountWithFocused(
+    conversations: ConversationDto[],
+    focusedIds: string[],
+  ): Promise<VueWrapper> {
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [pinia], stubs: CYCLE_STUBS },
+    });
     currentWrapper = wrapper;
     await flushPromises();
     const conversationsStore = useConversationsStore();
@@ -1189,18 +1264,25 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     await flushPromises();
     for (const id of focusedIds) {
       const digit = conversations.findIndex((c) => c.id === id) + 1;
-      document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${digit}`, ctrlKey: true, altKey: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { code: `Digit${digit}`, ctrlKey: true, altKey: true }),
+      );
       await flushPromises();
     }
     return wrapper;
   }
 
   function activeConversationId(wrapper: VueWrapper): string | undefined {
-    return wrapper.findAllComponents(ConversationDetailPanel).find((p) => p.props('active'))?.props('conversationId');
+    return wrapper
+      .findAllComponents(ConversationDetailPanel)
+      .find((p) => p.props('active'))
+      ?.props('conversationId');
   }
 
   function pressCycle(code: string, extra: Partial<KeyboardEventInit> = {}): void {
-    document.dispatchEvent(new KeyboardEvent('keydown', { code, ctrlKey: true, altKey: true, ...extra }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code, ctrlKey: true, altKey: true, ...extra }),
+    );
   }
 
   it('Ctrl+Alt+L (and Ctrl+Alt+ArrowRight, Ctrl+Alt+N) focuses the next currently-focused panel, wrapping from the last back to the first', async () => {
@@ -1239,7 +1321,7 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
   // event never arrives. This test locks in that the in-app dispatch for `KeyL` is correct (so any
   // *future* regression here is still caught), and the tests below cover the new Ctrl+Alt+N alternate
   // this fix adds as a guaranteed-reachable fallback.
-  it('regression: KeyL is defined once, with no registry collision, and its handler is symmetric with KeyH\'s', () => {
+  it("regression: KeyL is defined once, with no registry collision, and its handler is symmetric with KeyH's", () => {
     const keyLBindings = HOTKEY_BINDINGS.filter((b) => b.code === 'KeyL');
     expect(keyLBindings).toHaveLength(1);
     expect(keyLBindings[0]).toMatchObject({
@@ -1298,7 +1380,9 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     const composer = document.querySelector<HTMLTextAreaElement>('#composer-c2');
     expect(composer).not.toBeNull();
     composer!.focus();
-    composer!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, bubbles: true }));
+    composer!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyH', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await flushPromises();
 
     expect(activeConversationId(wrapper)).toBe('c1');
@@ -1323,14 +1407,18 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     let composer = document.querySelector<HTMLTextAreaElement>('#composer-c3');
     expect(composer).not.toBeNull();
     composer!.focus();
-    composer!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }));
+    composer!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await flushPromises();
     expect(activeConversationId(wrapper)).toBe('c1'); // wraps from the last (c3) to the first
 
     composer = document.querySelector<HTMLTextAreaElement>('#composer-c1');
     expect(composer).not.toBeNull();
     composer!.focus();
-    composer!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyN', ctrlKey: true, altKey: true, bubbles: true }));
+    composer!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyN', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await flushPromises();
     expect(activeConversationId(wrapper)).toBe('c2');
   });
@@ -1362,7 +1450,9 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     const editorEl = document.createElement('div');
     Object.defineProperty(editorEl, 'isContentEditable', { value: true });
     document.body.appendChild(editorEl);
-    editorEl.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }));
+    editorEl.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await flushPromises();
 
     expect(activeConversationId(wrapper)).toBe('c2');
@@ -1374,13 +1464,17 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     const wrapper = await mountWithFocused(conversations, ['c1', 'c2']);
     expect(activeConversationId(wrapper)).toBe('c2');
 
-    const c2Panel = wrapper.findAllComponents(ConversationDetailPanel).find((p) => p.props('conversationId') === 'c2')!;
+    const c2Panel = wrapper
+      .findAllComponents(ConversationDetailPanel)
+      .find((p) => p.props('conversationId') === 'c2')!;
     await c2Panel.get('.thread-rename-button').trigger('click');
     await flushPromises();
 
     const nameInput = document.querySelector<HTMLInputElement>('.thread-title-input');
     expect(nameInput).not.toBeNull();
-    nameInput!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }));
+    nameInput!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }),
+    );
     await flushPromises();
 
     expect(activeConversationId(wrapper)).toBe('c2');
@@ -1398,7 +1492,7 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     expect(document.activeElement?.id).toBe('composer-c1');
   });
 
-  it('moves keyboard focus into the newly-active panel\'s composer after cycling', async () => {
+  it("moves keyboard focus into the newly-active panel's composer after cycling", async () => {
     const conversations = [conversationFixture({ id: 'c1' }), conversationFixture({ id: 'c2' })];
     const wrapper = await mountWithFocused(conversations, ['c1', 'c2']);
     expect(activeConversationId(wrapper)).toBe('c2');

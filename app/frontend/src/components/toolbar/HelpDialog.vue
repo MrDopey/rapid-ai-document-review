@@ -13,7 +13,13 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 </script>
 
 <template>
-  <div ref="rootEl" class="help-dialog dialog-box" role="dialog" aria-modal="true" aria-label="Help">
+  <div
+    ref="rootEl"
+    class="help-dialog dialog-box"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Help"
+  >
     <header class="dialog-header">
       <h2>Help</h2>
       <button type="button" class="close-button" @click="emit('close')">Close</button>
@@ -27,12 +33,12 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
             Type a message to a conversation to ask questions or request changes to the document.
           </li>
           <li>
-            Highlight text in the document to start a focused conversation about just that
-            passage. Click "Branch (New)" (or press Alt+Shift+C) for an empty transcript with no
-            history, or "Branch (Main)" (Alt+Shift+S) to continue from where you are — it shows
-            Main's last exchange for context, without resending the document. Either way, any edit
-            it proposes shows up under "Proposed edits", where you can preview it and choose to
-            accept or drop it before anything changes in the document.
+            Highlight text in the document to start a focused conversation about just that passage.
+            Click "Branch (New)" (or press Alt+Shift+C) for an empty transcript with no history, or
+            "Branch (Main)" (Alt+Shift+S) to continue from where you are — it shows Main's last
+            exchange for context, without resending the document. Either way, any edit it proposes
+            shows up under "Proposed edits", where you can preview it and choose to accept or drop
+            it before anything changes in the document.
           </li>
         </ul>
       </section>
@@ -45,8 +51,8 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
         </p>
         <p>
           Conversations that are not Primary work differently: any edit they propose stays
-          <strong>pending</strong> in that conversation's "Proposed edits" list until you preview
-          it and explicitly choose <strong>Accept</strong> (to apply it) or <strong>Drop</strong>
+          <strong>pending</strong> in that conversation's "Proposed edits" list until you preview it
+          and explicitly choose <strong>Accept</strong> (to apply it) or <strong>Drop</strong>
           (to discard it). A Primary conversation skips that review step entirely, so only make a
           conversation Primary once you trust its edits to land without a second look.
         </p>
@@ -56,12 +62,11 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
         <h3>What does "branching" mean?</h3>
         <p>
           Branching creates a new conversation as its own separate thread, so you can explore a
-          different direction without altering the original. When branching from a text selection
-          in the document, "Branch (New)" (Alt+Shift+C) starts that thread as an empty
-          placeholder with no history. "Branch (Main)" (Alt+Shift+S) instead continues from your
-          current point: it shows Main's last exchange at the top of the new thread for context,
-          but never resends the document or selection as a message — you still start from a blank
-          message box either way.
+          different direction without altering the original. When branching from a text selection in
+          the document, "Branch (New)" (Alt+Shift+C) starts that thread as an empty placeholder with
+          no history. "Branch (Main)" (Alt+Shift+S) instead continues from your current point: it
+          shows Main's last exchange at the top of the new thread for context, but never resends the
+          document or selection as a message — you still start from a blank message box either way.
         </p>
       </section>
     </div>

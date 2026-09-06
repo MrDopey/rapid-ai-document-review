@@ -9,8 +9,7 @@ export interface DiffLine {
 }
 
 export type DiffGroup =
-  | { type: 'visible'; lines: DiffLine[] }
-  | { type: 'collapsed'; lines: DiffLine[] };
+  { type: 'visible'; lines: DiffLine[] } | { type: 'collapsed'; lines: DiffLine[] };
 
 /** Splits a word- or line-level `Change[]` diff (from the `diff` package) into per-line groups.
  *  A single `Change` can span several lines (e.g. a long unchanged run) or be shorter than one

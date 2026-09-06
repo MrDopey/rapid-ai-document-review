@@ -34,7 +34,10 @@ describe('DropAllButton — confirmation gate', () => {
     confirmSpy.mockReturnValue(true);
     vi.mocked(httpClient.dropRemaining).mockResolvedValue({ results: [] });
 
-    const wrapper = mount(DropAllButton, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    const wrapper = mount(DropAllButton, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
     await wrapper.get('button').trigger('click');
     await flushPromises();
 
@@ -47,7 +50,10 @@ describe('DropAllButton — confirmation gate', () => {
   it('cancelling the dialog is a no-op', async () => {
     confirmSpy.mockReturnValue(false);
 
-    const wrapper = mount(DropAllButton, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    const wrapper = mount(DropAllButton, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
     await wrapper.get('button').trigger('click');
     await flushPromises();
 

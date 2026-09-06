@@ -10,7 +10,11 @@ const { busy, run } = useBusyAction(() => store.dropRemaining(props.conversation
 // "Accept remaining" (which only applies proposed edits) — so this button, unlike
 // AcceptAllButton.vue, gates its action behind an explicit confirmation before it fires.
 function onClick(): void {
-  if (!window.confirm('Drop all remaining proposed edits in this conversation? This cannot be undone.')) {
+  if (
+    !window.confirm(
+      'Drop all remaining proposed edits in this conversation? This cannot be undone.',
+    )
+  ) {
     return;
   }
   void run();

@@ -138,7 +138,9 @@ import ConversationView from '../../src/components/conversation/ConversationView
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
 import App from '../../src/App.vue';
 
-function conversationFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
   return {
     name: overrides.id,
     kind: 'branch',
@@ -185,21 +187,21 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     setActivePinia(pinia);
   });
 
-  it('ReconnectingIndicator.vue\'s .reconnecting-indicator uses --z-indicator', () => {
+  it("ReconnectingIndicator.vue's .reconnecting-indicator uses --z-indicator", () => {
     const wrapper = mount(ReconnectingIndicator, { props: { reconnecting: true } });
     const el = wrapper.find('.reconnecting-indicator');
     expect(el.exists()).toBe(true);
     expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-indicator', 1000);
   });
 
-  it('EditorComponent.vue\'s sticky .editor-toolbar uses --z-sticky', () => {
+  it("EditorComponent.vue's sticky .editor-toolbar uses --z-sticky", () => {
     const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world.' } });
     const el = wrapper.find('.editor-toolbar');
     expect(el.exists()).toBe(true);
     expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-sticky', 2);
   });
 
-  it('ConversationDetailPanel.vue\'s .close-detail-button uses --z-raised', () => {
+  it("ConversationDetailPanel.vue's .close-detail-button uses --z-raised", () => {
     const wrapper = mount(ConversationDetailPanel, {
       props: { conversationId: 'conv-1', active: true },
       global: { plugins: [pinia], stubs: { ConversationView: true } },
@@ -209,7 +211,7 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-raised', 1);
   });
 
-  it('ConversationThreadBox.vue\'s sticky .thread-header uses --z-raised', () => {
+  it("ConversationThreadBox.vue's sticky .thread-header uses --z-raised", () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One' })];
     store.messagesByConversation['conv-1'] = [];
@@ -222,7 +224,7 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-raised', 1);
   });
 
-  it('HistoryPanel.vue\'s .diff-overlay uses --z-overlay-blocking once the Diff modal is open', async () => {
+  it("HistoryPanel.vue's .diff-overlay uses --z-overlay-blocking once the Diff modal is open", async () => {
     const store = useDocumentStore();
     store.revisions = [
       makeRevision({ revision: 2, createdAt: '2026-01-02T00:00:00.000Z' }),
@@ -233,7 +235,10 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     });
     const row = wrapper.findAll('.history-entry').find((r) => r.find('strong').text() === 'v2');
     if (!row) throw new Error('no history-entry row found for revision 2');
-    const diffButton = row.find('.actions').findAll('button').find((btn) => btn.text() === 'Diff');
+    const diffButton = row
+      .find('.actions')
+      .findAll('button')
+      .find((btn) => btn.text() === 'Diff');
     if (!diffButton) throw new Error('no Diff button found for revision 2');
     await diffButton.trigger('click');
     await flushPromises();
@@ -368,7 +373,9 @@ describe('z-index scale — ConversationThreadBox.vue .primary-busy-dialog-overl
   it('resolves --z-overlay-primary once the Primary-busy warning is open', async () => {
     const store = useConversationsStore();
     store.loaded = true;
-    store.conversations = [conversationFixture({ id: 'active-1', kind: 'branch', status: 'idle', isPrimary: false })];
+    store.conversations = [
+      conversationFixture({ id: 'active-1', kind: 'branch', status: 'idle', isPrimary: false }),
+    ];
     store.messagesByConversation['active-1'] = [];
     vi.mocked(httpClient.designatePrimary).mockRejectedValue(
       new (await import('../../src/transport/http-client.js')).ApiError(
@@ -467,7 +474,9 @@ describe('z-index scale — App.vue overlays', () => {
     stubMatchMedia(true);
     localStorage.clear();
     vi.mocked(httpClient.getDocument).mockReset().mockResolvedValue(getDocumentResponse);
-    vi.mocked(httpClient.listConversations).mockReset().mockResolvedValue(listConversationsResponse);
+    vi.mocked(httpClient.listConversations)
+      .mockReset()
+      .mockResolvedValue(listConversationsResponse);
     vi.mocked(httpClient.getSettings).mockReset().mockResolvedValue(settingsFixture);
     vi.mocked(httpClient.patchSettings).mockReset().mockResolvedValue(settingsFixture);
   });
@@ -497,7 +506,9 @@ describe('z-index scale — App.vue overlays', () => {
   it('.conversation-detail-overlay uses --z-overlay-detail once a conversation is focused', async () => {
     const wrapper = await mountApp();
     const conversationsStore = useConversationsStore();
-    conversationsStore.conversations = [conversationFixture({ id: 'main-1', kind: 'main', parentId: null, branchDepth: 0 })];
+    conversationsStore.conversations = [
+      conversationFixture({ id: 'main-1', kind: 'main', parentId: null, branchDepth: 0 }),
+    ];
 
     const canvas = wrapper.findComponent(DocumentCanvas);
     canvas.vm.$emit('toggle-focus', 'main-1');

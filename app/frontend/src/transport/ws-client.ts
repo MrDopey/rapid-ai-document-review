@@ -1,5 +1,9 @@
 import { ref, type Ref } from 'vue';
-import { ApplicationEvent, SubscribedFrame, PongFrame } from '@rapid-ai-document-review/shared/contracts/events';
+import {
+  ApplicationEvent,
+  SubscribedFrame,
+  PongFrame,
+} from '@rapid-ai-document-review/shared/contracts/events';
 
 export type ServerFrame =
   | { kind: 'subscribed'; frame: ReturnType<typeof SubscribedFrame.parse> }

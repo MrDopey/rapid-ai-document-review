@@ -2,7 +2,14 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { ChangeSet, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, insertNewline, undo, redo } from '@codemirror/commands';
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  insertNewline,
+  undo,
+  redo,
+} from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { search, searchKeymap } from '@codemirror/search';
 import { focusCapBranchTooltip } from '../../composables/focusConfig.js';
@@ -16,20 +23,30 @@ import { ChangeBatcher } from './ChangeBatcher';
 // so a bare `mount(EditorComponent, { props: { modelValue } })` (existing tests) behaves as "never at
 // cap".
 const props = withDefaults(
-  defineProps<{ modelValue: string; focusedConversationIds?: ReadonlySet<string>; maxFocusedConversations?: number }>(),
+  defineProps<{
+    modelValue: string;
+    focusedConversationIds?: ReadonlySet<string>;
+    maxFocusedConversations?: number;
+  }>(),
   { focusedConversationIds: () => new Set(), maxFocusedConversations: 3 },
 );
 const emit = defineEmits<{
   (e: 'change', changes: { from: number; to: number; insert: string }[]): void;
   (e: 'selection', range: { from: number; to: number } | null): void;
-  (e: 'branch-from-selection', range: { from: number; to: number }, includeSeedMessage: boolean): void;
+  (
+    e: 'branch-from-selection',
+    range: { from: number; to: number },
+    includeSeedMessage: boolean,
+  ): void;
 }>();
 
 const selection = ref<{ from: number; to: number } | null>(null);
 
 /** No free slot left to auto-focus a newly created branch into — see `requestBranch`'s doc comment
  *  for why this blocks branch creation itself, not just auto-focus. */
-const atFocusCap = computed(() => props.focusedConversationIds.size >= props.maxFocusedConversations);
+const atFocusCap = computed(
+  () => props.focusedConversationIds.size >= props.maxFocusedConversations,
+);
 const branchDisabled = computed(() => !selection.value || atFocusCap.value);
 
 /** Priority when both a disabled-reason could apply: no-selection wins over at-cap, since without a
@@ -160,7 +177,11 @@ onMounted(() => {
     // `hostRef` — labelling `hostRef` itself (a plain, non-interactive wrapper div) would leave
     // the element assistive technology actually focuses without its own accessible name. Setting
     // these via `contentAttributes` puts role/aria-label/aria-multiline directly on that node.
-    EditorView.contentAttributes.of({ role: 'textbox', 'aria-label': 'Document editor', 'aria-multiline': 'true' }),
+    EditorView.contentAttributes.of({
+      role: 'textbox',
+      'aria-label': 'Document editor',
+      'aria-multiline': 'true',
+    }),
     EditorView.updateListener.of((update) => {
       if (!update.docChanged && !update.selectionSet) return;
 

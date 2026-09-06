@@ -181,7 +181,12 @@ export function wrapHighlightedSelection(content: string): string {
  * there is no edit instruction yet at seed time, only that context-setting for the turn to come.
  * Main has no such closing prose: with no selection, there is nothing turn-specific to prime.
  */
-function buildSeedMessage(leadIn: string, revision: number, documentContent: string, selectionText?: string): string {
+function buildSeedMessage(
+  leadIn: string,
+  revision: number,
+  documentContent: string,
+  selectionText?: string,
+): string {
   const lines = [leadIn, '', wrapDocumentRevision(revision, documentContent)];
 
   if (selectionText !== undefined) {
@@ -239,7 +244,11 @@ export function buildMainSeedMessage(title: string, revision: number, content: s
  * shared `buildSeedMessage` builder above, so the branch's agent has the same whole-document
  * context a Main conversation gets — plus the highlighted selection the user branched from.
  */
-export function buildBranchSeedMessage(revision: number, documentContent: string, selectionText: string): string {
+export function buildBranchSeedMessage(
+  revision: number,
+  documentContent: string,
+  selectionText: string,
+): string {
   return buildSeedMessage(
     `Here is the full document under review (revision ${revision}), for context:`,
     revision,
@@ -263,7 +272,10 @@ export function buildSelectionOnlySeedMessage(selectionText: string): string {
 export function deriveBranchName(seedExcerpt: string, selectionText: string): string {
   const headingLine = seedExcerpt.split('\n').find((l) => HEADING_RE.test(l.trim()));
   if (headingLine) {
-    return headingLine.trim().replace(/^#{1,6}\s+/, '').slice(0, 80);
+    return headingLine
+      .trim()
+      .replace(/^#{1,6}\s+/, '')
+      .slice(0, 80);
   }
   const words = selectionText.trim().split(/\s+/).filter(Boolean).slice(0, 8).join(' ');
   return words.length > 0 ? words.slice(0, 80) : 'Branch';

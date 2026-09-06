@@ -83,7 +83,13 @@ function closePreview(): void {
           </span>
         </div>
         <div class="edit-actions">
-          <button type="button" :aria-label="`Preview: ${edit.summary}`" @click="openPreview(edit.id)">Preview</button>
+          <button
+            type="button"
+            :aria-label="`Preview: ${edit.summary}`"
+            @click="openPreview(edit.id)"
+          >
+            Preview
+          </button>
           <template v-if="edit.status === 'pending'">
             <button
               type="button"

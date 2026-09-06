@@ -59,7 +59,9 @@ export function useConversationBranchAction(
   options: UseConversationBranchActionOptions,
 ): ConversationBranchAction {
   const store = useConversationsStore();
-  const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const conversation = computed(
+    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
+  );
   const branching = ref(false);
   const error = ref<string | null>(null);
 
@@ -68,7 +70,13 @@ export function useConversationBranchAction(
     // ever reach here through `ActionDescriptor.onClick`, so this guard is what actually keeps
     // branch creation blocked for every one of `disabled`'s own reasons, regardless of how the host
     // renders the button.
-    if (!conversation.value || !conversation.value.canBranch || branching.value || options.atFocusCap()) return;
+    if (
+      !conversation.value ||
+      !conversation.value.canBranch ||
+      branching.value ||
+      options.atFocusCap()
+    )
+      return;
     error.value = null;
     branching.value = true;
     try {
@@ -95,8 +103,10 @@ export function useConversationBranchAction(
     return 'Branch this conversation';
   });
   const ariaLabel = computed(() => {
-    if (!conversation.value?.canBranch) return 'Branch this conversation (maximum conversation depth reached)';
-    if (options.atFocusCap()) return `Branch this conversation (${focusCapBranchTooltip(options.maxFocused())})`;
+    if (!conversation.value?.canBranch)
+      return 'Branch this conversation (maximum conversation depth reached)';
+    if (options.atFocusCap())
+      return `Branch this conversation (${focusCapBranchTooltip(options.maxFocused())})`;
     return 'Branch this conversation';
   });
 

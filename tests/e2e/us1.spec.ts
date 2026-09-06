@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 const XSS_PAYLOAD = '<script>window.__xss_fired = true;</script>';
-const MERMAID_BLOCK = '```mermaid\nflowchart TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[End]\n```';
+const MERMAID_BLOCK =
+  '```mermaid\nflowchart TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[End]\n```';
 
 test.describe('US1 — create and edit a document with tracked history', () => {
   test('paste, edit+sync, debounce, restore, undo/redo, export, sanitizer', async ({
@@ -11,9 +12,9 @@ test.describe('US1 — create and edit a document with tracked history', () => {
     await test.step('paste creates the document', async () => {
       await page.goto('/');
       await expect(page.getByRole('heading', { name: 'Paste your document' })).toBeVisible();
-      await page.getByLabel('Document content').fill(
-        `# Review Doc\n\nOriginal paragraph.\n\n${MERMAID_BLOCK}\n\n${XSS_PAYLOAD}`,
-      );
+      await page
+        .getByLabel('Document content')
+        .fill(`# Review Doc\n\nOriginal paragraph.\n\n${MERMAID_BLOCK}\n\n${XSS_PAYLOAD}`);
       await page.getByRole('button', { name: 'Start reviewing' }).click();
       await expect(page.locator('.toolbar h1')).toHaveText('Review Doc');
     });
@@ -23,7 +24,9 @@ test.describe('US1 — create and edit a document with tracked history', () => {
       await expect(preview).toBeVisible();
       const html = await preview.innerHTML();
       expect(html).not.toContain('<script>');
-      const fired = await page.evaluate(() => (window as unknown as { __xss_fired?: boolean }).__xss_fired);
+      const fired = await page.evaluate(
+        () => (window as unknown as { __xss_fired?: boolean }).__xss_fired,
+      );
       expect(fired).toBeUndefined();
     });
 
@@ -147,7 +150,10 @@ test.describe('US1 — create and edit a document with tracked history', () => {
 
     await test.step('export downloads the current Markdown', async () => {
       await page.getByRole('button', { name: 'History' }).click(); // reopen panel
-      const downloadLink = page.locator('.history-entry').first().getByRole('link', { name: 'Download' });
+      const downloadLink = page
+        .locator('.history-entry')
+        .first()
+        .getByRole('link', { name: 'Download' });
       const [download] = await Promise.all([page.waitForEvent('download'), downloadLink.click()]);
       const path = await download.path();
       expect(path).toBeTruthy();

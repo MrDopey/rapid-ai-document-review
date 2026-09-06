@@ -20,10 +20,7 @@ import {
  * `diffParts` is a ref/computed of the current `Change[]` diff (or `null` while nothing is loaded
  * yet); `contextLines` is how many unchanged lines of context to keep visible around each change.
  */
-export function useCollapsedDiffGroups(
-  diffParts: Ref<Change[] | null>,
-  contextLines: number,
-) {
+export function useCollapsedDiffGroups(diffParts: Ref<Change[] | null>, contextLines: number) {
   const focusedView = ref(true);
   const expandedGroupIndexes = ref<Set<number>>(new Set());
 

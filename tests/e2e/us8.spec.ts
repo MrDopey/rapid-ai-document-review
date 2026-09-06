@@ -6,7 +6,8 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
 const MARKERS = {
   first: 'US8-MARKER-FIRST: This sentence anchors the first highlighted conversation.',
-  second: 'US8-MARKER-SECOND: This sentence anchors the second highlighted conversation, further down the document.',
+  second:
+    'US8-MARKER-SECOND: This sentence anchors the second highlighted conversation, further down the document.',
 };
 
 // A filler paragraph, repeated, puts real vertical distance between the two markers — colocation
@@ -47,11 +48,20 @@ const MARKER_BLOCK = [
 
 async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
   const response = await page.request.get('/api/document');
-  const body = (await response.json()) as { document: { currentRevision: number }; content: string };
+  const body = (await response.json()) as {
+    document: { currentRevision: number };
+    content: string;
+  };
   return { currentRevision: body.document.currentRevision, content: body.content };
 }
 
-type ConversationSummary = { id: string; name: string; kind: string; parentId: string | null; branchDepth: number };
+type ConversationSummary = {
+  id: string;
+  name: string;
+  kind: string;
+  parentId: string | null;
+  branchDepth: number;
+};
 
 async function getConversations(request: APIRequestContext): Promise<ConversationSummary[]> {
   const response = await request.get('/api/conversations');
@@ -59,7 +69,10 @@ async function getConversations(request: APIRequestContext): Promise<Conversatio
   return body.conversations;
 }
 
-async function findConversation(request: APIRequestContext, name: string): Promise<ConversationSummary> {
+async function findConversation(
+  request: APIRequestContext,
+  name: string,
+): Promise<ConversationSummary> {
   const conversation = (await getConversations(request)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
@@ -67,7 +80,10 @@ async function findConversation(request: APIRequestContext, name: string): Promi
 
 type MessageSummary = { id: string; role: 'user' | 'assistant'; text: string };
 
-async function getConversationMessages(request: APIRequestContext, conversationId: string): Promise<MessageSummary[]> {
+async function getConversationMessages(
+  request: APIRequestContext,
+  conversationId: string,
+): Promise<MessageSummary[]> {
   const response = await request.get(`/api/conversations/${conversationId}`);
   const body = (await response.json()) as { messages: MessageSummary[] };
   return body.messages;
@@ -91,11 +107,17 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   const from = before.content.length;
   await page.request.patch('/api/document', {
-    data: { baseRevision: before.currentRevision, changes: [{ from, to: from, insert: MARKER_BLOCK }] },
+    data: {
+      baseRevision: before.currentRevision,
+      changes: [{ from, to: from, insert: MARKER_BLOCK }],
+    },
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000, intervals: [300] })
+    .poll(async () => (await getDocumentState(page)).currentRevision, {
+      timeout: 10_000,
+      intervals: [300],
+    })
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
@@ -145,7 +167,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
 
     await test.step('Main renders in column 0, anchored to the top of the document', async () => {
       const main = await findConversation(page.request, 'Main');
-      await expect(page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`)).toBeVisible();
+      await expect(
+        page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`),
+      ).toBeVisible();
     });
 
     let firstBranchId = '';
@@ -180,7 +204,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       firstBoxTop = threadBox!.y;
 
       const main = await findConversation(page.request, 'Main');
-      const mainBoxBox = await page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`).boundingBox();
+      const mainBoxBox = await page
+        .locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`)
+        .boundingBox();
       expect(mainBoxBox).toBeTruthy();
       expect(mainBoxBox!.y).toBeLessThan(firstBoxTop);
     });
@@ -198,7 +224,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       const secondBranch = after.find((c) => !before.some((b) => b.id === c.id));
       expect(secondBranch).toBeTruthy();
 
-      const box = page.locator(`.conversation-thread-box[data-conversation-id="${secondBranch!.id}"]`);
+      const box = page.locator(
+        `.conversation-thread-box[data-conversation-id="${secondBranch!.id}"]`,
+      );
       await expect(box).toBeVisible({ timeout: 10_000 });
       const boxBox = await box.boundingBox();
       expect(boxBox).toBeTruthy();
@@ -225,7 +253,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(branch).toBeTruthy();
       expect(branch!.branchDepth).toBe(1);
       parentId = branch!.id;
-      await expect(page.locator(`.conversation-thread-box[data-conversation-id="${parentId}"]`)).toBeVisible({
+      await expect(
+        page.locator(`.conversation-thread-box[data-conversation-id="${parentId}"]`),
+      ).toBeVisible({
         timeout: 10_000,
       });
     });
@@ -233,7 +263,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
     let firstChildId = '';
     let firstChildBox: { x: number; y: number; width: number; height: number };
     await test.step('branching that conversation (no message-level anchor exists — see conversation-service.ts; "branch off a specific message" is branching the conversation itself) renders one column further out', async () => {
-      const parentBox = page.locator(`.conversation-thread-box[data-conversation-id="${parentId}"]`);
+      const parentBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${parentId}"]`,
+      );
       const parentBoundingBox = await parentBox.boundingBox();
       expect(parentBoundingBox).toBeTruthy();
 
@@ -249,18 +281,24 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(child!.parentId).toBe(parentId);
       firstChildId = child!.id;
 
-      const childBox = page.locator(`.conversation-thread-box[data-conversation-id="${firstChildId}"]`);
+      const childBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${firstChildId}"]`,
+      );
       await expect(childBox).toBeVisible({ timeout: 10_000 });
       const bb = await childBox.boundingBox();
       expect(bb).toBeTruthy();
       firstChildBox = bb!;
       // column = max(0, branchDepth - 1): the parent (branchDepth 1) is column 0, this child
       // (branchDepth 2) is column 1 — one column further from the document than its parent.
-      expect(firstChildBox.x).toBeGreaterThan(parentBoundingBox!.x + parentBoundingBox!.width * 0.5);
+      expect(firstChildBox.x).toBeGreaterThan(
+        parentBoundingBox!.x + parentBoundingBox!.width * 0.5,
+      );
     });
 
     await test.step('branching the same parent again produces a sibling that stacks below the first, in the same column, without overlapping (FR-007)', async () => {
-      const parentBox = page.locator(`.conversation-thread-box[data-conversation-id="${parentId}"]`);
+      const parentBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${parentId}"]`,
+      );
       const before = await getConversations(page.request);
       await parentBox.getByRole('button', { name: 'Branch this conversation' }).click();
       await expect
@@ -272,7 +310,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(sibling!.branchDepth).toBe(2);
       expect(sibling!.parentId).toBe(parentId);
 
-      const siblingBox = page.locator(`.conversation-thread-box[data-conversation-id="${sibling!.id}"]`);
+      const siblingBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${sibling!.id}"]`,
+      );
       await expect(siblingBox).toBeVisible({ timeout: 10_000 });
       const bb = await siblingBox.boundingBox();
       expect(bb).toBeTruthy();
@@ -283,7 +323,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('branching a branch itself lands two columns out from the document (branchDepth 3, column 2)', async () => {
-      const childBox = page.locator(`.conversation-thread-box[data-conversation-id="${firstChildId}"]`);
+      const childBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${firstChildId}"]`,
+      );
       const before = await getConversations(page.request);
       await childBox.getByRole('button', { name: 'Branch this conversation' }).click();
       await expect
@@ -295,7 +337,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(grandchild!.branchDepth).toBe(3);
       expect(grandchild!.parentId).toBe(firstChildId);
 
-      const grandchildBoxEl = page.locator(`.conversation-thread-box[data-conversation-id="${grandchild!.id}"]`);
+      const grandchildBoxEl = page.locator(
+        `.conversation-thread-box[data-conversation-id="${grandchild!.id}"]`,
+      );
       await expect(grandchildBoxEl).toBeVisible({ timeout: 10_000 });
       const bb = await grandchildBoxEl.boundingBox();
       expect(bb).toBeTruthy();
@@ -304,7 +348,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
 
     await test.step('messages sent into the parent and its branch stay isolated to their own conversation', async () => {
       async function sendMessageVia(conversationId: string, text: string): Promise<void> {
-        const box = page.locator(`.conversation-thread-box[data-conversation-id="${conversationId}"]`);
+        const box = page.locator(
+          `.conversation-thread-box[data-conversation-id="${conversationId}"]`,
+        );
         await box.getByRole('button', { name: 'Focus' }).click();
         // US4/T031: the per-box detail overlay was consolidated into a single, app-level dialog
         // (`.conversation-detail-dialog` in App.vue) so opening one conversation doesn't block
@@ -312,7 +358,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
         const dialog = page.locator('.conversation-detail-dialog');
         await dialog.locator('textarea').fill(text);
         await dialog.getByRole('button', { name: /^Send$/ }).click();
-        await expect(dialog.locator('.message-bubble', { hasText: text })).toBeVisible({ timeout: 10_000 });
+        await expect(dialog.locator('.message-bubble', { hasText: text })).toBeVisible({
+          timeout: 10_000,
+        });
         await dialog.getByRole('button', { name: 'Close full view' }).click();
       }
 
@@ -327,20 +375,32 @@ test.describe('US8 — Spatial canvas colocation', () => {
       // text filter on the *other* conversation's box once both messages have been sent (each box
       // only ever contains its own assistant reply, but that reply's text still contains the other
       // conversation's user text as a substring after both sends have happened).
-      const parentBox = page.locator(`.conversation-thread-box[data-conversation-id="${parentId}"]`);
-      const childBox = page.locator(`.conversation-thread-box[data-conversation-id="${firstChildId}"]`);
+      const parentBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${parentId}"]`,
+      );
+      const childBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${firstChildId}"]`,
+      );
       await expect(
         parentBox.locator('.message-bubble[data-role="user"]', { hasText: parentOnlyText }),
       ).toBeVisible({ timeout: 10_000 });
-      await expect(parentBox.locator('.message-bubble[data-role="user"]', { hasText: childOnlyText })).toHaveCount(0);
-      await expect(childBox.locator('.message-bubble[data-role="user"]', { hasText: childOnlyText })).toBeVisible({
+      await expect(
+        parentBox.locator('.message-bubble[data-role="user"]', { hasText: childOnlyText }),
+      ).toHaveCount(0);
+      await expect(
+        childBox.locator('.message-bubble[data-role="user"]', { hasText: childOnlyText }),
+      ).toBeVisible({
         timeout: 10_000,
       });
-      await expect(childBox.locator('.message-bubble[data-role="user"]', { hasText: parentOnlyText })).toHaveCount(0);
+      await expect(
+        childBox.locator('.message-bubble[data-role="user"]', { hasText: parentOnlyText }),
+      ).toHaveCount(0);
     });
   });
 
-  test('per-message expand/collapse and a conversation-level bulk toggle (US3, FR-008/FR-009)', async ({ page }) => {
+  test('per-message expand/collapse and a conversation-level bulk toggle (US3, FR-008/FR-009)', async ({
+    page,
+  }) => {
     await test.step('fixture document exists', async () => {
       await ensureFixtureDocument(page);
     });
@@ -348,7 +408,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
     // Long enough (well over MessageBubble.vue's 160px clamp) that both this user message and the
     // FakeAgentSession's echo reply (which quotes the whole sent text back) get their own toggle.
     const LONG_TEXT = Array(10)
-      .fill('This is a deliberately long test sentence meant to exceed the default collapsed message height.')
+      .fill(
+        'This is a deliberately long test sentence meant to exceed the default collapsed message height.',
+      )
       .join(' ');
 
     let mainId = '';
@@ -363,7 +425,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       for (const suffix of ['one', 'two']) {
         await dialog.locator('textarea').fill(`${LONG_TEXT} (${suffix})`);
         await dialog.getByRole('button', { name: /^Send$/ }).click();
-        await expect(dialog.locator('.message-bubble', { hasText: `(${suffix})` })).toBeVisible({ timeout: 10_000 });
+        await expect(dialog.locator('.message-bubble', { hasText: `(${suffix})` })).toBeVisible({
+          timeout: 10_000,
+        });
       }
       await dialog.getByRole('button', { name: 'Close full view' }).click();
     });
@@ -373,13 +437,23 @@ test.describe('US8 — Spatial canvas colocation', () => {
     const secondLongBubble = () => box().locator('.message-bubble', { hasText: '(two)' }).first();
 
     await test.step('a long message truncates with its own expand control; expanding/collapsing it individually works (FR-008)', async () => {
-      await expect(firstLongBubble().getByRole('button', { name: /Show more of this message/ })).toBeVisible({
+      await expect(
+        firstLongBubble().getByRole('button', { name: /Show more of this message/ }),
+      ).toBeVisible({
         timeout: 10_000,
       });
-      await firstLongBubble().getByRole('button', { name: /Show more of this message/ }).click();
-      await expect(firstLongBubble().getByRole('button', { name: /Show less of this message/ })).toBeVisible();
-      await firstLongBubble().getByRole('button', { name: /Show less of this message/ }).click();
-      await expect(firstLongBubble().getByRole('button', { name: /Show more of this message/ })).toBeVisible();
+      await firstLongBubble()
+        .getByRole('button', { name: /Show more of this message/ })
+        .click();
+      await expect(
+        firstLongBubble().getByRole('button', { name: /Show less of this message/ }),
+      ).toBeVisible();
+      await firstLongBubble()
+        .getByRole('button', { name: /Show less of this message/ })
+        .click();
+      await expect(
+        firstLongBubble().getByRole('button', { name: /Show more of this message/ }),
+      ).toBeVisible();
     });
 
     await test.step('the conversation-level bulk control expands every message in the box together (FR-009)', async () => {
@@ -396,14 +470,22 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('after the bulk action, toggling one message individually changes only that message', async () => {
-      await firstLongBubble().getByRole('button', { name: /Show less of this message/ }).click();
-      await expect(firstLongBubble().getByRole('button', { name: /Show more of this message/ })).toBeVisible();
+      await firstLongBubble()
+        .getByRole('button', { name: /Show less of this message/ })
+        .click();
+      await expect(
+        firstLongBubble().getByRole('button', { name: /Show more of this message/ }),
+      ).toBeVisible();
       // The other long message stays expanded — the individual toggle didn't affect it.
-      await expect(secondLongBubble().getByRole('button', { name: /Show less of this message/ })).toBeVisible();
+      await expect(
+        secondLongBubble().getByRole('button', { name: /Show less of this message/ }),
+      ).toBeVisible();
     });
   });
 
-  test('HUD ordering, click-to-scroll, and staying visible while panning (US4, FR-010)', async ({ page }) => {
+  test('HUD ordering, click-to-scroll, and staying visible while panning (US4, FR-010)', async ({
+    page,
+  }) => {
     await test.step('fixture document exists', async () => {
       await ensureFixtureDocument(page);
     });
@@ -433,7 +515,10 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(secondOffset).toBeGreaterThanOrEqual(0);
 
       const firstResponse = await page.request.post('/api/conversations', {
-        data: { parentConversationId: mainId, selection: { from: firstOffset, to: firstOffset + MARKERS.first.length } },
+        data: {
+          parentConversationId: mainId,
+          selection: { from: firstOffset, to: firstOffset + MARKERS.first.length },
+        },
       });
       expect(firstResponse.ok()).toBeTruthy();
       firstHighlightId = ((await firstResponse.json()) as { id: string }).id;
@@ -445,14 +530,19 @@ test.describe('US8 — Spatial canvas colocation', () => {
       branchOfFirstId = ((await branchResponse.json()) as { id: string }).id;
 
       const secondResponse = await page.request.post('/api/conversations', {
-        data: { parentConversationId: mainId, selection: { from: secondOffset, to: secondOffset + MARKERS.second.length } },
+        data: {
+          parentConversationId: mainId,
+          selection: { from: secondOffset, to: secondOffset + MARKERS.second.length },
+        },
       });
       expect(secondResponse.ok()).toBeTruthy();
       secondHighlightId = ((await secondResponse.json()) as { id: string }).id;
 
       await page.reload();
       await expect(page.locator('.toolbar h1')).toBeVisible();
-      await expect(page.locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`)).toBeVisible({
+      await expect(
+        page.locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`),
+      ).toBeVisible({
         timeout: 10_000,
       });
     });
@@ -464,7 +554,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       // four conversations within the full list, rather than the list's exact full contents.
       const rows = page.locator('.hud-panel .conversation-row');
       await expect(rows).not.toHaveCount(0);
-      const ids = await rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-conversation-id')));
+      const ids = await rows.evaluateAll((els) =>
+        els.map((el) => el.getAttribute('data-conversation-id')),
+      );
       const mine = new Set([mainId, firstHighlightId, branchOfFirstId, secondHighlightId]);
       const myOrder = ids.filter((id): id is string => id !== null && mine.has(id));
       expect(myOrder).toEqual([mainId, firstHighlightId, branchOfFirstId, secondHighlightId]);
@@ -476,7 +568,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       // that it was already in view.
       await canvas.evaluate((el) => el.scrollTo({ top: 0 }));
       await expect(async () => {
-        const box = await page.locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`).boundingBox();
+        const box = await page
+          .locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`)
+          .boundingBox();
         expect(box).toBeTruthy();
         const viewport = page.viewportSize();
         expect(viewport).toBeTruthy();
@@ -488,7 +582,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
         .click();
 
       await expect(async () => {
-        const box = await page.locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`).boundingBox();
+        const box = await page
+          .locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`)
+          .boundingBox();
         expect(box).toBeTruthy();
         const viewport = page.viewportSize();
         expect(viewport).toBeTruthy();
@@ -524,7 +620,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
   // exactly its parent's last user + last assistant message for read-only display (the same
   // `.continuity-context` contract exercised directly in
   // app/frontend/tests/component/MessageBubble.spec.ts).
-  test('branching a conversation creates an empty placeholder with no auto-sent seed message, showing the parent\'s last two messages as read-only context (canvas-conversation-threads, NEW behavior)', async ({
+  test("branching a conversation creates an empty placeholder with no auto-sent seed message, showing the parent's last two messages as read-only context (canvas-conversation-threads, NEW behavior)", async ({
     page,
   }) => {
     await test.step('fixture document exists', async () => {
@@ -534,7 +630,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
     const main = await findConversation(page.request, 'Main');
     const parentLastUserText = 'US8-CONTINUITY-PARENT-USER: what do you make of this document?';
 
-    await test.step("send a real message into Main so it has genuine history to borrow from", async () => {
+    await test.step('send a real message into Main so it has genuine history to borrow from', async () => {
       const box = page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`);
       await box.getByRole('button', { name: 'Focus' }).click();
       const dialog = page.locator('.conversation-detail-dialog');
@@ -542,7 +638,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       await dialog.getByRole('button', { name: /^Send$/ }).click();
       // Wait for the fake agent's deterministic reply too, so Main's "last message" is settled
       // before branching (mirrors us8's other tests' reliance on FakeAgentSession's echo reply).
-      await expect(dialog.locator('.message-bubble[data-role="assistant"]', { hasText: parentLastUserText })).toBeVisible({
+      await expect(
+        dialog.locator('.message-bubble[data-role="assistant"]', { hasText: parentLastUserText }),
+      ).toBeVisible({
         timeout: 10_000,
       });
       await dialog.getByRole('button', { name: 'Close full view' }).click();
@@ -566,7 +664,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(branch).toBeTruthy();
       branchId = branch!.id;
 
-      const branchBox = page.locator(`.conversation-thread-box[data-conversation-id="${branchId}"]`);
+      const branchBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${branchId}"]`,
+      );
       await expect(branchBox).toBeVisible({ timeout: 10_000 });
       // No message ever belongs to the branch's own history — checked immediately (not after a
       // poll/wait) since the point is that nothing was ever queued to send one in the first place.
@@ -581,12 +681,16 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step("the new placeholder box shows the parent's last user and last assistant message as read-only context", async () => {
-      const branchBox = page.locator(`.conversation-thread-box[data-conversation-id="${branchId}"]`);
+      const branchBox = page.locator(
+        `.conversation-thread-box[data-conversation-id="${branchId}"]`,
+      );
       const context = branchBox.locator('.continuity-context');
       await expect(context).toBeVisible({ timeout: 10_000 });
       await expect(context.locator('.message-bubble')).toHaveCount(2);
       await expect(context.locator('.message-bubble').first()).toContainText(parentLastUserText);
-      await expect(context.locator('.message-bubble').last()).toContainText(parentLastAssistantText);
+      await expect(context.locator('.message-bubble').last()).toContainText(
+        parentLastAssistantText,
+      );
     });
   });
 });

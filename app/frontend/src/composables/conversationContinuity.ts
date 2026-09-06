@@ -26,7 +26,9 @@ export interface ConversationContinuity {
  */
 export function useConversationContinuity(conversationId: () => string): ConversationContinuity {
   const store = useConversationsStore();
-  const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const conversation = computed(
+    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
+  );
   const messages = computed(() => store.messagesFor(conversationId()));
 
   const parentConversation = computed<ConversationDto | null>(() =>

@@ -1,19 +1,27 @@
 import type { FastifyInstance } from 'fastify';
 import type { ListEditsResponse } from '@rapid-ai-document-review/shared/contracts/http';
-import { EditNotFoundError, EditNotPendingError, type EditService } from '../../edit/edit-service.ts';
+import {
+  EditNotFoundError,
+  EditNotPendingError,
+  type EditService,
+} from '../../edit/edit-service.ts';
 import { sendError } from './errors.ts';
 
 export function registerEditRoutes(app: FastifyInstance, deps: { editService: EditService }): void {
   const { editService } = deps;
 
-  function handleEditError(err: unknown): { status: number; code: 'EDIT_NOT_FOUND' | 'EDIT_NOT_PENDING' } | null {
+  function handleEditError(
+    err: unknown,
+  ): { status: number; code: 'EDIT_NOT_FOUND' | 'EDIT_NOT_PENDING' } | null {
     if (err instanceof EditNotFoundError) return { status: 404, code: 'EDIT_NOT_FOUND' };
     if (err instanceof EditNotPendingError) return { status: 409, code: 'EDIT_NOT_PENDING' };
     return null;
   }
 
   app.get<{ Params: { id: string } }>('/api/conversations/:id/edits', async (request, reply) => {
-    const response: ListEditsResponse = { stagedEdits: editService.listForConversation(request.params.id) };
+    const response: ListEditsResponse = {
+      stagedEdits: editService.listForConversation(request.params.id),
+    };
     return reply.send(response);
   });
 
@@ -49,25 +57,31 @@ export function registerEditRoutes(app: FastifyInstance, deps: { editService: Ed
     }
   });
 
-  app.post<{ Params: { id: string } }>('/api/conversations/:id/edits/accept-remaining', async (request, reply) => {
-    try {
-      const result = await editService.acceptRemaining(request.params.id);
-      return reply.send(result);
-    } catch (err) {
-      const mapped = handleEditError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
-      throw err;
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    '/api/conversations/:id/edits/accept-remaining',
+    async (request, reply) => {
+      try {
+        const result = await editService.acceptRemaining(request.params.id);
+        return reply.send(result);
+      } catch (err) {
+        const mapped = handleEditError(err);
+        if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
+        throw err;
+      }
+    },
+  );
 
-  app.post<{ Params: { id: string } }>('/api/conversations/:id/edits/drop-remaining', async (request, reply) => {
-    try {
-      const droppedEditIds = editService.dropRemaining(request.params.id);
-      return reply.send({ droppedEditIds });
-    } catch (err) {
-      const mapped = handleEditError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
-      throw err;
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    '/api/conversations/:id/edits/drop-remaining',
+    async (request, reply) => {
+      try {
+        const droppedEditIds = editService.dropRemaining(request.params.id);
+        return reply.send({ droppedEditIds });
+      } catch (err) {
+        const mapped = handleEditError(err);
+        if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message);
+        throw err;
+      }
+    },
+  );
 }

@@ -1,4 +1,7 @@
-import type { EditHunk, PreviewEditResponse } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  EditHunk,
+  PreviewEditResponse,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { reconcile } from '../document/text-anchor.ts';
 import type { EditOperation, StagedEditRow } from '../storage/storage-adapter.ts';
 
@@ -24,7 +27,10 @@ const HUNK_CONTEXT_LINES = readHunkContextLines();
 
 /** Applies already-resolved, descending-offset patches to a string copy — never the live document
  * (GET /edits/:id/preview must never mutate anything; contracts/http-api.md). */
-function applyPatches(text: string, patches: { from: number; to: number; insert: string }[]): string {
+function applyPatches(
+  text: string,
+  patches: { from: number; to: number; insert: string }[],
+): string {
   let result = text;
   for (const patch of patches) {
     result = result.slice(0, patch.from) + patch.insert + result.slice(patch.to);
@@ -77,7 +83,8 @@ function lineContextWindow(
 
   const toLine = lineIndexForOffset(lineStarts, to);
   const afterEndLine = Math.min(lastLineIndex, toLine + contextLines);
-  const afterEndOffset = afterEndLine + 1 <= lastLineIndex ? lineStarts[afterEndLine + 1]! : text.length;
+  const afterEndOffset =
+    afterEndLine + 1 <= lastLineIndex ? lineStarts[afterEndLine + 1]! : text.length;
   const contextAfter = text.slice(to, afterEndOffset);
 
   return { contextBefore, contextAfter };
@@ -91,7 +98,12 @@ function buildHunks(operations: EditOperation[], currentText: string): EditHunk[
   return operations.map((op, index) => {
     const from = currentText.indexOf(op.old_string);
     const to = from + op.old_string.length;
-    const { contextBefore, contextAfter } = lineContextWindow(currentText, from, to, HUNK_CONTEXT_LINES);
+    const { contextBefore, contextAfter } = lineContextWindow(
+      currentText,
+      from,
+      to,
+      HUNK_CONTEXT_LINES,
+    );
     return {
       operationIndex: index,
       contextBefore,

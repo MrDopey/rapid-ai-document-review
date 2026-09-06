@@ -72,7 +72,10 @@ describe('document store — patchContent 409/retry behavior', () => {
   // edit is never dropped and no conflictMessage is set.
   it('a baseRevision gap that resolves without a 409 (e.g. only a benign manual_debounce checkpoint in between) succeeds normally, without dropping the edit', async () => {
     const store = useDocumentStore();
-    vi.mocked(httpClient.patchDocument).mockResolvedValue({ currentRevision: 4, revisionCreated: false });
+    vi.mocked(httpClient.patchDocument).mockResolvedValue({
+      currentRevision: 4,
+      revisionCreated: false,
+    });
 
     await store.patchContent(3, [{ from: 0, to: 0, insert: 'x' }]);
 
@@ -116,7 +119,14 @@ describe('document store — WS event-sequence gap resync', () => {
         currentSequence: sequence,
         replayCount: 0,
         snapshot: {
-          document: { id: 'doc-1', title: 'Doc', currentRevision: 1, createdAt: '', updatedAt: '', content: 'v1' },
+          document: {
+            id: 'doc-1',
+            title: 'Doc',
+            currentRevision: 1,
+            createdAt: '',
+            updatedAt: '',
+            content: 'v1',
+          },
           conversations: [],
         },
       },
@@ -144,7 +154,14 @@ describe('document store — WS event-sequence gap resync', () => {
     expect(store.eventSequence).toBe(5);
 
     vi.mocked(httpClient.getDocument).mockResolvedValue({
-      document: { id: 'doc-1', title: 'Doc', currentRevision: 9, createdAt: '', updatedAt: '', updatedAtServer: '' } as never,
+      document: {
+        id: 'doc-1',
+        title: 'Doc',
+        currentRevision: 9,
+        createdAt: '',
+        updatedAt: '',
+        updatedAtServer: '',
+      } as never,
       content: 'resynced content',
       eventSequence: 9,
     });

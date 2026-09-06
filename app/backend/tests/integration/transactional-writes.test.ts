@@ -47,14 +47,34 @@ function buildHarness(): Harness {
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
   const primaryMutex = new PrimaryMutex();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
-  const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
+  const revisionService = new RevisionService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    primaryMutex,
+  );
+  const documentService = new DocumentService(
+    storage,
+    eventService,
+    eventHub,
+    automerge,
+    revisionService,
+    primaryMutex,
+  );
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
-  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
+  const turnRunner = new TurnRunner(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    piService,
+    concurrencyLimiter,
+  );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -71,7 +91,12 @@ function buildHarness(): Harness {
   return { storage, automerge, documentService, revisionService, editService };
 }
 
-function createConversation(storage: StorageAdapter, documentId: string, contextRevision: number, isPrimary = false): ConversationRow {
+function createConversation(
+  storage: StorageAdapter,
+  documentId: string,
+  contextRevision: number,
+  isPrimary = false,
+): ConversationRow {
   const now = new Date().toISOString();
   const id = newId('conv');
   return storage.createConversation({
@@ -133,7 +158,9 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     expect(h.storage.getStagedEdit(staged.id)?.status).toBe('pending');
     expect(h.storage.getStagedEdit(staged.id)?.appliedRevision).toBeNull();
     expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision);
-    expect(h.storage.getLatestRevision(documentId)?.revision).toBe(latestRevisionBefore?.revision ?? 0);
+    expect(h.storage.getLatestRevision(documentId)?.revision).toBe(
+      latestRevisionBefore?.revision ?? 0,
+    );
     expect(h.storage.getConversation(conv.id)?.contextRevision).toBe(conv.contextRevision);
 
     // Restoring the real storage call: the document remains fully usable afterward — a fresh
@@ -189,7 +216,11 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     expect(h.storage.listChangesSince(documentId, 0)).toHaveLength(changesBefore);
 
     h.storage.appendEvent = originalAppendEvent;
-    await h.documentService.applyChanges(undefined, [{ from: 0, to: 5, insert: 'Howdy' }], undefined);
+    await h.documentService.applyChanges(
+      undefined,
+      [{ from: 0, to: 5, insert: 'Howdy' }],
+      undefined,
+    );
     expect(h.storage.listChangesSince(documentId, 0)).toHaveLength(changesBefore + 1);
     expect(h.automerge.get().getContent()).toBe('Howdy world.\n');
   });
@@ -203,7 +234,9 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
 
     const originalUpdateDocumentRevision = h.storage.updateDocumentRevision.bind(h.storage);
     let shouldThrow = true;
-    h.storage.updateDocumentRevision = ((...args: Parameters<typeof originalUpdateDocumentRevision>) => {
+    h.storage.updateDocumentRevision = ((
+      ...args: Parameters<typeof originalUpdateDocumentRevision>
+    ) => {
       if (shouldThrow) {
         shouldThrow = false;
         throw new Error('simulated crash mid-sequence');
@@ -211,17 +244,22 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
       return originalUpdateDocumentRevision(...args);
     }) as typeof h.storage.updateDocumentRevision;
 
-    expect(() => h.revisionService.createRevision(documentId, { source: 'user', origin: 'manual_debounce' })).toThrow(
-      'simulated crash mid-sequence',
-    );
+    expect(() =>
+      h.revisionService.createRevision(documentId, { source: 'user', origin: 'manual_debounce' }),
+    ).toThrow('simulated crash mid-sequence');
 
     // The `revision` row `createRevision` had already written (before the stubbed call threw) was
     // rolled back too — not left as an orphan with no matching `document.current_revision` bump.
-    expect(h.storage.getLatestRevision(documentId)?.revision).toBe(latestRevisionBefore?.revision ?? 0);
+    expect(h.storage.getLatestRevision(documentId)?.revision).toBe(
+      latestRevisionBefore?.revision ?? 0,
+    );
     expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision);
 
     h.storage.updateDocumentRevision = originalUpdateDocumentRevision;
-    const row = h.revisionService.createRevision(documentId, { source: 'user', origin: 'manual_debounce' });
+    const row = h.revisionService.createRevision(documentId, {
+      source: 'user',
+      origin: 'manual_debounce',
+    });
     expect(row.revision).toBe(docBefore.currentRevision + 1);
     expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision + 1);
   });
