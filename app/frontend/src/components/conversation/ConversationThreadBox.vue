@@ -14,30 +14,26 @@ import ConversationStatusBadges from './ConversationStatusBadges.vue';
 import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
 
-// US4/T031 fix: the app's pre-canvas sidebar showed exactly one conversation's full detail view
-// at a time — a per-box `.modal-overlay` (this component's original approach) can't support
-// switching between conversations (once open, it covers the *entire* viewport including the
-// toolbar/HUD, so clicking a different HUD row to switch never reaches it). So the actual detail
-// view is rendered in `App.vue` (via `ConversationDetailPanel.vue`, one instance per currently
-// focused conversation) — this box only ever *requests* a change to focus state; it doesn't
-// render or own any detail panel itself.
-// 005-canvas-conversation-threads (multi-focus overlay): renamed from `isOpen`/`request-open`+
-// `request-close` to `isFocused`/`toggle-focus` — App.vue's `selectedConversationId` (a single
-// scalar) became `focusedConversationIds: Set<string>` (several conversations may have an open
-// detail panel simultaneously, up to a configurable cap), and both this box's "Focus" button and
-// its "Close" button (only rendered while `isFocused`) now just request the *same* toggle rather
-// than two directionally-different actions — App.vue's own toggle already no-ops correctly in
-// either direction (removing when present, adding when absent and under cap). `focusDisabled`/
+// A per-box detail view can't support switching between conversations while one is already open
+// (it would cover the *entire* viewport including the toolbar/HUD, so clicking a different HUD row
+// to switch never reaches it). So the actual detail view is rendered in `App.vue` (via
+// `ConversationDetailPanel.vue`, one instance per currently focused conversation) — this box only
+// ever *requests* a change to focus state; it doesn't render or own any detail panel itself.
+// Several conversations may have an open detail panel simultaneously, up to a configurable cap
+// (`focusedConversationIds: Set<string>` in App.vue), and both this box's "Focus" button and its
+// "Close" button (only rendered while `isFocused`) just request the *same* toggle rather than two
+// directionally-different actions — App.vue's own toggle already no-ops correctly in either
+// direction (removing when present, adding when absent and under cap). `focusDisabled`/
 // `maxFocused` (both computed by App.vue/DocumentCanvas.vue from the live cap and current focused
 // count) drive the Focus button's own disabled-looking affordance when focusing this conversation
 // would exceed that cap; they're irrelevant whenever `isFocused` is already true (toggling off is
 // always allowed, never capped).
-// `atFocusCap` (005-canvas-conversation-threads, branch-cap parity): the same live "no free slot"
-// condition `focusDisabled` above already reflects for the Focus button, but *not* conditioned on
-// `isFocused` — branching always creates a brand-new conversation (never already focused), so the
-// Branch button's own disabled check is just the plain cap comparison, computed once by
-// DocumentCanvas.vue and threaded down here as its own boolean prop (same "precomputed boolean +
-// maxFocused number" shape as `focusDisabled`/`maxFocused` already establish).
+// `atFocusCap` is the same live "no free slot" condition `focusDisabled` above already reflects for
+// the Focus button, but *not* conditioned on `isFocused` — branching always creates a brand-new
+// conversation (never already focused), so the Branch button's own disabled check is just the
+// plain cap comparison, computed once by DocumentCanvas.vue and threaded down here as its own
+// boolean prop (same "precomputed boolean + maxFocused number" shape as `focusDisabled`/
+// `maxFocused` already establish).
 const props = withDefaults(
   defineProps<{
     conversationId: string;
@@ -50,19 +46,17 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   (e: 'toggle-focus', conversationId: string): void;
-  // Parity fix (auto-focus on branch): mirrors `ConversationView.vue`'s own `branch-created` emit —
-  // fired (via `useConversationBranchAction`'s `onBranchCreated` callback) once a new branch is
-  // successfully created, carrying its id up to App.vue (via DocumentCanvas.vue), which auto-focuses
-  // it. Branch creation itself is blocked at the cap (see that composable's own doc comment), so by
-  // the time this fires a free slot is always available.
+  // Mirrors `ConversationView.vue`'s own `branch-created` emit — fired (via
+  // `useConversationBranchAction`'s `onBranchCreated` callback) once a new branch is successfully
+  // created, carrying its id up to App.vue (via DocumentCanvas.vue), which auto-focuses it. Branch
+  // creation itself is blocked at the cap (see that composable's own doc comment), so by the time
+  // this fires a free slot is always available.
   (e: 'branch-created', id: string): void;
 }>();
 const store = useConversationsStore();
 
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
 const messages = computed(() => store.messagesFor(props.conversationId));
-// De-dup fix: `isPrimary` now computed once by `conversationStatusBadges.ts`, shared with
-// `ConversationView.vue`/`HudPanel.vue` — see that composable's own doc comment.
 const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
 // Rename affordance: click-to-edit title, following the same "one action per slot" convention as
@@ -77,42 +71,41 @@ const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, c
   useConversationRename(() => props.conversationId, nameInputEl);
 
 // Branch-lineage cue (sidebar list view): a plain-text breadcrumb naming this conversation's
-// parent, if any. Note on scope: this data model has no message-level fork-point field at all —
+// parent, if any. This data model has no message-level fork-point field at all —
 // `ConversationDto.parentId` links two *conversations*, and the only anchor a branch can carry
 // (`seedSelection`) is a document character-range excerpt, never a specific transcript message id
 // (see conversation-service.ts's `branch()` and conversationLayout.ts's doc comments). So "branched
 // from" here names the parent conversation as a whole; it can't point at a specific message within
 // it because no such reference is stored anywhere in the domain model.
-// 005-canvas-conversation-threads: branch creation no longer sends any seed message, so a
-// freshly-created branch starts with zero messages of its own (see conversation-service.ts's
+// A freshly-created branch starts with zero messages of its own (see conversation-service.ts's
 // `branch()` — `forkedFromMessageId` is populated with the parent's last message id at the moment
 // of branching, `null` for a selection-anchored branch with no message-level fork point). Rather
-// than leave that box a blank dead end, borrow exactly two messages from the *parent's* own
+// than leave that box a blank dead end, this borrows exactly two messages from the *parent's* own
 // (already independently loaded — see `onMounted` below) message list for read-only display: the
 // last user message and the last assistant message, up to and including `forkedFromMessageId`.
 // These are never written into this conversation's own `messagesByConversation` entry — they stay
 // sourced live from the parent, so they can never be mistaken for (or counted as) this
 // conversation's own messages.
-// Bug fix follow-up: this logic (and `parentConversation` above it) is now shared with
-// `ConversationView.vue`'s focus/detail view via `useConversationContinuity` — see that
-// composable's doc comment — so both call sites stay in lockstep rather than risk drifting apart.
+// This logic (and `parentConversation` above it) is shared with `ConversationView.vue`'s
+// focus/detail view via `useConversationContinuity` — see that composable's doc comment — so both
+// call sites stay in lockstep rather than risk drifting apart.
 const { parentConversation, continuityMessages } = useConversationContinuity(() => props.conversationId);
 
-// US3/FR-008/FR-009: this box — not `MessageBubble.vue` itself — owns every one of its messages'
-// `expanded` state, since the bulk toggle below needs to read/set all of them at once
-// (data-model.md's `MessageDisplayState` is "purely a batch write over the same per-message
-// field", not a separate stored bulk mode). Seeded from `localStorage` per message the first time
-// each message is seen (streaming deltas update `message.text` in place without changing `id`, so
-// this only runs once per real message) — see `ensureMessageExpandedSeeded` in
-// `stores/conversations.ts` for the role-aware default (assistant replies start expanded, user
-// messages stay collapsed-by-default) and the full reasoning.
+// This box — not `MessageBubble.vue` itself — owns every one of its messages' `expanded` state,
+// since the bulk toggle below needs to read/set all of them at once (data-model.md's
+// `MessageDisplayState` is "purely a batch write over the same per-message field", not a separate
+// stored bulk mode). Seeded from `localStorage` per message the first time each message is seen
+// (streaming deltas update `message.text` in place without changing `id`, so this only runs once
+// per real message) — see `ensureMessageExpandedSeeded` in `stores/conversations.ts` for the
+// role-aware default (assistant replies start expanded, user messages stay collapsed-by-default)
+// and the full reasoning.
 //
-// Bug fix (state divergence): this used to be a local `ref<Record<string, boolean>>` — since this
-// box and `ConversationView.vue`'s focus/detail view can both be mounted at once for the same
-// conversation, two independent local refs could silently show different expanded/collapsed state
-// for the same message. Now backed by `conversationsStore.expandedByMessage` (keyed by
-// conversationId then messageId) so both components read/write the exact same reactive source —
-// `localStorage` stays purely the persistence layer underneath it.
+// Backed by `conversationsStore.expandedByMessage` (keyed by conversationId then messageId), not a
+// local `ref<Record<string, boolean>>` — this box and `ConversationView.vue`'s focus/detail view
+// can both be mounted at once for the same conversation, so a local ref per component would let
+// the two silently show different expanded/collapsed state for the same message. Both components
+// read/write the exact same reactive source; `localStorage` stays purely the persistence layer
+// underneath it.
 const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
 watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
 
@@ -122,12 +115,12 @@ watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), {
 // line, or wrapped action buttons).
 const threadHeaderEl = ref<HTMLElement | null>(null);
 
-// Bug fix (scroll-to-top-of-message): expanding a single message (as opposed to the bulk "Expand
-// all" toggle below, which deliberately leaves scroll position alone — there's no one message to
-// anchor to) scrolls so its own top edge becomes visible, not just wherever it happens to land once
-// its content grows. Only fires on a collapsed -> expanded transition (never on collapse, and never
-// redundantly on an already-expanded message), since that's the only direction that can reveal new
-// content the user hasn't seen yet.
+// Expanding a single message (as opposed to the bulk "Expand all" toggle below, which deliberately
+// leaves scroll position alone — there's no one message to anchor to) scrolls so its own top edge
+// becomes visible, not just wherever it happens to land once its content grows. Only fires on a
+// collapsed -> expanded transition (never on collapse, and never redundantly on an
+// already-expanded message), since that's the only direction that can reveal new content the user
+// hasn't seen yet.
 function setMessageExpanded(messageId: string, expanded: boolean): void {
   const wasExpanded = expandedByMessage.value[messageId];
   store.setMessageExpanded(props.conversationId, messageId, expanded);
@@ -140,37 +133,32 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // collapsed, one click expands all of them; once every message is already expanded, the same
 // control collapses all of them instead. Individual messages stay independently toggleable
 // afterward (setMessageExpanded above is unchanged by this bulk path).
-// Now shared with `ConversationView.vue` via `useBulkToggleAction`, backed by the shared store slice
-// above rather than this box's own local ref.
+// Shared with `ConversationView.vue` via `useBulkToggleAction`.
 const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
 
 // Root element exposed so `DocumentCanvas.vue` can attach a `ResizeObserver` to it (Phase 4/US2's
 // sibling-collision stacking needs each box's *actual* rendered height, not a fixed assumption).
 const rootEl = ref<HTMLElement | null>(null);
 
-// 005-canvas-conversation-threads (US2, gap #1 found during implementation review): there is no
-// message-level anchor in this data model (`CreateConversationRequest` only carries an optional
-// *document* `selection`, never a message id — see spec.md's Assumptions section: "This restructure
-// does not change branching's underlying semantics... it changes how branches are laid out
-// spatially"). "Branch off a specific message" (spec.md US2) is implemented as branching *this*
-// conversation with no selection — the new child renders one column further out, inheriting this
-// conversation's own resolved position (`resolveBaseAnchorY` in `conversationLayout.ts`). This is a
-// dedicated affordance, alongside every other header action (constitution: one action per slot).
-// Branch-cap parity fix: this used to always allow branch creation, with no auto-focus at all —
-// now shared with `ConversationView.vue`'s focus-view "Branch" button via `useConversationBranchAction`
-// (see that composable's own doc comment): blocked outright while `atFocusCap`, and auto-focuses the
-// new branch via the `branch-created` emit on every success.
+// There is no message-level anchor in this data model (`CreateConversationRequest` only carries an
+// optional *document* `selection`, never a message id). "Branch off a specific message" is
+// implemented as branching *this* conversation with no selection — the new child renders one
+// column further out, inheriting this conversation's own resolved position (`resolveBaseAnchorY`
+// in `conversationLayout.ts`). This is a dedicated affordance, alongside every other header action
+// (constitution: one action per slot).
+// Shared with `ConversationView.vue`'s focus-view "Branch" button via `useConversationBranchAction`
+// (see that composable's own doc comment): blocked outright while `atFocusCap`, and auto-focuses
+// the new branch via the `branch-created` emit on every success.
 const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
   atFocusCap: () => props.atFocusCap,
   maxFocused: () => props.maxFocused,
   onBranchCreated: (id) => emit('branch-created', id),
 });
 
-// 005-canvas-conversation-threads: `ConversationView.vue` is no longer permanently mounted for
-// every conversation (it used to live in App.vue's sidebar, always fetching its own detail on
-// mount) — this compact box is now the only thing that renders for a conversation by default, so
-// it has to trigger the message fetch itself. Guarded so remounting this box (e.g. during layout
-// reflow in a later phase) doesn't refetch messages that are already loaded.
+// `ConversationView.vue` is not permanently mounted for every conversation — this compact box is
+// the only thing that renders for a conversation by default, so it has to trigger the message
+// fetch itself. Guarded so remounting this box (e.g. during layout reflow) doesn't refetch
+// messages that are already loaded.
 onMounted(() => {
   if (!store.messagesByConversation[props.conversationId]) {
     void store.loadDetail(props.conversationId);
@@ -183,9 +171,6 @@ onMounted(() => {
 // footer regions as before; every other mutating action (Request review, sending a message,
 // viewing proposed edits) still lives exclusively inside `ConversationView.vue`'s own header/
 // composer, unchanged.
-// 005-canvas-conversation-threads (multi-focus overlay): both buttons below now emit the same
-// `toggle-focus` — see the prop doc comment above for why a single toggle replaces the old
-// directional `request-open`/`request-close` pair.
 const focusButtonTitle = computed(() => {
   if (props.isFocused) return "Close this conversation's full view";
   if (props.focusDisabled) return `Un-focus another conversation first (max ${props.maxFocused})`;
@@ -198,10 +183,9 @@ function toggleFocus(): void {
 // Focus/Close descriptors stay defined locally (not shared with `ConversationView.vue`) — they're
 // specific to this surface, combined here with the two shared descriptors above into the one list
 // `ConversationActionButtons.vue` renders. `focusAction.disabled` is deliberately left unset (not
-// `focusDisabled`): the pre-existing Focus button was never a native `disabled` control either — see
-// `focusButtonTitle`'s own doc comment history — a click always still toggles regardless of whether
-// it "looks" capped, `ariaDisabled` alone carries that affordance so the button stays keyboard-
-// reachable and its title stays discoverable.
+// `focusDisabled`): a click always still toggles regardless of whether it "looks" capped,
+// `ariaDisabled` alone carries that affordance so the button stays keyboard-reachable and its
+// title stays discoverable.
 const focusAction = computed<ActionDescriptor>(() => ({
   key: 'focus',
   label: 'Focus',
@@ -278,9 +262,6 @@ defineExpose({ el: rootEl });
       <span v-if="parentConversation" class="branch-lineage text-wrap-safe">
         ↳ Branched from {{ parentConversation.name }}
       </span>
-      <!-- Header action row: every per-conversation action this box offers now lives together here
-           (previously "Open" alone lived in the header, "Expand/Collapse all" sat in its own
-           toolbar row, and "Branch" sat in a footer row below the messages). -->
       <div class="thread-actions">
         <ConversationActionButtons :actions="actions" />
         <span v-if="branchError" class="branch-error" role="alert">{{ branchError }}</span>
@@ -312,86 +293,55 @@ defineExpose({ el: rootEl });
   width: 320px;
   max-width: min(320px, 90vw);
   background: var(--panel-bg, #f7f7f8);
-  /* Was `var(--border-color, #ccc)` — that token is explicitly documented in style.css as a
-     "decorative divider only" (~1.5-1.7:1 against --panel-bg/--bg-color, below WCAG 1.4.11's 3:1
-     non-text minimum) and its own comment warns not to use it as a UI-boundary cue. This box's
-     outer edge is exactly that boundary — it's how adjacent stacked/columned boxes read as
-     separate, so a low-contrast divider made them blend together, especially in dark mode.
-     `--neutral-muted-color` is the same fix already applied to `.thread-action-button` below for
-     an identical reason: it's validated to clear 3:1+ against every flat panel surface (this box
-     sits on flat `--panel-bg`/`--panel-bg-alt`, not a tinted one, so the plain — not `-on-tint` —
-     variant is correct here) in both color schemes. */
+  /* Must use `--neutral-muted-color`, not `--border-color` — that token is documented in style.css
+     as a "decorative divider only" (~1.5-1.7:1 against --panel-bg/--bg-color, below WCAG 1.4.11's
+     3:1 non-text minimum). This box's outer edge is a UI-boundary cue (it's how adjacent
+     stacked/columned boxes read as separate), which needs the higher-contrast token —
+     `--neutral-muted-color` clears 3:1+ against every flat panel surface (this box sits on flat
+     `--panel-bg`/`--panel-bg-alt`, not a tinted one, so the plain — not `-on-tint` — variant is
+     correct here) in both color schemes. */
   border: 1px solid var(--neutral-muted-color, #4b5563);
   border-radius: 6px;
   padding: 0.4rem 0.6rem 0.6rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
-/* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
-   background tint) had no equivalent on this box — the shadow value itself now lives once in
-   style.css's `--primary-indicator-shadow` custom property (shared with `ConversationView.vue`'s/
-   `HudPanel.vue`'s own `.is-primary` rules), reused here for visual consistency across all three
-   surfaces that display a conversation. `box-shadow` is a single property, so this rule still
-   restates the base rule's own drop-shadow alongside `--primary-indicator-shadow` rather than
-   losing it to a separate `.is-primary` override; both inset shadows automatically follow this
-   box's own `border-radius: 6px` (an inset shadow is always clipped to the padding box's rounded
-   corners, same as the border it sits just inside of), so there's no separate corner-radius fix
-   needed here. */
+/* The shadow value lives once in style.css's `--primary-indicator-shadow` custom property (shared
+   with `ConversationView.vue`'s/`HudPanel.vue`'s own `.is-primary` rules), reused here for visual
+   consistency across all three surfaces that display a conversation. `box-shadow` is a single
+   property and its values don't merge across separate rules, so this rule restates the base
+   rule's own drop-shadow alongside `--primary-indicator-shadow` rather than losing it to a
+   separate `.is-primary` override; both inset shadows automatically follow this box's own
+   `border-radius: 6px` (an inset shadow is always clipped to the padding box's rounded corners,
+   same as the border it sits just inside of). */
 .conversation-thread-box.is-primary {
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.08),
     var(--primary-indicator-shadow);
 }
-/* Header consolidation: title+status stays a single top row; lineage + actions stack beneath it.
-   Previously `.thread-header` was a single 3-column grid holding only title | Open | status — the
-   "Open" button now lives in `.thread-actions` below, alongside every other per-conversation action
-   this box offers (see the template). */
 .thread-header {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  /* Correction (bleed-through fix): a non-zero `top` was tried first (`top: 0.4rem`) to preserve
-     breathing room once stuck, but a sticky element's `top` positions its *margin* edge, not its
-     painted box — any offset there (from `top` itself, or from a leftover `margin-top` on this
-     element) is a gap that sits OUTSIDE this header's own opaque background, so `.thread-messages`
-     content scrolling underneath is visible through it as it scrolls past. Confirmed empirically
-     with a Playwright probe (`elementFromPoint` at the scroll container's exact top edge resolved to
-     a `.msg` element, not the header, with the old `top: 0.4rem` + `margin-top: 0.15rem`
-     combination) — and confirmed fixed the same way once `top`/`margin-top` were both zeroed.
-     `margin: 0` below removes that second, smaller leak: even at `top: 0`, a lingering `margin-top`
-     would still park the header's *painted* box that many pixels below the scroll edge, leaving the
-     same class of gap just smaller. (The same reasoning applies to the bottom edge — `padding-bottom`
-     below, not `margin-bottom`, keeps the space below this header's content inside its own opaque
-     painted box too, for consistency with the top edge; there is no bleed-through risk there today
-     since nothing scrolls *above* `.thread-messages`, but a stray bottom margin would be exactly the
-     same class of gap-outside-the-background bug were that to ever change.)
-     `top: 0` means the header's margin box (== border box, since margin-top is 0) lands flush with
-     `.document-canvas`'s own top edge (which has no padding of its own — see DocumentCanvas.vue) the
-     instant it engages — zero pixels of scrollport are ever above it, so nothing can bleed through
-     geometrically. The breathing room the old `top: 0.4rem` was trying to preserve (matching
-     `.conversation-thread-box`'s own 0.4rem top padding, which this header doesn't otherwise inherit
-     since `.pane-eyebrow` — not this header — is the box's first child and the one actually sitting
-     against that padding) is recreated by `padding-top` instead, which lives *inside* this header's
-     own painted, opaque box: 0.4rem (the same breathing room) plus 0.15rem (replacing the
-     `margin-top` removed above, so the gap from `.pane-eyebrow` to this header's content is
-     unchanged) = 0.55rem. Padding, unlike `top`/`margin`, applies identically whether or not the
-     header is currently stuck, so this does very slightly increase the resting (unstuck) gap below
-     `.pane-eyebrow` versus the original pre-sticky layout — an accepted, minor trade-off, since
-     there's no standard CSS way to condition padding on sticky-engagement state, and it's what keeps
-     the stuck state fully opaque.
-     Each `.thread-column`'s boxes still stick independently against their own bounds (confirmed via
-     the same Playwright probe — different columns can show different stuck headers at once); this
-     was never a horizontal inset bug either — `.thread-header` and `.thread-messages` share the same
-     left/right edges in every state, only proven by measuring both, not simply asserting it — and
-     horizontal position is unaffected by a sticky offset that only sets `top`. `background` matches
-     this box's own `--panel-bg` (see `.conversation-thread-box` above) so `.thread-messages` content
-     scrolling underneath can't show through the header's own box either. `--z-raised` (style.css
-     `:root`) only needs to beat this box's own unstyled (z-index: auto) message content directly
-     below it in the same stacking context; `.conversation-thread-box` being `position: absolute`
-     already gives it its own stacking context, so this can never collide with any app-level
-     overlay's z-index (e.g. `ConversationDetailPanel.vue`'s `--z-raised`, App.vue's `--z-overlay`/
-     `--z-overlay-detail`, `PrimaryPanel.vue`'s/`ConversationView.vue`'s `--z-overlay-primary`,
+  /* A sticky element's `top` positions its *margin* edge, not its painted box — any offset there
+     (from `top` itself, or from a leftover `margin-top`) is a gap that sits OUTSIDE this header's
+     own opaque background, letting `.thread-messages` content scrolling underneath show through as
+     it scrolls past. `top: 0` plus `margin: 0` eliminates that gap entirely, since the header's
+     margin box (== border box, with no margin) then lands flush with the top of its scroll
+     container the instant it engages.
+     Breathing room is recreated via `padding-top`/`padding-bottom` instead of `margin`, since
+     padding lives *inside* the header's own painted, opaque box and so can't reopen the same
+     bleed-through gap (padding applies identically whether or not the header is currently stuck).
+     `background` matches this box's own `--panel-bg` (see `.conversation-thread-box` above) for the
+     same reason — content scrolling underneath can't show through the header's own box either.
+     `--z-raised` (style.css `:root`) only needs to beat this box's own unstyled (z-index: auto)
+     message content directly below it in the same stacking context; `.conversation-thread-box`
+     being `position: absolute` already gives it its own stacking context, so this can never
+     collide with any app-level overlay's z-index (e.g. `ConversationDetailPanel.vue`'s
+     `--z-raised`, App.vue's `--z-overlay`/`--z-overlay-detail`,
+     `PrimaryPanel.vue`'s/`ConversationView.vue`'s `--z-overlay-primary`,
      `ReconnectingIndicator.vue`'s `--z-indicator`) — those all live in entirely separate stacking
-     contexts. */
+     contexts. `.thread-header` and `.thread-messages` share the same left/right edges in every
+     state, and horizontal position is unaffected by a sticky offset that only sets `top`. */
   margin: 0;
   padding-top: 0.55rem;
   padding-bottom: 0.4rem;
@@ -445,9 +395,6 @@ defineExpose({ el: rootEl });
   font-size: 0.7rem;
   color: var(--neutral-muted-color, #4b5563);
 }
-/* Every per-conversation action this box offers (Focus/Close/Expand-all/Branch) lives in this one
-   row now, instead of being scattered across the header's old "Open" slot, a separate bulk-toggle
-   toolbar, and a footer "Branch" row. */
 .thread-actions {
   display: flex;
   flex-wrap: wrap;
