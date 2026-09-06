@@ -181,26 +181,23 @@ onBeforeUnmount(() => {
 
     <ul>
       <!-- UI convention: every conversation row is a 2-section layout — title | status (see
-           .specify/memory/constitution.md "UI Conventions"). Previously a 3rd, middle section
-           held a per-row "Make Primary" button; per feedback that action shouldn't sit next to
-           every row's title, so it moved to the "Primary" box (`PrimaryPanel.vue`, in App.vue's
-           toolbar right column) and this middle slot was removed outright.
-           `.conversation-row` is the flex/grid container (not a button, so the
-           title can still be a true nested control); its own @click reproduces the previous
-           click-anywhere-in-the-row selection behavior via ordinary event bubbling from its
-           descendants. The title itself stays a real, natively keyboard-operable <button> (Tab to
-           focus, Enter/Space activates — its click bubbles up and is caught by the same handler,
-           so keyboard selection is unchanged); the status badge plus every other existing badge
-           (stale/pending/queue) are grouped on the right. The Primary conversation no longer gets
-           a text "Primary" badge here either — see `.conversation-row.is-primary` below, which
-           indicates it via a left accent + subtle background tint (never color alone: a
-           `title` on the row plus a `.visually-hidden` label on the title button keep it
-           identifiable for screen-reader users, and the small icon is a non-color-dependent visual
-           cue too). A separate "Read-only" badge used to sit next to the status badge here too,
-           but a closed conversation's `data-status` badge already says "closed" — read-only is
-           implied, not new information — so it was removed (see ConversationView.vue's
-           `.readonly-banner` for the one spot that still earns its keep, since it explains *why*
-           editing is disabled rather than just re-labelling the status). -->
+           .specify/memory/constitution.md "UI Conventions"). The per-row "Make Primary" action
+           lives in the "Primary" box (`PrimaryPanel.vue`, in App.vue's toolbar right column), not
+           next to each row's title. `.conversation-row` is the flex/grid container (not a button,
+           so the title can still be a true nested control); its own @click reproduces click-
+           anywhere-in-the-row selection via ordinary event bubbling from its descendants. The
+           title itself is a real, natively keyboard-operable <button> (Tab to focus, Enter/Space
+           activates — its click bubbles up and is caught by the same handler, so keyboard
+           selection works); the status badge plus every other existing badge (stale/pending/queue)
+           are grouped on the right. The Primary conversation is indicated by
+           `.conversation-row.is-primary` below (a left accent + subtle background tint) rather
+           than a text badge here — never color alone: a `title` on the row plus a
+           `.visually-hidden` label on the title button keep it identifiable for screen-reader
+           users, and the small icon is a non-color-dependent visual cue too. There is no separate
+           "Read-only" badge next to the status badge: a closed conversation's `data-status` badge
+           already says "closed", so read-only is implied, not new information — see
+           ConversationView.vue's `.readonly-banner` for the one spot that still earns its keep,
+           since it explains *why* editing is disabled rather than just re-labelling the status. -->
       <li v-for="conv in orderedConversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.3}rem` }">
         <div
           class="conversation-row"
@@ -319,13 +316,12 @@ onBeforeUnmount(() => {
   border-color: var(--border-color, #999);
   background: var(--row-selected-bg, rgba(0, 0, 0, 0.05));
 }
-/* Fix (Primary indicator): the text "Primary" badge that used to sit in the status cell was
-   removed in favor of styling the row itself — a left accent bar plus a subtle background tint
-   (both via `box-shadow` so they layer independently of `.selected`'s own `border`/`background`,
-   letting the two states combine instead of fighting over the same properties). Never color
-   alone: the row also carries a `title` (see template) and the title button carries a
-   `.visually-hidden` "Primary conversation" label plus a small `★` icon, so screen-reader and
-   colorblind users can still tell which conversation is Primary. */
+/* The Primary conversation is indicated on the row itself — a left accent bar plus a subtle
+   background tint, both via `box-shadow` so they layer independently of `.selected`'s own
+   `border`/`background`, letting the two states combine instead of fighting over the same
+   properties. Never color alone: the row also carries a `title` (see template) and the title
+   button carries a `.visually-hidden` "Primary conversation" label plus a small `★` icon, so
+   screen-reader and colorblind users can still tell which conversation is Primary. */
 .conversation-row.is-primary {
   box-shadow: var(--primary-indicator-shadow);
 }

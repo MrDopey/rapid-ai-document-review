@@ -6,14 +6,12 @@ import type { PrimaryWhenBusy } from '@rapid-ai-document-review/shared/contracts
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import { PRIMARY_EXPLANATION } from '../../composables/constants.js';
 
-// 006-toolbar-reorg (confirmed layout): split out of HudPanel.vue, which used to render the
-// Primary notice/summary (plus this busy-switch dialog) inline above its own filter/conversation
-// list. The confirmed toolbar redesign gives Primary its own visually-boxed section in App.vue's
-// right-hand column, entirely decoupled from the HUD's filter+list box — this component now owns
-// exactly that content (and the busy-switch dialog it can open) and nothing else. `activeId`
-// mirrors HudPanel.vue's own prop of the same name (App.vue's `lastInteractedId`): Make/Clear
-// Primary still targets whichever conversation is currently "active" system-wide, a concept that
-// doesn't belong to the HUD list any more than it belongs here.
+// 006-toolbar-reorg: PrimaryPanel.vue owns Primary's own visually-boxed section in App.vue's
+// right-hand column, entirely decoupled from HudPanel.vue's filter+list box — the Primary
+// notice/summary and the busy-switch dialog live here and nowhere else. `activeId` mirrors
+// HudPanel.vue's own prop of the same name (App.vue's `lastInteractedId`): Make/Clear Primary
+// targets whichever conversation is currently "active" system-wide, a concept that doesn't belong
+// to the HUD list any more than it belongs here.
 const props = defineProps<{ activeId: string | null }>();
 // `update:error` mirrors this panel's own `primaryError` state up to App.vue, which renders the
 // actual banner as a full-width strip beneath both toolbar columns (per the confirmed layout, the
@@ -60,16 +58,16 @@ function conversationName(id: string | null): string {
   return store.conversations.find((c) => c.id === id)?.name ?? id;
 }
 
-// Fix (primary-action placement): "Make Primary" targets whichever conversation is currently
-// *active* (App.vue's `lastInteractedId`, passed down as `activeId`) so choosing a row and then
-// acting on it reads the same way selection drives every other per-conversation action.
+// "Make Primary" targets whichever conversation is currently *active* (App.vue's
+// `lastInteractedId`, passed down as `activeId`) so choosing a row and then acting on it reads the
+// same way selection drives every other per-conversation action.
 const activeConversation = computed(() => store.conversations.find((c) => c.id === props.activeId) ?? null);
 const canMakeActivePrimary = computed(() => {
   const conv = activeConversation.value;
   return conv !== null && !conv.isPrimary && conv.status !== 'closed';
 });
 
-// Fix (no layout jump): "Make Primary" always renders and is `disabled` instead of `v-if`, so this
+// "Make Primary" always renders and is `disabled` instead of `v-if`, so this
 // box doesn't reflow as the user browses different conversations — `canMakeActivePrimary` still
 // drives eligibility, just repurposed to feed `disabled` rather than `v-if`. A disabled button
 // with no explanation is unhelpful, so `makePrimaryTitle` below picks the single most relevant
@@ -89,7 +87,7 @@ const makePrimaryTitle = computed(() => {
   return `Make Primary — ${PRIMARY_EXPLANATION}`;
 });
 
-// Fix (redundant text): Primary is indicated on the row itself (HudPanel.vue's accent border/tint
+// Primary is indicated on the row itself (HudPanel.vue's accent border/tint
 // + ★ icon), so "Clear Primary" carries no visible conversation name — its `title`/`aria-label`
 // name which conversation it targets so that context isn't lost.
 const clearPrimaryTitle = computed(() => {
@@ -222,9 +220,9 @@ async function clearPrimary(): Promise<void> {
 /* `.dismiss-notice-button` shared shape now lives in style.css (shared with ConversationView.vue's
    composer hint dismiss button). */
 .no-primary-badge {
-  /* Fix: #6b7280 was a razor-thin 4.52:1 against the plain panel background and an outright
-     failing 4.06:1 against the darkened `.selected` row tint (same fix as HudPanel.vue's
-     `.stale-badge`). */
+  /* #6b7280 measures a razor-thin 4.52:1 against the plain panel background and an outright
+     failing 4.06:1 against the darkened `.selected` row tint — `--neutral-muted-color` avoids
+     both, matching HudPanel.vue's `.stale-badge` treatment for the same reason. */
   color: var(--neutral-muted-color, #4b5563);
 }
 .clear-primary-button,
