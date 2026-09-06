@@ -243,7 +243,70 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     const mainDto = list.conversations.find((c) => c.id === mainConversationId);
     expect(mainDto?.isPrimary).toBe(false);
 
+    // 5013cf6: ConflictService's "awaiting replacement" pointer (which staged edit a freshly-staged
+    // proposal should link to via `supersedesId`) used to live in an in-memory Map — a restart
+    // between "conflict recorded as superseded" and "replacement staged" silently dropped it,
+    // breaking FR-032a's chain-budget accounting with no error surfaced. It's now derived from
+    // persisted `staged_edit` rows instead, so it must survive exactly that restart window. Reuses
+    // this same test's document/database (rather than a second, independent `it()`) since
+    // `config.ts` reads its env vars — including `RADR_BE_DATABASE_PATH` — exactly once per
+    // process, so a second `bootApp()` elsewhere in this file cannot point at a different file.
+    const conflictBranch = createBranchConversation(
+      storage2,
+      documentId,
+      storage2.getDocument()!.currentRevision,
+      'Conflict Branch',
+    );
+    const supersededEdit: StagedEditRow = {
+      id: newId('edit'),
+      documentId,
+      conversationId: conflictBranch.id,
+      piToolCallId: 'tool_conflict_original',
+      sourceRevision: storage2.getDocument()!.currentRevision,
+      summary: 'Original proposal, later superseded by a conflict',
+      operations: [{ old_string: 'second paragraph', new_string: 'SECOND PARAGRAPH' }],
+      status: 'superseded',
+      autoApplied: false,
+      appliedRevision: null,
+      supersedesId: null,
+      conflictDetail: { reason: 'not_found', operations: [] },
+      replacementAttempt: 0,
+      createdAt: new Date().toISOString(),
+      resolvedAt: new Date().toISOString(),
+    };
+    storage2.createStagedEdit(supersededEdit);
+
+    // "Restart" again: close this (second) instance, boot a THIRD, fresh one against the same
+    // file — no replacement was ever staged for `supersededEdit` in this boot.
     storage2.close();
     await app2.close();
+
+    const boot3 = await bootApp(databasePath);
+    const app3 = boot3.app;
+    const storage3 = boot3.storage;
+
+    const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
+    const sendRes = await call(app3, 'POST', `/api/conversations/${conflictBranch.id}/send`, {
+      message:
+        PROPOSE_EDIT_DIRECTIVE +
+        JSON.stringify({
+          summary: 'Replacement for the conflicting proposal',
+          operations: [{ old_string: 'second paragraph', new_string: 'SECOND PARAGRAPH REPLACED' }],
+        }),
+    });
+    expect(sendRes.status).toBe(202);
+    await waitFor(() => storage3.listStagedEditsByConversation(conflictBranch.id).length === 2);
+
+    const editsAfter = storage3.listStagedEditsByConversation(conflictBranch.id);
+    const replacement = editsAfter.find((e) => e.id !== supersededEdit.id);
+    expect(replacement).toBeTruthy();
+    // The crux: this newly-staged replacement's `supersedesId` links back to the edit that was
+    // superseded in the PREVIOUS boot — proving the "awaiting replacement" pointer was derived from
+    // the persisted row rather than lost with the old in-memory Map.
+    expect(replacement?.supersedesId).toBe(supersededEdit.id);
+    expect(replacement?.replacementAttempt).toBe(1);
+
+    storage3.close();
+    await app3.close();
   });
 });
