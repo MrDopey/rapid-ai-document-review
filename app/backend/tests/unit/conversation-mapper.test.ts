@@ -70,6 +70,29 @@ describe('toConversationDto anchorOrphaned', () => {
     const dto = toConversationDto(fakeStorage(), row, 1, editedContent);
     expect(dto.anchorOrphaned).toBe(true);
   });
+
+  // Bug fix (823de25): an edit applied EARLIER in the document shifts every later raw offset, so
+  // an anchor whose text is still present, byte-for-byte, just at a new offset used to be a
+  // false-positive `anchorOrphaned: true`. `resolveSeedSelection` now re-searches the whole
+  // document for the anchor text and, if found, treats the closest occurrence to the original
+  // offset as the anchor's true current position instead of flagging it orphaned.
+  it('is false, with the reconciled offset, when an earlier edit shifts the anchor text rather than touching it', () => {
+    const original = 'The quick brown fox jumps over the lazy dog.';
+    const from = original.indexOf('brown fox');
+    const to = from + 'brown fox'.length;
+    const row = baseRow({ seedSelection: { from, to, text: 'brown fox' } });
+
+    // An edit inserted well BEFORE the anchor's original offset range shifts "brown fox" later in
+    // the document without touching it at all.
+    const prefixInsert = 'A brand new opening sentence has been inserted before everything else. ';
+    const shiftedContent = prefixInsert + original;
+    const expectedFrom = shiftedContent.indexOf('brown fox');
+    expect(expectedFrom).not.toBe(from); // sanity check: the offset genuinely moved
+
+    const dto = toConversationDto(fakeStorage(), row, 1, shiftedContent);
+    expect(dto.anchorOrphaned).toBe(false);
+    expect(dto.seedSelection).toEqual({ from: expectedFrom, to: expectedFrom + 'brown fox'.length, text: 'brown fox' });
+  });
 });
 
 // specs/005-canvas-conversation-threads — NEW desired behavior, not yet implemented: the data

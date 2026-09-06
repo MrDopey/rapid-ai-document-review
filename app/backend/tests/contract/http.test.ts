@@ -598,6 +598,26 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(body.name.length).toBeGreaterThan(0);
       expect(body.branchDepth).toBe(1);
     });
+
+    it('de-duplicates auto-generated names on collision (a26fbec), but never touches an explicit name', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const selection = { from: 0, to: DOC_WITH_HEADING.indexOf('\n') };
+
+      const first = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
+      const second = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
+      const third = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, { selection });
+
+      const firstName = (first.json as { name: string }).name;
+      expect((second.json as { name: string }).name).toBe(`${firstName} (2)`);
+      expect((third.json as { name: string }).name).toBe(`${firstName} (3)`);
+
+      // An explicit request.name passes through untouched, even colliding with an existing name.
+      const explicit = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id, {
+        selection,
+        name: firstName,
+      });
+      expect((explicit.json as { name: string }).name).toBe(firstName);
+    });
   });
 
   describe('DELETE /api/conversations/:id (discard an untouched branch)', () => {
@@ -844,6 +864,14 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const parsed = CloseConversationResponse.parse(res.json);
       expect(parsed.status).toBe('closed');
       expect(parsed.summaryFoldedIntoParent).toBe(false);
+    });
+
+    it('409 CANNOT_CLOSE_MAIN_CONVERSATION when closing Main (2275aa6/0031872)', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/close`, {});
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('CANNOT_CLOSE_MAIN_CONVERSATION');
     });
 
     it('409 PENDING_EDITS_BLOCK_CLOSE with pendingEditIds while a proposal is pending', async () => {
