@@ -123,15 +123,13 @@ watch(
 );
 
 // ---------------------------------------------------------------------------------------------
-// Fix 3 (extended by 005-canvas-conversation-threads): click-and-drag resizable panes
-// (Preview | Canvas), persisted per-viewer in localStorage. Only active at the desktop
-// breakpoint — below it, the existing responsive @media rules in <style> (unchanged) fully
-// control `.panes`' layout, exactly as before this fix. The old third pane (a HudPanel|
-// ConversationView sidebar) is gone — HudPanel now lives in the toolbar row (see below) and each
+// Click-and-drag resizable panes (Preview | Canvas), persisted per-viewer in localStorage. Only
+// active at the desktop breakpoint — below it, the existing responsive @media rules in <style>
+// fully control `.panes`' layout. HudPanel lives in the toolbar row (see below); each
 // conversation's own detail view is opened per-box by DocumentCanvas's ConversationThreadBox
 // children, not through one global selection here — see `useResizeHandle`/`panePersistence` for
 // the shared drag/keyboard and localStorage logic every split in this file (and
-// ConversationView.vue's transcript|edits split) still shares.
+// ConversationView.vue's transcript|edits split) shares.
 // ---------------------------------------------------------------------------------------------
 const DEFAULT_PREVIEW_FR = 1;
 const DEFAULT_CANVAS_FR = 1;
@@ -167,15 +165,11 @@ const previewSplitDragging = ref(false);
 // since a hidden pane's grid track collapses to 0 width — see `panesStyle` below — the rest of the
 // row, e.g. the conversation-detail overlay) the freed horizontal room.
 //
-// Bug-fix (editor-vs-canvas scope fix): this used to be `canvasVisible`, hiding the *entire*
-// `DocumentCanvas` pane — editor AND the conversation sidebar/thread columns — via `v-show` on
-// `<DocumentCanvas>` itself below. That hid the sidebar along with the editor, which broke the
-// (only) use case for hiding it: keeping the conversation sidebar usable while the editor is out of
-// the way. Renamed to `editorVisible`/`toggleEditorVisible` and re-scoped to a prop
-// (`DocumentCanvas`'s new `editorVisible`) that only gates its internal `EditorComponent` — the
-// `DocumentCanvas` pane itself (and thus `.thread-columns`) now always renders; `App.vue`'s own
-// grid column for it is therefore never collapsed by this toggle (only `previewVisible` still
-// collapses a track here — see `panesStyle`).
+// editorVisible/toggleEditorVisible gate only DocumentCanvas's internal EditorComponent (via the
+// editorVisible prop), not the DocumentCanvas pane itself — so the conversation sidebar/thread
+// columns inside DocumentCanvas always keep rendering and stay usable even when the editor is
+// hidden. App.vue's own grid column for DocumentCanvas is therefore never collapsed by this
+// toggle; only previewVisible still collapses a track here (see panesStyle).
 //
 // At least one of Preview/Editor must always stay visible — `togglePreviewVisible`/
 // `toggleEditorVisible` below silently no-op (rather than throwing or forcing the other back open)
@@ -184,13 +178,11 @@ const previewSplitDragging = ref(false);
 // Ctrl+Alt+2 (`onGlobalKeydown` below) share these same functions, so all three entry points
 // enforce the invariant identically.
 //
-// Judgment call: kept this "never hide both" guard even though hiding both Preview and the editor
-// no longer hides *everything* (the conversation sidebar, inside the always-rendered
-// `DocumentCanvas` pane, would still be visible and usable) — the guard's remaining purpose is
-// preserving "some view of the document's actual content" (rendered preview or raw markdown), which
-// is still a real guarantee worth keeping now that it accurately maps to just those two panes'
-// scope. Persisted the same per-viewer, best-effort way as `syncScrollEnabled` above, via
-// `panePersistence.ts`.
+// Judgment call: this guard's purpose is preserving "some view of the document's actual content"
+// (rendered preview or raw markdown) by never letting both Preview and the editor be hidden at
+// once. It doesn't need to guarantee the conversation sidebar is visible — that lives in the
+// always-rendered DocumentCanvas pane and stays usable independent of this guard. Persisted the
+// same per-viewer, best-effort way as `syncScrollEnabled` above, via `panePersistence.ts`.
 // ---------------------------------------------------------------------------------------------
 const previewVisible = ref(loadPreviewVisible());
 const editorVisible = ref(loadEditorVisible());
@@ -282,21 +274,20 @@ watch(
   { immediate: true },
 );
 
-// Fix 1: History gets its own reserved grid column — never an extra, unaccounted-for grid child
-// — only while `historyOpen` is true, so `.panes`' column count is always in sync with however
-// many actual grid children it has (previously a 4th child was inserted into a hardcoded 3-column
-// template, shoving the conversation sidebar into a second row at the wrong width).
+// History gets its own reserved grid column — never an extra, unaccounted-for grid child — only
+// while `historyOpen` is true, so `.panes`' column count is always in sync with however many
+// actual grid children it has.
 const HISTORY_PANEL_WIDTH_PX = 340;
 // Grid order: Preview | handle | Canvas | History (Preview moved left of the canvas — see
 // tasks.md's scope note; History is untouched beyond this reordering).
 //
 // Independent Preview/Editor visibility: only Preview's own track can still collapse here — the
-// Canvas track (`DocumentCanvas`, editor + conversation sidebar) is never hidden as a whole any
-// more (bug-fix, editor-vs-canvas scope fix: `editorVisible` now only hides `DocumentCanvas`'s
-// *internal* editor pane, via a prop — see that ref's own doc comment above), so its own grid
-// track always gets its full `canvasFr` share. The resize handle collapses to `0px` (and is
-// un-rendered — see the template's `v-if` below) whenever Preview is hidden, since there's nothing
-// left to drag between two panes when the Canvas pane is the entire row.
+// Canvas track (`DocumentCanvas`, editor + conversation sidebar) is never hidden as a whole
+// (`editorVisible` only hides `DocumentCanvas`'s *internal* editor pane, via a prop — see that
+// ref's own doc comment above), so its own grid track always gets its full `canvasFr` share. The
+// resize handle collapses to `0px` (and is un-rendered — see the template's `v-if` below) whenever
+// Preview is hidden, since there's nothing left to drag between two panes when the Canvas pane is
+// the entire row.
 const panesStyle = computed(() => {
   if (!isDesktop.value) return undefined;
   const previewTrack = previewVisible.value ? `${previewFr.value}fr` : '0fr';
@@ -315,50 +306,48 @@ const panesStyle = computed(() => {
   };
 });
 
-// Bug 2 root-cause fix: CSS grid auto-placement assigns any item without an explicit
-// `grid-column`/`grid-row` to a track by DOM order, counting only items that actually generate a
-// box — an item hidden via `v-show` (`display: none`) generates none at all and is skipped
-// entirely from that count (the same rule that applies to a `v-if`-removed element). So whenever
-// Preview was hidden, `DocumentCanvas` — the next real grid item in source order — was silently
-// auto-placed into column 1 (Preview's own, now-empty `0fr` track) instead of column 3, collapsing
-// Canvas to zero width while the real, `1fr`-wide column 3 sat empty: exactly "hiding preview hides
-// everything". Pinning every pane's `grid-column` explicitly (matching the fixed track order
-// `panesStyle` above assumes: Preview=1, handle=2, Canvas=3, [History]=4 — the same order
-// `conversationOverlayStyle` below already relies on for Canvas) makes each one's column
+// CSS grid auto-placement assigns any item without an explicit `grid-column`/`grid-row` to a
+// track by DOM order, counting only items that actually generate a box — an item hidden via
+// `v-show` (`display: none`) generates none at all and is skipped entirely from that count (the
+// same rule applies to a `v-if`-removed element). So whenever Preview is hidden, `DocumentCanvas`
+// — the next real grid item in source order — would be auto-placed into column 1 (Preview's own,
+// now-empty `0fr` track) instead of column 3, collapsing Canvas to zero width while the real,
+// `1fr`-wide column 3 sits empty. Pinning every pane's `grid-column` explicitly (matching the
+// fixed track order `panesStyle` above assumes: Preview=1, handle=2, Canvas=3, [History]=4 — the
+// same order `conversationOverlayStyle` below relies on for Canvas) makes each one's column
 // assignment independent of which of its siblings currently exist as boxes.
 const previewGridColumn = computed(() => (isDesktop.value ? '1 / 2' : undefined));
 const resizeHandleGridColumn = computed(() => (isDesktop.value ? '2 / 3' : undefined));
 const canvasGridColumn = computed(() => (isDesktop.value ? '3 / 4' : undefined));
 const historyGridColumn = computed(() => (isDesktop.value ? '4 / 5' : undefined));
 
-// Fix (coordinator follow-up, 005-canvas-conversation-threads): `.conversation-detail-overlay`
-// below is `position: absolute` with no explicit `grid-column` of its own, so per the CSS Grid
-// spec its containing block for that absolute positioning falls back to `.panes`' entire padding
-// box — Preview + the resize handle + Canvas (+ History's reserved column, when open) combined —
-// rather than just the Canvas column it visually sits over. Its `justify-content: center` then
-// centers the focused panel(s) against that *combined* width, so dragging the Preview|Canvas
-// splitter (which only changes how that combined width is split, via `previewFr`/`canvasFr` in
-// `panesStyle` above) shifts Canvas's actual position/width without moving the overlay's centering
-// reference, and the panel visibly drifts off Canvas/the editor underneath it.
+// `.conversation-detail-overlay` below is `position: absolute` with no explicit `grid-column` of
+// its own, so per the CSS Grid spec its containing block for that absolute positioning falls back
+// to `.panes`' entire padding box — Preview + the resize handle + Canvas (+ History's reserved
+// column, when open) combined — rather than just the Canvas column it visually sits over. Its
+// `justify-content: center` then centers the focused panel(s) against that *combined* width, so
+// dragging the Preview|Canvas splitter (which only changes how that combined width is split, via
+// `previewFr`/`canvasFr` in `panesStyle` above) shifts Canvas's actual position/width without
+// moving the overlay's centering reference, and the panel would visibly drift off Canvas/the
+// editor underneath it.
 //
 // Pinning `grid-column: 3 / 4` here (Canvas's own track — see the "Grid order" comment on
 // `panesStyle` above: Preview, handle, Canvas, [History]) makes that column itself the overlay's
 // containing block, so its `inset: 0` (set in CSS) resolves against exactly Canvas's current
 // edges — tracking the splitter live with no JS recalculation needed — and, as a side effect,
 // already excludes History's own column 4 by construction whenever History is open, so no
-// separate `historyOpen`-dependent width math (this computed's previous `right` value) is needed
-// to keep History interactive. Both line numbers must be spelled out (`3 / 4`, not the bare `3`
-// shorthand): per the CSS Grid abspos-containing-block rules, an edge only becomes the
-// corresponding grid line's edge when its own grid-column-start/end is explicitly non-auto — `3`
-// alone only sets grid-column-start (leaving -end auto), so the right edge would still fall back
-// to `.panes`' own padding edge (i.e. past History's column) instead of Canvas's own right edge.
-// Only applies on desktop (`isDesktop`) — `panesStyle` itself only establishes that column layout
-// there; below the breakpoint `.panes` reflows to rows (see the `@media` rules below) where
-// Canvas is no longer a distinct column, so the overlay falls back to spanning `.panes`' full box
-// exactly as it already did pre-fix, a layout this fix intentionally leaves alone.
+// separate `historyOpen`-dependent width math is needed to keep History interactive. Both line
+// numbers must be spelled out (`3 / 4`, not the bare `3` shorthand): per the CSS Grid abspos-
+// containing-block rules, an edge only becomes the corresponding grid line's edge when its own
+// grid-column-start/end is explicitly non-auto — `3` alone only sets grid-column-start (leaving
+// -end auto), so the right edge would fall back to `.panes`' own padding edge (i.e. past History's
+// column) instead of Canvas's own right edge. Only applies on desktop (`isDesktop`) —
+// `panesStyle` itself only establishes that column layout there; below the breakpoint `.panes`
+// reflows to rows (see the `@media` rules below) where Canvas is no longer a distinct column, so
+// the overlay spans `.panes`' full box.
 const conversationOverlayStyle = computed(() => (isDesktop.value ? { gridColumn: '3 / 4' } : undefined));
 
-/** Pointer-driven + keyboard-operable resize (Fix 3) for the horizontal Preview|Canvas split:
+/** Pointer-driven + keyboard-operable resize for the horizontal Preview|Canvas split:
  *  converts a horizontal drag/step delta into a preview/canvas `fr` split, clamped to a sane
  *  minimum on each side so a pane can never be dragged down to nothing. */
 const editorPreviewResize = useResizeHandle({
@@ -513,20 +502,19 @@ function onEditorChange(changes: { from: number; to: number; insert: string }[])
 async function onBranchFromSelection(range: { from: number; to: number }, includeSeedMessage: boolean): Promise<void> {
   const main = conversationsStore.conversations.find((c) => c.kind === 'main');
   if (!main) return;
-  // Branch-cap parity fix: `EditorComponent.vue`'s own "Branch (New)"/"Branch (Main)" buttons (and
-  // their keyboard shortcuts) are already disabled/blocked whenever `atFocusCap` — this is defense
-  // in depth against a same-tick race (e.g. another panel getting focused between render and
-  // click), not the common case.
+  // `EditorComponent.vue`'s own "Branch (New)"/"Branch (Main)" buttons (and their keyboard
+  // shortcuts) are already disabled/blocked whenever `atFocusCap` — this is defense in depth
+  // against a same-tick race (e.g. another panel getting focused between render and click), not
+  // the common case.
   if (atFocusCap.value) return;
   const conversation = await conversationsStore.branch({
     parentConversationId: main.id,
     selection: range,
     includeSeedMessage,
   });
-  // Matches this app's pre-canvas behavior: branching from a selection used to auto-navigate
-  // straight into the new conversation's detail view. Guaranteed a free slot by the guard above, so
-  // this always succeeds — `focusConversation`'s own cap check is only ever a defense-in-depth
-  // no-op here, same as every other caller below.
+  // Branching from a selection auto-navigates straight into the new conversation's detail view.
+  // Guaranteed a free slot by the guard above, so this always succeeds — `focusConversation`'s own
+  // cap check is only ever a defense-in-depth no-op here, same as every other caller below.
   focusConversation(conversation.id);
 }
 
@@ -537,8 +525,8 @@ async function onBranchFromSelection(range: { from: number; to: number }, includ
  *  `ConversationDetailPanel.vue`). (The toolbar path reports success via `onBranchFromSelection`'s
  *  own return value above instead, since it calls `conversationsStore.branch` directly.)
  *
- * Branch-cap parity fix: every one of these three components' own Branch button/action is now
- * blocked outright whenever `atFocusCap` (see each one's own `branchDisabled`/`atFocusCap`-gated
+ * Every one of these three components' own Branch button/action is blocked outright whenever
+ * `atFocusCap` (see each one's own `branchDisabled`/`atFocusCap`-gated
  * click handler) — so by the time this fires, a free slot is always guaranteed, and
  * `focusConversation`'s own cap check below is only ever defense in depth against a same-tick race,
  * never the reason a branch fails to get auto-focused. Never evicts an existing panel to make room;
@@ -633,9 +621,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
         </div>
         <div class="toolbar-right">
           <!-- Row 1: Primary controls (col 1) and the Keyboard-shortcuts/Help icon triggers
-               (col 2), side by side. `.primary-box` and `.info-group` used to live in separate
-               boxes (the latter pinned to the bottom of a since-removed `.global-actions-box`);
-               this row simply places them next to each other instead. -->
+               (col 2), side by side. -->
           <div class="toolbar-right-row-1">
             <PrimaryPanel
               ref="primaryPanelRef"
@@ -685,12 +671,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
               </button>
             </div>
           </div>
-          <!-- Rows 2 & 3: 006-toolbar-reorg (confirmed layout), extended for the Preview/Canvas
-               visibility toggles — explicit, fixed 2-row grouping: row 2 is the two checkbox
-               toggles, row 3 is the three buttons. Previously nested (alongside `.info-group`)
-               inside a `.global-actions-box`; that wrapper is gone, so `.actions-group` is now
-               `.toolbar-right`'s own second child and absorbs the column's stretched height
-               directly (see its `flex: 1 1 auto` below). -->
+          <!-- Rows 2 & 3 (006-toolbar-reorg): explicit, fixed 2-row grouping — row 2 is the two
+               checkbox toggles, row 3 is the three buttons. `.actions-group` is `.toolbar-right`'s
+               own second child and absorbs the column's stretched height directly (see its
+               `flex: 1 1 auto` below). -->
           <div class="actions-group">
             <div class="actions-row actions-row-1">
               <label class="reasoning-toggle">
@@ -802,7 +786,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
         @branch-created="onBranchCreated"
       />
 
-      <!-- Fix 1: History is a genuine, reserved grid column (see `panesStyle` above) that only
+      <!-- History is a genuine, reserved grid column (see `panesStyle` above) that only
            exists in the template — and only ever asked of the grid — while `historyOpen` is true,
            so `.panes`' column count always matches its actual number of children. It renders in
            normal flow alongside every other pane (not as an overlay), so nothing else on the page
@@ -1074,7 +1058,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
     transition: none !important;
   }
 }
-/* Fix: a grid item's default min-width is `auto`, which respects its content's intrinsic minimum
+/* A grid item's default min-width is `auto`, which respects its content's intrinsic minimum
    width — so once the Preview pane renders something wide (an unwrapped table or code block), its
    column refuses to shrink below that no matter what `fr` share the Preview|Canvas divider assigns
    it, making the divider look broken. `min-width: 0` lets each pane's own `overflow: auto` (already
@@ -1083,7 +1067,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
   min-width: 0;
 }
 
-/* Fix 3: draggable, keyboard-operable resize handle between the major layout regions
+/* Draggable, keyboard-operable resize handle between the major layout regions
    (Preview|Canvas). `--horizontal` is a vertical dividing line dragged left/right; `--vertical`
    (still used by ConversationView.vue's own transcript|edits split) is a horizontal dividing line
    dragged up/down. */
@@ -1115,7 +1099,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
   outline-offset: -2px;
 }
 
-/* Fix 1: History renders in normal grid flow, in its own reserved column (see `panesStyle`) —
+/* History renders in normal grid flow, in its own reserved column (see `panesStyle`) —
    never as an overlay, so it never covers or blocks pointer events for anything else on the page. */
 .panes :deep(.history-drawer) {
   height: 100%;
@@ -1137,7 +1121,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
      — see that computed's doc comment above — making Canvas's grid cell this element's containing
      block, so a plain `inset: 0` here resolves against exactly Canvas's current edges instead of
      `.panes`' entire box. Below the desktop breakpoint no inline `grid-column` is set, so this
-     falls back to spanning `.panes`' full box, matching the pre-fix mobile layout. */
+     falls back to spanning `.panes`' full box. */
   inset: 0;
   z-index: var(--z-overlay-detail, 55);
   background: rgba(0, 0, 0, 0.4);
