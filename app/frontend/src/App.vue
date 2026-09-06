@@ -106,7 +106,7 @@ const {
   atFocusCap,
   orderedFocusedConversations,
   focusConversation,
-  unfocusConversation,
+  closeFocusedConversation,
   toggleFocus,
   replaceFocus,
   closeAllFocused,
@@ -361,12 +361,30 @@ const editorPreviewResize = useResizeHandle({
   beginGesture: (containerRect) => {
     const startPreviewFr = previewFr.value;
     const totalFr = startPreviewFr + canvasFr.value;
-    const remainingPx = containerRect.width - HANDLE_SPACE_PX;
+    // `containerRect` is `.panes`' own measured rect — its *entire* row, including History's own
+    // reserved column (`HISTORY_PANEL_WIDTH_PX`) whenever `historyOpen` — but the `fr` tracks being
+    // split here are only Preview and Canvas's (see `panesStyle`'s grid-template-columns above);
+    // History's column is a separate, fixed-width track the browser subtracts before dividing the
+    // remaining space among the `fr` tracks. Not subtracting it here (a prior version of this
+    // calculation didn't) overstated how much pixel space the Preview/Canvas `fr` split actually
+    // has to work with by exactly History's width, so `minPx` below (meant to guarantee Canvas
+    // never drops below 30% of the *real* Preview+Canvas space) was computed and applied against
+    // too-large a `remainingPx` — letting a drag starve Canvas well under its intended floor
+    // whenever History was open, down to the point where the focused-conversation overlay (pinned
+    // to Canvas's own column) no longer had room for even one panel and visibly overlapped Preview
+    // (ConversationDetailPanel.vue's own `flex-shrink` fix guards the panel itself against this,
+    // but Canvas should still get its fair, spec'd minimum share of space).
+    const historyPx = historyOpen.value ? HISTORY_PANEL_WIDTH_PX : 0;
+    const remainingPx = containerRect.width - HANDLE_SPACE_PX - historyPx;
     const startPreviewPx = remainingPx * (startPreviewFr / totalFr);
-    // 30% minimum is a fraction of `.panes`' *total* width (`containerRect.width`, handle included)
-    // per the spec, not of `remainingPx` (the handle-excluded space the fr split is computed over)
-    // — the two are close enough in practice (the handle is 6px) that this distinction rarely
-    // matters, but `containerRect.width` is the literal "total available `.panes` width".
+    // 30% minimum is a fraction of `.panes`' *total* width (`containerRect.width`, handle and
+    // History's own reserved column both included) per the spec, not of `remainingPx` (the
+    // Preview+Canvas-only space the `fr` split is computed over) — matches this clamp's own
+    // pre-existing, tested behavior (App.spec.ts's "30% minimum-width clamp" suite) when History is
+    // closed; keeping the same `containerRect.width` base when it's open too just means the 30%
+    // floor is (deliberately) a fraction of the *whole* row including History's fixed width, not of
+    // the smaller Preview/Canvas-only space — still strictly more conservative (never smaller) than
+    // 30% of `remainingPx` would be, so Canvas is never left with less room than intended.
     const minPx = containerRect.width * MIN_PANE_FRACTION;
     return (deltaPx) => {
       const nextPreviewPx = clamp(startPreviewPx + deltaPx, minPx, Math.max(minPx, remainingPx - minPx));
@@ -422,10 +440,24 @@ const OVERLAY_GUARDED_BINDING_IDS = new Set<string>([
  *  `orderedFocusedConversations` — the same list/order the multi-focus overlay below renders —
  *  wrapping at both ends. Mirrors HudPanel.vue's own `cycleByOffset` (Ctrl+Alt+J/K) but cycles only
  *  the currently-focused subset, never adding/removing a focused panel the way `toggleFocus`/
- *  `replaceFocus` do. A no-op with 0 or 1 focused conversations — there's nothing to cycle to. */
+ *  `replaceFocus` do — except in the "nothing focused yet" case below, where there is no existing
+ *  focused panel to cycle among in the first place.
+ *
+ *  With exactly one focused conversation this is still correctly a no-op (nothing else to cycle
+ *  to). With *zero* focused conversations, though, a no-op made the hotkey feel dead: pressing
+ *  Ctrl+Alt+L/N/H with nothing open did nothing at all, even though the user's evident intent —
+ *  "move to a conversation" — has an obvious, unambiguous action to take when there's no existing
+ *  focused panel to move *from*. So this now falls back to focusing `orderedVisibleConversations`'
+ *  first entry (the same HUD-ordered list Ctrl+Alt+1 targets for its own index 0), giving the
+ *  hotkey a sensible conversation to land on instead of silently doing nothing. */
 function cycleFocusedConversation(offset: number): void {
   const list = orderedFocusedConversations.value;
-  if (list.length <= 1) return;
+  if (list.length === 0) {
+    const fallback = orderedVisibleConversations.value[0];
+    if (fallback) focusConversation(fallback.id);
+    return;
+  }
+  if (list.length === 1) return;
   const currentIndex = list.findIndex((c) => c.id === lastInteractedId.value);
   const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + list.length) % list.length;
   lastInteractedId.value = list[nextIndex]!.id;
@@ -859,7 +891,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
           :active="conv.id === lastInteractedId"
           :at-focus-cap="atFocusCap"
           :max-focused="focusCap"
-          @close="unfocusConversation(conv.id)"
+          @close="closeFocusedConversation(conv.id)"
           @interact="lastInteractedId = conv.id"
           @select="replaceFocus(conv.id, $event)"
           @branch-created="onBranchCreated"

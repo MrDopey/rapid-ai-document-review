@@ -97,7 +97,22 @@ const name = computed(() => store.conversations.find((c) => c.id === props.conve
    (applied via the template class above); only this dialog's own layout/sizing stays here. */
 .conversation-detail-dialog {
   position: relative;
-  flex: 0 0 auto;
+  /* `flex-shrink: 0` (this panel's old behavior) refused to ever render narrower than 480px, even
+     when `.conversation-detail-overlay`'s own box (pinned to Canvas's live grid column — see
+     `conversationOverlayStyle`'s doc comment in App.vue) is narrower than that — e.g. Canvas's
+     column commonly measures well under 480px at ordinary laptop widths (~1280-1440px) once
+     History is open and reserves its own fixed-width column. A flex child that refuses to shrink
+     doesn't get clipped by the row's own `overflow-x: auto` in that case — a centered flex/grid
+     item wider than its scroll container paints its *start-edge* overflow unclipped by default
+     (only the end-edge overflow is what `overflow-x: auto` actually makes reachable via
+     scrolling) — so the excess width bled straight out the *left* edge, visibly overlapping
+     whatever renders to Canvas's left (Preview, or Preview+Editor). Allowing this to shrink (down
+     to 0, overriding the flex-item default `min-width: auto` floor, which would otherwise still
+     block shrinking below the message list's own intrinsic content width) instead keeps the panel
+     fully inside the overlay's actual box — narrower than the usual 480px only when the container
+     genuinely doesn't have that much room, never overlapping a neighboring pane. */
+  flex: 0 1 min(480px, 92vw);
+  min-width: 0;
   width: min(480px, 92vw);
   padding: 1.25rem 1rem 1rem;
   max-height: 100%;

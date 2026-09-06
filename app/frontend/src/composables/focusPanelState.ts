@@ -55,6 +55,33 @@ export function useFocusPanelState(focusCap: Ref<number> | ComputedRef<number>) 
     void conversationsStore.discardIfEmpty(id);
   }
 
+  /** `ConversationDetailPanel.vue`'s own `close` emit (Escape, or its "×" button) routes here
+   *  instead of straight to `unfocusConversation` — deliberately, not merely a rename: an explicit
+   *  *toggle-off* (Ctrl+Alt+<N>, or clicking "Focus" again on an already-focused row/box — both call
+   *  `unfocusConversation` via `toggleFocus` above) is the user choosing to un-focus one specific
+   *  conversation and nothing else, and must stay a plain, silent removal — auto-opening a
+   *  different panel right after would be a surprising, uninvited side effect nobody asked for.
+   *  Dismissing the panel itself (Escape/"×") reads differently: with no *other* panel left open,
+   *  it leaves the user looking at an abruptly empty canvas with nothing focused at all — the
+   *  "closing a tab" convention here is to land on a neighboring tab, not on a blank window. So only
+   *  this entry point auto-advances to the next conversation (`orderConversationsByAnchor`'s same
+   *  HUD/canvas order used everywhere else), and only when the panel just closed was the *only* one
+   *  open — closing one of several simultaneously-focused panels leaves the rest exactly as they
+   *  were, same as `unfocusConversation` alone always has. */
+  function closeFocusedConversation(id: string): void {
+    const wasOnlyFocused = isFocused(id) && focusedConversationIds.value.size === 1;
+    unfocusConversation(id);
+    if (!wasOnlyFocused) return;
+    const byId = new Map(conversationsStore.conversations.map((c) => [c.id, c]));
+    const ordered = orderConversationsByAnchor(conversationsStore.conversations, byId);
+    const closedIndex = ordered.findIndex((c) => c.id === id);
+    const nextConversation =
+      closedIndex === -1 ? ordered[0] : (ordered[(closedIndex + 1) % ordered.length] ?? ordered[0]);
+    // Guards the "this was the only conversation that exists at all" case, where the only
+    // candidate is the one that just closed — nothing else to focus.
+    if (nextConversation && nextConversation.id !== id) focusConversation(nextConversation.id);
+  }
+
   /** The one toggle every Focus click (HudPanel row, ConversationThreadBox's Focus/Close buttons)
    *  calls: remove if present, else add if there's room. */
   function toggleFocus(id: string): void {
@@ -112,6 +139,7 @@ export function useFocusPanelState(focusCap: Ref<number> | ComputedRef<number>) 
     orderedFocusedConversations,
     focusConversation,
     unfocusConversation,
+    closeFocusedConversation,
     toggleFocus,
     replaceFocus,
     closeAllFocused,

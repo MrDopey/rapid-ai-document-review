@@ -1272,12 +1272,17 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     expect(activeConversationId(wrapper)).toBe('c3'); // wraps from the first back to the last
   });
 
-  it('is a no-op with zero or one focused conversations', async () => {
+  // Bug fix: with *zero* focused conversations this hotkey used to be a dead no-op — pressing
+  // Ctrl+Alt+L/N/H with nothing open did nothing, even though there's an obvious, unambiguous
+  // action to take ("focus something"). It now falls back to focusing the first conversation in
+  // the same HUD-ordered list Ctrl+Alt+1 targets. With exactly one focused conversation it's still
+  // correctly a no-op — there's nothing else to cycle to.
+  it('focuses the first conversation when none are focused, and is a no-op with exactly one focused', async () => {
     const conversations = [conversationFixture({ id: 'c1' }), conversationFixture({ id: 'c2' })];
     const wrapperNone = await mountWithFocused(conversations, []);
     pressCycle('KeyL');
     await flushPromises();
-    expect(activeConversationId(wrapperNone)).toBeUndefined();
+    expect(activeConversationId(wrapperNone)).toBe('c1');
 
     const wrapperOne = await mountWithFocused(conversations, ['c1']);
     pressCycle('KeyL');
