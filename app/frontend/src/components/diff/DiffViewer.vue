@@ -6,8 +6,9 @@ import { httpClient } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import { useDocumentStore } from '../../stores/document.js';
 import DiffText from './DiffText.vue';
-import { splitIntoLines, groupByContext, groupParts, type DiffGroup } from './collapseUnchanged.js';
+import { groupParts } from './collapseUnchanged.js';
 import { diffContextLinesFromEnv } from '../../composables/diffContextConfig.js';
+import { useCollapsedDiffGroups } from '../../composables/collapsedDiffView.js';
 
 const props = defineProps<{ editId: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -20,24 +21,6 @@ const error = ref<string | null>(null);
 const view = ref<'full' | 'hunks' | 'side-by-side'>('hunks');
 const rootEl = ref<HTMLElement | null>(null);
 const originalSnapshot = ref('');
-// FR-focused-diff: Full document / Side by side default to a collapsed, context-window view (like
-// a classic unified diff) so a reviewer isn't stuck scrolling past long unchanged stretches;
-// "Show full document" reveals everything. Manually-expanded collapsed groups are tracked by
-// index and reset on every fresh `load()` (a new editId's groups don't line up with the old ones).
-const focusedView = ref(true);
-const expandedGroupIndexes = ref<Set<number>>(new Set());
-
-function expandGroup(index: number): void {
-  expandedGroupIndexes.value = new Set(expandedGroupIndexes.value).add(index);
-}
-function isGroupVisible(group: DiffGroup, index: number): boolean {
-  return group.type === 'visible' || expandedGroupIndexes.value.has(index);
-}
-// Toggling focus off and back on should return to the default collapsed state, not remember
-// which groups a prior look at the full document happened to expand.
-watch(focusedView, () => {
-  expandedGroupIndexes.value = new Set();
-});
 
 // FR-043d: this component only ever exists in the DOM while its preview dialog is open (the
 // parent, EditsList.vue, mounts/unmounts it via `v-if`) — so "active" is simply "for as long as
@@ -45,12 +28,24 @@ watch(focusedView, () => {
 // focus to the "Preview" button that triggered it.
 useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 
+const fullDocDiff = computed(() =>
+  diffWords(originalSnapshot.value, preview.value?.fullPreview ?? ''),
+);
+
+const {
+  focusedView,
+  isGroupVisible,
+  expandGroup,
+  resetExpanded,
+  groups: fullDocGroups,
+} = useCollapsedDiffGroups(fullDocDiff, diffContextLinesFromEnv);
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
     originalSnapshot.value = documentStore.content;
-    expandedGroupIndexes.value = new Set();
+    resetExpanded();
     preview.value = await httpClient.previewEdit(props.editId);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load preview.';
@@ -66,17 +61,11 @@ const wordDiffs = computed(() =>
   (preview.value?.hunks ?? []).map((hunk) => diffWords(hunk.removed, hunk.added)),
 );
 
-const fullDocDiff = computed(() =>
-  diffWords(originalSnapshot.value, preview.value?.fullPreview ?? ''),
-);
 const fullDocHasNoDiff = computed(
   () =>
     fullDocDiff.value.length === 1 &&
     !fullDocDiff.value[0].added &&
     !fullDocDiff.value[0].removed,
-);
-const fullDocGroups = computed(() =>
-  groupByContext(splitIntoLines(fullDocDiff.value), diffContextLinesFromEnv),
 );
 </script>
 

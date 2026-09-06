@@ -4,8 +4,9 @@ import { diffLines, type Change } from 'diff';
 import { useDocumentStore } from '../../stores/document.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import DiffText from './DiffText.vue';
-import { splitIntoLines, groupByContext, groupParts, type DiffGroup } from './collapseUnchanged.js';
+import { groupParts } from './collapseUnchanged.js';
 import { diffContextLinesFromEnv } from '../../composables/diffContextConfig.js';
+import { useCollapsedDiffGroups } from '../../composables/collapsedDiffView.js';
 
 const props = defineProps<{ revision: number; previousRevision: number }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -18,22 +19,21 @@ const previousText = ref<string | null>(null);
 const currentText = ref<string | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 const view = ref<'unified' | 'side-by-side'>('unified');
-// Same collapsed-by-default context-window view as DiffViewer.vue (see collapseUnchanged.ts) —
-// reset on every fresh `load()` since a new revision pair's groups don't line up with the old ones.
-const focusedView = ref(true);
-const expandedGroupIndexes = ref<Set<number>>(new Set());
 
-function expandGroup(index: number): void {
-  expandedGroupIndexes.value = new Set(expandedGroupIndexes.value).add(index);
-}
-function isGroupVisible(group: DiffGroup, index: number): boolean {
-  return group.type === 'visible' || expandedGroupIndexes.value.has(index);
-}
-// Toggling focus off and back on should return to the default collapsed state, not remember
-// which groups a prior look at the full document happened to expand.
-watch(focusedView, () => {
-  expandedGroupIndexes.value = new Set();
+// Same collapsed-by-default context-window view as DiffViewer.vue (see collapsedDiffView.ts) —
+// reset on every fresh `load()` since a new revision pair's groups don't line up with the old ones.
+const diffParts = computed<Change[] | null>(() => {
+  if (previousText.value === null || currentText.value === null) return null;
+  return diffLines(previousText.value, currentText.value);
 });
+
+const {
+  focusedView,
+  isGroupVisible,
+  expandGroup,
+  resetExpanded,
+  groups: diffGroups,
+} = useCollapsedDiffGroups(diffParts, diffContextLinesFromEnv);
 
 useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 
@@ -42,7 +42,7 @@ async function load(): Promise<void> {
   error.value = null;
   previousText.value = null;
   currentText.value = null;
-  expandedGroupIndexes.value = new Set();
+  resetExpanded();
   try {
     const [previous, current] = await Promise.all([
       store.exportRevision(props.previousRevision),
@@ -60,16 +60,8 @@ async function load(): Promise<void> {
 onMounted(load);
 watch([() => props.revision, () => props.previousRevision], load);
 
-const diffParts = computed<Change[] | null>(() => {
-  if (previousText.value === null || currentText.value === null) return null;
-  return diffLines(previousText.value, currentText.value);
-});
-
 const identical = computed(
   () => diffParts.value !== null && !diffParts.value.some((part) => part.added || part.removed),
-);
-const diffGroups = computed(() =>
-  groupByContext(splitIntoLines(diffParts.value ?? []), diffContextLinesFromEnv),
 );
 </script>
 
