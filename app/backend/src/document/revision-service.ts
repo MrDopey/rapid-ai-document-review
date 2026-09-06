@@ -41,10 +41,10 @@ export interface RestoreResult {
  * revision creation, restore, and export.
  */
 export class RevisionService {
-  // FIX 2: keyed by documentId (Map), not a bare scalar — one process-wide `NodeJS.Timeout` would
-  // let debounce timers from different documents clobber each other if multi-document support is
-  // ever added. No behavior change for today's single-document case. Follows the same pattern as
-  // `ConcurrencyLimiter`'s `running`/`queues` maps (concurrency-limiter.ts).
+  // Keyed by documentId (Map), not a bare scalar — one process-wide `NodeJS.Timeout` would let
+  // debounce timers from different documents clobber each other if multi-document support is ever
+  // added. Follows the same pattern as `ConcurrencyLimiter`'s `running`/`queues` maps
+  // (concurrency-limiter.ts).
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   /** Late-bound (server.ts, right after `DocumentService` is constructed): `DocumentService`
    *  already depends on `RevisionService` to create revisions, so `RevisionService` depending on
@@ -111,11 +111,11 @@ export class RevisionService {
     const heads = JSON.stringify(store.getHeads());
     const createdAt = new Date().toISOString();
 
-    // FIX 3: `createRevision` + `updateDocumentRevision` (+ an occasional snapshot write) is
-    // wrapped as one atomic sequence — without this, a crash between the two left
-    // `document.current_revision` desynced from the actual latest `revision` row. Composes
-    // correctly with a caller (e.g. EditService.applyClean) that wraps its own broader write
-    // sequence in `storage.transaction()` too: nested calls just join the outer transaction.
+    // `createRevision` + `updateDocumentRevision` (+ an occasional snapshot write) run as one
+    // atomic sequence, so a crash between the two can't desync `document.current_revision` from
+    // the actual latest `revision` row. Composes correctly with a caller (e.g.
+    // EditService.applyClean) that wraps its own broader write sequence in `storage.transaction()`
+    // too: nested calls just join the outer transaction.
     return this.storage.transaction(() => {
       const row = this.storage.createRevision({
         documentId,
@@ -158,11 +158,11 @@ export class RevisionService {
     });
   }
 
-  /** FIX 1 (CRITICAL): runs under this document's `PrimaryMutex` lock, same as every other
-   *  document-mutating path (`DocumentService.applyChanges`, `EditService.apply`, the
-   *  `propose_document_edit` tool — see primary-mutex.ts's own doc comment). Previously restore
-   *  read `store.view(heads)` and called `store.updateText(...)` completely unlocked, so a restore
-   *  landing while another mutation was mid-flight for the same document could silently corrupt it. */
+  /** Runs under this document's `PrimaryMutex` lock, same as every other document-mutating path
+   *  (`DocumentService.applyChanges`, `EditService.apply`, the `propose_document_edit` tool — see
+   *  primary-mutex.ts's own doc comment): an unlocked restore's read-then-write (`store.view(heads)`
+   *  then `store.updateText(...)`) racing another mutation for the same document could corrupt
+   *  content. */
   restore(documentId: string, revisionNumber: number): Promise<RestoreResult> {
     return this.primaryMutex.withLock(documentId, () => {
       const target = this.storage.getRevision(documentId, revisionNumber);

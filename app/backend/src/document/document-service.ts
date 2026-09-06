@@ -32,17 +32,15 @@ export class DocumentNotFoundError extends Error {}
  * Primary conversation's agent edit landed while this manual edit was in flight, or another
  * browser tab wrote first). Automerge's CRDT convergence guarantees do not make a numeric offset
  * computed against old text keep naming the same logical span once the document's shape has
- * changed — silently splicing it in anyway (the previous behavior here) risks corrupting content.
- * This is a hard reject, not a merge attempt; the caller is expected to refetch the current
- * document and let the user redo their edit.
+ * changed, so this is a hard reject, not a merge attempt; the caller is expected to refetch the
+ * current document and let the user redo their edit.
  *
  * No route currently has a dedicated `instanceof` catch clause for this error (unlike
  * `DocumentAlreadyExistsError`/`DocumentNotFoundError` in `api/http/document.ts`), so it propagates
  * to Fastify's default error handler. That handler reads a thrown error's own `status`/`statusCode`
  * property (see `fastify/lib/error-handler.js`'s `setErrorHeaders`) to pick the response status even
  * with no custom handler registered, so the `statusCode` below is enough on its own to surface this
- * as an HTTP 409 — routing it through the shared `sendError`/`ErrorCode` envelope used elsewhere is
- * left for a follow-up (see this file's `applyChanges` doc comment and the fix report).
+ * as an HTTP 409.
  */
 export class DocumentOutOfSyncError extends Error {
   readonly statusCode = 409;
@@ -288,12 +286,12 @@ export class DocumentService {
   }
 
   /**
-   * FIX 4: the actual content mutation (splice + its `document_content_changed` publish) runs
-   * under this document's `PrimaryMutex` lock, same as every other document-mutating path
+   * The actual content mutation (splice + its `document_content_changed` publish) runs under this
+   * document's `PrimaryMutex` lock, same as every other document-mutating path
    * (`EditService.apply()`, `acceptRemaining`, the `propose_document_edit` tool) — a manual edit
    * arriving while an accept or a Primary-designation switch is in flight for the same document
-   * now serializes against it instead of racing it. The splice itself is also wrapped in
-   * `storage.transaction()` (FIX 3) so the Automerge `document_change` write and the
+   * serializes against it instead of racing it. The splice itself is also wrapped in
+   * `storage.transaction()` so the Automerge `document_change` write and the
    * `document_content_changed` event-log write commit atomically.
    */
   async applyChanges(
@@ -309,28 +307,22 @@ export class DocumentService {
     }
 
     if (changes && changes.length > 0) {
-      // Hard reject on a base-revision mismatch — see `DocumentOutOfSyncError`. This replaces a
-      // previous coarse diagnostic that only log-warned past a 50-revision drift and otherwise
-      // applied `changes` regardless; that left every smaller mismatch (a single concurrent edit
-      // landing first, which is the common case) silently applying stale offsets.
-      //
-      // Fix (spurious-409-on-debounce-checkpoint): a revision-number mismatch alone is not
-      // sufficient to conclude the document's CONTENT has actually moved on. Manual edits (this
-      // method) never bump `currentRevision` themselves — only `RevisionService.createRevision`
-      // does, on: (a) `manual_debounce`'s periodic checkpoints of whatever content already exists
-      // (scheduled below, at the end of this same `if` block), which never themselves change
-      // content, or (b) an `agent_edit`/`restore`, which do. That means several manual edits from
-      // this same client routinely accumulate under one unchanged `currentRevision` before any
-      // debounce fires — comparing actual content between `baseRevision` and now (e.g. via each
-      // revision's retained Automerge `heads`, as `RevisionService.restore`/`export` do) would
-      // *always* differ across that gap and isn't the right test here. What actually matters is
-      // whether every revision created between `baseRevision` and `currentRevision` was a
-      // content-preserving `manual_debounce` checkpoint (safe to apply `changes` to the live
-      // content as usual — e.g. this same client's own earlier edit retrying after transient
-      // network failures, whose debounce fired mid-retry) versus at least one being a real
-      // content-changing `agent_edit`/`restore` (a genuine conflict: this tab's local text no
-      // longer matches the document's actual shape, so `changes`' offsets can no longer be trusted
-      // — reject as before).
+      // A bare revision-number mismatch does not by itself prove the document's CONTENT has moved
+      // on. Manual edits (this method) never bump `currentRevision` themselves — only
+      // `RevisionService.createRevision` does, on: (a) `manual_debounce`'s periodic checkpoints of
+      // whatever content already exists (scheduled below, at the end of this same `if` block),
+      // which never themselves change content, or (b) an `agent_edit`/`restore`, which do. That
+      // means several manual edits from this same client routinely accumulate under one unchanged
+      // `currentRevision` before any debounce fires — comparing actual content between
+      // `baseRevision` and now (e.g. via each revision's retained Automerge `heads`, as
+      // `RevisionService.restore`/`export` do) would *always* differ across that gap and isn't the
+      // right test here. What actually matters is whether every revision created between
+      // `baseRevision` and `currentRevision` was a content-preserving `manual_debounce` checkpoint
+      // (safe to apply `changes` to the live content as usual — e.g. this same client's own
+      // earlier edit retrying after transient network failures, whose debounce fired mid-retry)
+      // versus at least one being a real content-changing `agent_edit`/`restore` (a genuine
+      // conflict: this tab's local text no longer matches the document's actual shape, so
+      // `changes`' offsets can no longer be trusted — reject, see `DocumentOutOfSyncError`).
       if (baseRevision !== undefined && baseRevision !== doc.currentRevision) {
         let onlyDebounceCheckpointsSinceBaseRevision = baseRevision < doc.currentRevision;
         for (let revision = baseRevision + 1; revision <= doc.currentRevision; revision += 1) {
