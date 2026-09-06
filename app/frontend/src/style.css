@@ -64,6 +64,15 @@
      getting lighter in dark mode. Reusing one token for both would break one of the two. */
   --reconnect-bg: #92400e;
   --reconnect-text: #ffffff;
+  /* De-dup fix: the "is Primary" visual indicator (left accent bar + subtle background tint) was
+     hand-duplicated as an identical `box-shadow` value in `ConversationView.vue`,
+     `ConversationThreadBox.vue`, and `HudPanel.vue`'s own `<style scoped>` blocks. Centralized here
+     as a single custom property so all three (plus any future consumer) reference the one
+     definition — `.primary-indicator` below is the plain drop-in for a consumer with no other
+     `box-shadow` of its own; `ConversationThreadBox.vue` composes this value alongside its own
+     drop-shadow directly, since `box-shadow` values don't merge across separate rules. */
+  --primary-indicator-shadow: inset 3px 0 0 0 var(--accent-color, #2563eb),
+    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
   /* This app now has a real dark palette (see the `prefers-color-scheme: dark` block below), so
      both schemes are genuinely supported — the browser should render native form
      controls/scrollbars to match whichever one is active. */
@@ -216,6 +225,96 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Shared "is Primary" visual indicator — the plain drop-in class for a consumer with no other
+   `box-shadow` of its own (`ConversationView.vue`, `HudPanel.vue`'s `.conversation-row`);
+   `ConversationThreadBox.vue` instead references `--primary-indicator-shadow` (`:root` above)
+   directly, composing it alongside its own drop-shadow. Never color alone: every consumer also
+   names the Primary conversation via a `title`/`.visually-hidden` label or explanatory banner text
+   elsewhere in its own template. */
+.primary-indicator {
+  box-shadow: var(--primary-indicator-shadow);
+}
+
+/* Shared dismiss button for a small, one-time inline notice/tip banner — used by
+   `ConversationView.vue`'s "Tip: highlight text..." composer hint and `PrimaryPanel.vue`'s Primary
+   notice, both previously duplicating this identical 3-property rule in their own scoped styles. */
+.dismiss-notice-button {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+}
+
+/* Shared read-only "borrowed from parent" branch-continuity card (see `useConversationContinuity`)
+   — used by `ConversationView.vue`'s focus/detail view and `ConversationThreadBox.vue`'s sidebar
+   box, both previously duplicating this identical card verbatim. `margin-bottom` is the one place
+   the two differed (0.4rem vs 0.5rem) — `ConversationView.vue` layers its own small override for
+   that; see its own `<style scoped>`. */
+.continuity-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px dashed var(--seed-border, #9ca3af);
+  border-radius: 6px;
+  background: var(--seed-bg, #f3f4f6);
+  opacity: 0.85;
+}
+.continuity-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--neutral-muted-color-on-tint, #c3cad3);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* Shared click-to-edit conversation-title rename affordance (see
+   `composables/conversationRename.ts`) — used by `ConversationView.vue` and
+   `ConversationThreadBox.vue`, both previously duplicating this markup/CSS verbatim.
+   `.thread-rename-button`/`.rename-error` are byte-for-byte identical between the two hosts, so
+   they move here wholesale; `.thread-title-input` only shares its shape (flex/border/padding) — its
+   font-size/weight/background differ per host (matching each one's own title styling: an `h2` vs a
+   compact card title), so each host layers a small override with just those three properties in its
+   own `<style scoped>` block. */
+.thread-rename-button {
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  color: var(--neutral-muted-color, #4b5563);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.thread-rename-button:hover,
+.thread-rename-button:focus-visible {
+  color: var(--text-color, #111);
+  background: var(--panel-bg-alt, #eef0f3);
+  border-color: var(--neutral-muted-color, #4b5563);
+}
+.thread-rename-button:focus-visible {
+  outline: 2px solid var(--accent-color, #2563eb);
+  outline-offset: 1px;
+}
+.rename-error {
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.7rem;
+}
+.thread-title-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  border: 1px solid var(--accent-color, #2563eb);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+.thread-title-input:disabled {
+  opacity: 0.7;
 }
 
 /* Shared text-wrap-safe utility — for any element rendering unbounded/dynamic text (LLM-generated
