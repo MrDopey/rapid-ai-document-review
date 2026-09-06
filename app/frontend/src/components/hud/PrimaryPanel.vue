@@ -238,7 +238,7 @@ async function clearPrimary(): Promise<void> {
   padding: 0.1rem 0.4rem;
 }
 .primary-busy-dialog-overlay {
-  z-index: 60;
+  z-index: var(--z-overlay-primary, 60);
 }
 .primary-busy-dialog {
   background: var(--bg-color, #fff);

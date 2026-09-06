@@ -23,6 +23,6 @@ defineProps<{ reconnecting: boolean }>();
   color: var(--reconnect-text, white);
   border-radius: 999px;
   font-size: 0.8rem;
-  z-index: 1000;
+  z-index: var(--z-indicator, 1000);
 }
 </style>

@@ -206,7 +206,7 @@ function closePreview(): void {
   color: var(--neutral-muted-color, #4b5563);
 }
 .preview-overlay {
-  z-index: 50;
+  z-index: var(--z-overlay, 50);
 }
 .preview-overlay :deep(.diff-viewer) {
   background: var(--bg-color, #fff);

@@ -68,6 +68,36 @@
      both schemes are genuinely supported — the browser should render native form
      controls/scrollbars to match whichever one is active. */
   color-scheme: light dark;
+  /* Cross-component z-index scale. Previously this was an unenforced, prose-only convention (see
+     the `.modal-overlay` comment below) — which is exactly how HistoryPanel.vue's `.diff-overlay`
+     shipped with NO z-index at all: left at the resulting `auto`, it lost to
+     EditorComponent.vue's sticky `.editor-toolbar` (which explicitly sets a z-index and so
+     establishes a stacking context), painting the sticky editor header on top of the modal
+     instead of behind it. Every component-level z-index in this app should reference one of
+     these tokens instead of a bare number, lowest to highest:
+       --z-raised          generic "just above this element's own unstyled (auto) siblings" bump
+                            for content that already lives in its own isolated stacking context
+                            (e.g. inside a `position: absolute`/`fixed` ancestor), so it can never
+                            collide with anything below regardless of its literal value — not
+                            comparable across components. Used by ConversationDetailPanel.vue's
+                            `.close-detail-button` and ConversationThreadBox.vue's sticky
+                            `.thread-header`.
+       --z-sticky          sticky pane headers, e.g. EditorComponent.vue's `.editor-toolbar`.
+       --z-overlay         simple, non-nesting modal overlays: App.vue's `.shortcuts-overlay`/
+                            `.help-overlay`, EditsList.vue's `.preview-overlay`, HistoryPanel.
+                            vue's `.diff-overlay`.
+       --z-overlay-detail  App.vue's `.conversation-detail-overlay`, which must sit above
+                            `--z-overlay`.
+       --z-overlay-primary PrimaryPanel.vue's `.primary-busy-dialog-overlay` and ConversationView.
+                            vue's `.close-dialog-overlay`, above `--z-overlay-detail`.
+       --z-indicator       always-on-top status badges (ReconnectingIndicator.vue), above every
+                            other layer in the app. */
+  --z-raised: 1;
+  --z-sticky: 2;
+  --z-overlay: 50;
+  --z-overlay-detail: 55;
+  --z-overlay-primary: 60;
+  --z-indicator: 1000;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -177,7 +207,8 @@ body {
 
 /* Shared modal-overlay backdrop — used by EditsList's preview overlay, ConversationView's close
    dialog, and HudPanel's Primary-busy warning. Each caller still sets its own z-index (they
-   nest: preview overlay under close dialog under busy dialog) via a modifier class. */
+   nest: preview overlay under close dialog under busy dialog) via a modifier class, drawn from
+   the `--z-overlay*` scale defined on `:root` above rather than a bare number. */
 .modal-overlay {
   position: fixed;
   inset: 0;

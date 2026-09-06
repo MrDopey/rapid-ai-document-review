@@ -57,6 +57,41 @@ A reviewer opens a proposed edit's preview for the first time. Given this app's 
 
 ---
 
+### User Story 4 - Consistent diff experience when reviewing revision history (Priority: P4)
+
+A reviewer comparing two document revisions in the separate revision-history comparison view (an
+existing, already-shipped feature, distinct from the proposed-edit preview) sees the same visual
+diff treatment — marker glyphs and screen-reader labels on added/removed text — as the proposed-edit
+preview, and can also switch that view to a "Side by side" column layout, mirroring the option now
+available when reviewing a proposed edit.
+
+**Why this priority**: A consistency/parity enhancement to an already-shipped, separate feature —
+it depends on the shared rendering work done for User Story 1 and the side-by-side layout done for
+User Story 2, and delivers no value on its own until both exist.
+
+**Independent Test**: Open the revision-history comparison view for two revisions, verify its
+added/removed markup matches the proposed-edit diff view's marker-glyph + visually-hidden-label
+treatment, and verify a "Side by side" option is available there and behaves like the proposed-edit
+preview's side-by-side view.
+
+**Acceptance Scenarios**:
+
+1. **Given** a reviewer opens the revision-history comparison view for two revisions, **When** the
+   diff renders, **Then** added/removed text uses the same marker-glyph and visually-hidden-label
+   treatment as the proposed-edit diff views.
+2. **Given** the revision-history comparison view is open, **When** the reviewer selects "Side by
+   side," **Then** the earlier revision appears in one column and the later revision in an adjacent
+   column, each highlighting only the portions that differ from the other, consistent with the
+   proposed-edit preview's side-by-side view.
+3. **Given** the revision-history comparison view's side-by-side layout is active at this app's
+   narrowest supported pane width, **When** the reviewer views it, **Then** both columns remain
+   readable via internal scrolling/wrapping without the page itself scrolling horizontally.
+4. **Given** the revision-history comparison view is showing its existing unified diff display,
+   **When** the reviewer switches to "Side by side" and back, **Then** no new network request is
+   made — the already-fetched previous/current revision text is reused.
+
+---
+
 ### Edge Cases
 
 - What happens when the proposed edit is not reconcilable (conflict)? All view modes continue to be superseded by the existing conflict banner; no diff view (inline, full document, or side-by-side) is rendered in that state.
@@ -73,12 +108,16 @@ A reviewer opens a proposed edit's preview for the first time. Given this app's 
 - **FR-002**: The system MUST provide a "Side by side" comparison view, selectable alongside the existing "Added / removed" and "Full document" views, showing the original document in one column and the proposed document in an adjacent column.
 - **FR-003**: In the "Side by side" view, each column MUST visually highlight the portions of its own content that differ from the other column (removed content in the original column, added content in the proposed column), not just present two independent blocks of plain text.
 - **FR-004**: When a proposed edit's preview is first opened, the system MUST default to the existing "Added / removed" inline view; "Side by side" MUST only be shown after the reviewer explicitly selects it.
-- **FR-005**: Every view mode that renders document-derived text (inline hunks, full document, side-by-side) MUST escape/neutralize HTML-significant characters in that text so that no content authored in the document can be interpreted as markup or executed as script, regardless of which view is active.
+- **FR-005**: Every view mode that renders document-derived text — the proposed-edit preview's inline hunks, full document, and side-by-side views, and the revision-history comparison view's unified and side-by-side views — MUST escape/neutralize HTML-significant characters in that text so that no content authored in the document can be interpreted as markup or executed as script, regardless of which view is active.
 - **FR-006**: Switching between view modes for an already-loaded proposal preview MUST NOT require a new network request; the same previously fetched preview data MUST be reused across all view modes.
 - **FR-007**: If the content being compared in a given view (full document, or side-by-side) is identical between original and proposed, that view MUST indicate no differences were found rather than rendering plain, unmarked content that could be mistaken for a broken highlight.
 - **FR-008**: The "Side by side" view MUST remain usable (readable and scrollable) at the narrow pane widths this application's layout already constrains other panels to, without causing the page itself to scroll horizontally.
 - **FR-009**: The existing conflict banner for non-reconcilable proposals MUST continue to take the place of all diff views (inline, full document, side-by-side) — none of the new or changed views apply when a proposal no longer reconciles cleanly.
 - **FR-010**: The existing "Added / removed" inline hunk view's current word-level highlighting behavior MUST be preserved unchanged by this feature (this feature extends highlighting to the other views; it does not regress the hunk view).
+- **FR-011**: The revision-history comparison view MUST render its added/removed diff markup using the same shared rendering (marker glyph + visually-hidden "added:"/"removed:" labels) as the proposed-edit preview's diff views, replacing its current, simpler add/remove markup.
+- **FR-012**: The revision-history comparison view MUST provide a "Side by side" view mode, alongside its existing unified diff display, showing the earlier revision in one column and the later revision in an adjacent column, each highlighting only the portions that differ from the other — mirroring FR-002/FR-003 for the proposed-edit preview.
+- **FR-013**: The revision-history comparison view MUST default to its existing unified diff display; "Side by side" MUST only be shown after the reviewer explicitly selects it — mirroring FR-004.
+- **FR-014**: Switching view modes within the revision-history comparison view MUST NOT require a new network request; the same already-fetched previous/current revision text MUST be reused across both its view modes — mirroring FR-006.
 
 ### Key Entities
 
@@ -94,6 +133,8 @@ A reviewer opens a proposed edit's preview for the first time. Given this app's 
 - **SC-003**: A reviewer can reach the side-by-side comparison from the default preview view in a single selection (one click/tap).
 - **SC-004**: Diff rendering in any view mode completes within 2 seconds for documents of typical review size.
 - **SC-005**: The side-by-side view remains fully readable, with no broken or horizontally-overflowing page layout, at the narrowest pane width this application's layout supports.
+- **SC-006**: The revision-history comparison view's added/removed markup is visually indistinguishable in treatment (marker glyph, screen-reader labeling) from the proposed-edit preview's diff views, in a spot check of both.
+- **SC-007**: A reviewer can reach the revision-history comparison view's side-by-side layout from its default unified display in a single selection.
 
 ## Assumptions
 
@@ -105,3 +146,4 @@ A reviewer opens a proposed edit's preview for the first time. Given this app's 
 - Accessibility treatment already established for the hunk view (screen-reader-only "added"/"removed" labels, ARIA roles/labelling) is extended to the new "Full document" highlighting and to the "Side by side" view.
 - The selected view mode is a per-preview-session choice: it is not persisted between closing one proposal's preview and opening another's, and it resets to the inline default each time a preview is freshly opened.
 - "Side by side" compares the original and proposed documents as a whole (mirroring "Full document"), not a separate per-hunk two-column layout — the existing compact hunk view already serves the narrow, per-change comparison case.
+- The revision-history comparison view's own data flow (fetching the previous/current revision text) is unchanged by this feature; only its rendering (User Story 4) is brought into parity with the proposed-edit preview's diff views. It gains a "Side by side" option but does not gain a "Full document" concept distinct from what it already shows, since it already compares two whole revisions, not hunks.

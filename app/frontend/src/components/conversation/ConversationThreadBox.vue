@@ -5,7 +5,13 @@ import { ApiError } from '../../transport/http-client.js';
 import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
 import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { useConversationContinuity } from '../../composables/conversationContinuity.js';
-import { focusCapBranchTooltip } from '../../composables/focusConfig.js';
+import {
+  useConversationBranchAction,
+  useBulkToggleAction,
+  type ActionDescriptor,
+} from '../../composables/conversationActions.js';
+import ConversationStatusBadges from './ConversationStatusBadges.vue';
+import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
 
 // US4/T031 fix: the app's pre-canvas sidebar showed exactly one conversation's full detail view
@@ -45,10 +51,10 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'toggle-focus', conversationId: string): void;
   // Parity fix (auto-focus on branch): mirrors `ConversationView.vue`'s own `branch-created` emit —
-  // fired once `branchThisConversation` below successfully creates a new branch, carrying its id up
-  // to App.vue (via DocumentCanvas.vue), which auto-focuses it. Branch creation itself is blocked at
-  // the cap (see `branchThisConversation`'s doc comment), so by the time this fires a free slot is
-  // always available.
+  // fired (via `useConversationBranchAction`'s `onBranchCreated` callback) once a new branch is
+  // successfully created, carrying its id up to App.vue (via DocumentCanvas.vue), which auto-focuses
+  // it. Branch creation itself is blocked at the cap (see that composable's own doc comment), so by
+  // the time this fires a free slot is always available.
   (e: 'branch-created', id: string): void;
 }>();
 const store = useConversationsStore();
@@ -57,7 +63,7 @@ const conversation = computed(() => store.conversations.find((c) => c.id === pro
 const messages = computed(() => store.messagesFor(props.conversationId));
 
 // Rename affordance: click-to-edit title, following the same "one action per slot" convention as
-// `branchThisConversation` below — an inline text input replaces the plain-text `.thread-title`
+// the Branch action below — an inline text input replaces the plain-text `.thread-title`
 // span rather than opening a modal/dialog, since this is a single-field, low-stakes edit. Save on
 // Enter/blur, cancel on Escape (constitution's "UI Conventions": no confirmation dialog for a
 // reversible, single-field text edit).
@@ -184,17 +190,13 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // collapsed, one click expands all of them; once every message is already expanded, the same
 // control collapses all of them instead. Individual messages stay independently toggleable
 // afterward (setMessageExpanded above is unchanged by this bulk path).
-const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
-const bulkToggleLabel = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
-function toggleAllMessages(): void {
-  const nextExpanded = anyCollapsed.value;
-  const entries: Record<string, boolean> = {};
-  for (const message of messages.value) {
-    expandedByMessage.value[message.id] = nextExpanded;
-    entries[message.id] = nextExpanded;
-  }
-  persistMessageExpanded(entries);
-}
+// Now shared with `ConversationView.vue` via `useBulkToggleAction` — see that composable's own doc
+// comment for why it still needs this box's own `expandedByMessage` ref passed in rather than
+// owning an independent copy of that state.
+const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(
+  () => props.conversationId,
+  expandedByMessage,
+);
 
 // Root element exposed so `DocumentCanvas.vue` can attach a `ResizeObserver` to it (Phase 4/US2's
 // sibling-collision stacking needs each box's *actual* rendered height, not a fixed assumption).
@@ -208,46 +210,14 @@ const rootEl = ref<HTMLElement | null>(null);
 // conversation with no selection — the new child renders one column further out, inheriting this
 // conversation's own resolved position (`resolveBaseAnchorY` in `conversationLayout.ts`). This is a
 // dedicated affordance, alongside every other header action (constitution: one action per slot).
-const branching = ref(false);
-const branchError = ref<string | null>(null);
-/** Branch-cap parity fix: this used to always allow branch creation, with no auto-focus at all —
- *  now mirrors `ConversationView.vue`'s focus-view "Branch" button exactly: blocked outright while
- *  `atFocusCap` (the Branch button below is disabled for the same reason, but this guard covers a
- *  race — e.g. another panel getting focused between render and click), and auto-focuses the new
- *  branch via the `branch-created` emit on every success (guaranteed a free slot, since creation
- *  itself was just blocked at the cap). */
-async function branchThisConversation(): Promise<void> {
-  if (!conversation.value || props.atFocusCap) return;
-  branchError.value = null;
-  branching.value = true;
-  try {
-    const branched = await store.branch({ parentConversationId: conversation.value.id });
-    emit('branch-created', branched.id);
-  } catch (err) {
-    // `canBranch` (server-computed, mirrors `maxConversationDepth`) already disables the button
-    // below in the common case — this catch only covers a race (e.g. a setting change lowering
-    // the depth limit between render and click), consistent with HudPanel.vue's `primaryError`
-    // pattern for a similar server-side rejection.
-    branchError.value =
-      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to branch this conversation.';
-  } finally {
-    branching.value = false;
-  }
-}
-
-/** Disabled-reason priority: the existing server-computed `canBranch` (closed/max-depth) wins over
- *  the newer "at focus cap" reason — keeping its own pre-existing `title`/`aria-label` wording
- *  exactly as before this change; the shared cap tooltip only applies once `canBranch` isn't the
- *  active reason. */
-const branchTitle = computed(() => {
-  if (!conversation.value?.canBranch) return 'Maximum conversation depth reached';
-  if (props.atFocusCap) return focusCapBranchTooltip(props.maxFocused);
-  return 'Branch this conversation';
-});
-const branchAriaLabel = computed(() => {
-  if (!conversation.value?.canBranch) return 'Branch this conversation (maximum conversation depth reached)';
-  if (props.atFocusCap) return `Branch this conversation (${focusCapBranchTooltip(props.maxFocused)})`;
-  return 'Branch this conversation';
+// Branch-cap parity fix: this used to always allow branch creation, with no auto-focus at all —
+// now shared with `ConversationView.vue`'s focus-view "Branch" button via `useConversationBranchAction`
+// (see that composable's own doc comment): blocked outright while `atFocusCap`, and auto-focuses the
+// new branch via the `branch-created` emit on every success.
+const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
+  atFocusCap: () => props.atFocusCap,
+  maxFocused: () => props.maxFocused,
+  onBranchCreated: (id) => emit('branch-created', id),
 });
 
 // 005-canvas-conversation-threads: `ConversationView.vue` is no longer permanently mounted for
@@ -278,6 +248,38 @@ const focusButtonTitle = computed(() => {
 function toggleFocus(): void {
   emit('toggle-focus', props.conversationId);
 }
+
+// Focus/Close descriptors stay defined locally (not shared with `ConversationView.vue`) — they're
+// specific to this surface, combined here with the two shared descriptors above into the one list
+// `ConversationActionButtons.vue` renders. `focusAction.disabled` is deliberately left unset (not
+// `focusDisabled`): the pre-existing Focus button was never a native `disabled` control either — see
+// `focusButtonTitle`'s own doc comment history — a click always still toggles regardless of whether
+// it "looks" capped, `ariaDisabled` alone carries that affordance so the button stays keyboard-
+// reachable and its title stays discoverable.
+const focusAction = computed<ActionDescriptor>(() => ({
+  key: 'focus',
+  label: 'Focus',
+  title: focusButtonTitle.value,
+  ariaLabel: focusButtonTitle.value,
+  pressed: props.isFocused,
+  ariaDisabled: props.focusDisabled,
+  onClick: toggleFocus,
+}));
+const closeAction = computed<ActionDescriptor>(() => ({
+  key: 'close',
+  label: 'Close',
+  ariaLabel: "Close this conversation's full view",
+  danger: true,
+  onClick: toggleFocus,
+}));
+
+const actions = computed<ActionDescriptor[]>(() => {
+  const list: ActionDescriptor[] = [focusAction.value];
+  if (props.isFocused) list.push(closeAction.value);
+  if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
+  list.push(branchAction.value);
+  return list;
+});
 
 defineExpose({ el: rootEl });
 </script>
@@ -314,23 +316,7 @@ defineExpose({ el: rootEl });
           </template>
         </div>
         <span class="thread-status">
-          <span class="badge status-badge" :data-status="conversation.status">{{ conversation.status }}</span>
-          <span
-            v-if="conversation.isStale"
-            class="badge stale-badge"
-            title="Stale: the document has changed since this conversation last saw it."
-            >Stale</span
-          >
-          <!-- FR-011/SC-006: the conversation stays visible at its last known anchor position rather
-               than disappearing or moving once its highlighted text has been edited or removed —
-               this badge is the visual flag for that state. -->
-          <span
-            v-if="conversation.anchorOrphaned"
-            class="badge orphaned-badge"
-            title="Orphaned anchor: the highlighted text this conversation was anchored to has since been edited or removed."
-            aria-label="Orphaned anchor: the highlighted text this conversation was anchored to has since been edited or removed."
-            >Orphaned anchor</span
-          >
+          <ConversationStatusBadges :conversation-id="conversationId" />
         </span>
       </div>
       <span v-if="renameError" class="rename-error" role="alert">{{ renameError }}</span>
@@ -344,51 +330,7 @@ defineExpose({ el: rootEl });
            (previously "Open" alone lived in the header, "Expand/Collapse all" sat in its own
            toolbar row, and "Branch" sat in a footer row below the messages). -->
       <div class="thread-actions">
-        <button
-          type="button"
-          class="thread-action-button focus-button"
-          :class="{ 'is-focused': isFocused, 'focus-disabled': focusDisabled }"
-          :aria-pressed="isFocused"
-          :aria-disabled="focusDisabled"
-          :title="focusButtonTitle"
-          :aria-label="focusButtonTitle"
-          @click="toggleFocus"
-        >
-          Focus
-        </button>
-        <button
-          v-if="isFocused"
-          type="button"
-          class="thread-action-button close-button"
-          aria-label="Close this conversation's full view"
-          @click="toggleFocus"
-        >
-          Close
-        </button>
-        <!-- US3/research.md §5: only worth showing once there's more than one message to bulk-act
-             on. -->
-        <button
-          v-if="messages.length > 1"
-          type="button"
-          class="thread-action-button bulk-toggle-button"
-          :aria-label="`${bulkToggleLabel} messages in this conversation`"
-          @click="toggleAllMessages"
-        >
-          {{ bulkToggleLabel }}
-        </button>
-        <!-- US2 (FR-006/FR-007): disabled via the server-computed `canBranch` (mirrors
-             `maxConversationDepth`, Constitution Principle V) rather than a client-reimplemented
-             depth check. -->
-        <button
-          type="button"
-          class="thread-action-button branch-button"
-          :disabled="!conversation.canBranch || branching || atFocusCap"
-          :aria-label="branchAriaLabel"
-          :title="branchTitle"
-          @click="branchThisConversation"
-        >
-          Branch
-        </button>
+        <ConversationActionButtons :actions="actions" />
         <span v-if="branchError" class="branch-error" role="alert">{{ branchError }}</span>
       </div>
     </header>
@@ -475,19 +417,20 @@ defineExpose({ el: rootEl });
      left/right edges in every state, only proven by measuring both, not simply asserting it — and
      horizontal position is unaffected by a sticky offset that only sets `top`. `background` matches
      this box's own `--panel-bg` (see `.conversation-thread-box` above) so `.thread-messages` content
-     scrolling underneath can't show through the header's own box either. `z-index: 1` only needs to
-     beat this box's own unstyled (z-index: auto) message content directly below it in the same
-     stacking context; `.conversation-thread-box` being `position: absolute` already gives it its own
-     stacking context, so this can never collide with any app-level overlay's z-index (e.g.
-     `ConversationDetailPanel.vue`'s 1, `App.vue`'s 50/55, `PrimaryPanel.vue`'s/`ConversationView.
-     vue`'s 60, `ReconnectingIndicator.vue`'s 1000) — those all live in entirely separate stacking
+     scrolling underneath can't show through the header's own box either. `--z-raised` (style.css
+     `:root`) only needs to beat this box's own unstyled (z-index: auto) message content directly
+     below it in the same stacking context; `.conversation-thread-box` being `position: absolute`
+     already gives it its own stacking context, so this can never collide with any app-level
+     overlay's z-index (e.g. `ConversationDetailPanel.vue`'s `--z-raised`, App.vue's `--z-overlay`/
+     `--z-overlay-detail`, `PrimaryPanel.vue`'s/`ConversationView.vue`'s `--z-overlay-primary`,
+     `ReconnectingIndicator.vue`'s `--z-indicator`) — those all live in entirely separate stacking
      contexts. */
   margin: 0;
   padding-top: 0.55rem;
   padding-bottom: 0.4rem;
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-raised, 1);
   background: var(--panel-bg, #f7f7f8);
 }
 .thread-header-top {
@@ -563,25 +506,8 @@ defineExpose({ el: rootEl });
   gap: 0.3rem;
   min-width: 0;
 }
-.stale-badge {
-  color: var(--warning-color, #92400e);
-}
-.orphaned-badge {
-  color: var(--warning-color, #92400e);
-  background: var(--warning-bg, #fef3c7);
-}
-.status-badge[data-status='idle'] {
-  color: var(--neutral-muted-color, #4b5563);
-}
-.status-badge[data-status='working'] {
-  color: var(--status-active-color, #1d4ed8);
-}
-.status-badge[data-status='errored'] {
-  color: var(--danger-color, #b91c1c);
-}
-.status-badge[data-status='closed'] {
-  color: var(--danger-color, #b91c1c);
-}
+/* Status/stale/orphaned badge colors now live in `ConversationStatusBadges.vue` (shared verbatim
+   with `HudPanel.vue`/`ConversationView.vue` — see that component's own doc comment). */
 /* Branch-lineage breadcrumb: deliberately plain text (no border/background/cursor) — it must read
    as informational, not as another interactive control alongside the buttons below it. */
 .branch-lineage {
@@ -597,66 +523,10 @@ defineExpose({ el: rootEl });
   align-items: center;
   gap: 0.4rem;
 }
-/* Visual-affordance fix: buttons need to read as clearly interactive at a glance, distinct from the
-   plain-text `.branch-lineage` line above and the border-only `.badge` status pills in
-   `.thread-status` (which have no fill). A filled background + visible border + hover/focus states
-   is what actually separates "this is clickable" from "this is a label" here — `.badge` intentionally
-   stays fill-less so the contrast holds.
-   Dark-mode contrast fix: `--panel-bg-alt` and this box's own `--panel-bg` background are only
-   ~1.15:1 apart (and `--border-color` only ~1.4-1.6:1 against either) in dark mode — well under
-   WCAG 1.4.11's 3:1 non-text-contrast minimum for a UI component's boundary, so the button visually
-   disappeared into the box. `--neutral-muted-color` (already validated elsewhere in this file/
-   style.css to clear 4.5:1+ against every panel surface) clears 3:1 against both backgrounds in
-   both color schemes, so the border alone now reliably demarcates the button regardless of how
-   close its fill is to the surrounding panel. */
-.thread-action-button {
-  /* research.md §4: a real <button>, minimum 24x24px hit area. */
-  min-width: 24px;
-  min-height: 24px;
-  font-size: 0.7rem;
-  padding: 0.15rem 0.55rem;
-  color: var(--text-color, #111);
-  background: var(--panel-bg-alt, #eef0f3);
-  border: 1px solid var(--neutral-muted-color, #4b5563);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.thread-action-button:hover:not(:disabled) {
-  background: var(--accent-color, #2563eb);
-  border-color: var(--accent-color, #2563eb);
-  color: #fff;
-}
-.thread-action-button:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: 1px;
-}
-.thread-action-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-/* 005-canvas-conversation-threads (multi-focus overlay): `aria-disabled`, not the native `disabled`
-   attribute (see the prop doc comment above — this stays keyboard-reachable so `focusButtonTitle`'s
-   explanation is actually discoverable); the visual dim has to be its own class rather than
-   `:disabled` since that selector never matches here. */
-.focus-button.focus-disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-/* A small, non-color-alone cue (matching `HudPanel.vue`'s `.conversation-row.is-focused`) that this
-   is the currently-open one — distinct from `:hover`/`:focus-visible`'s own accent treatment. */
-.focus-button.is-focused {
-  border-color: var(--accent-color, #2563eb);
-  color: var(--accent-color, #2563eb);
-}
-.close-button {
-  color: var(--danger-color, #b91c1c);
-  border-color: var(--danger-color, #b91c1c);
-}
-.close-button:hover:not(:disabled) {
-  background: var(--danger-color, #b91c1c);
-  border-color: var(--danger-color, #b91c1c);
-  color: #fff;
-}
+/* Per-button visual styling (`.thread-action-button`, `.focus-button.is-focused`/`.focus-disabled`,
+   `.close-button`) now lives in `ConversationActionButtons.vue`, shared with `ConversationView.vue`
+   — see that component's own doc comment for the generic `data-action`/`aria-pressed`/`aria-disabled`
+   attribute selectors that replace the old per-action-name classes. */
 /* US3: compactness now comes from each `MessageBubble`'s own per-message max-height clamp
    (FR-008), not a fixed cap on this whole container — a box's height is the sum of its (capped)
    messages' heights instead of an arbitrary fixed box height. */

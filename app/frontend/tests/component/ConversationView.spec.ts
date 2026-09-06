@@ -214,6 +214,64 @@ describe('ConversationView — draft-aware discard-on-close', () => {
   });
 });
 
+// Bug fix (this task): `ConversationView.vue` (the focus/detail overlay content) used to read
+// `conversation.isStale` only to toggle an `.emphasized` CSS class on the "Refresh + Send" button —
+// unlike `HudPanel.vue` (topnav) and `ConversationThreadBox.vue` (sidebar/canvas box), it never
+// actually rendered a "Stale"/"Orphaned anchor" badge of its own. Now shares
+// `ConversationStatusBadges.vue` with both those surfaces (see `conversationStatusBadges.ts`), so
+// this is the regression test proving the badges now appear here too.
+describe('ConversationView — Stale/Orphaned-anchor badges (bug fix regression)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.getConversation).mockReset();
+    vi.mocked(httpClient.listEdits).mockReset();
+    vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
+  });
+
+  function mountView(overrides: Partial<ConversationDto> = {}) {
+    const store = useConversationsStore();
+    const conversation = conversationFixture({ id: 'conv-1', ...overrides });
+    store.conversations = [conversation];
+    store.messagesByConversation['conv-1'] = [];
+    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
+    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+  }
+
+  it('renders the Stale badge in the header when the conversation is stale', async () => {
+    const wrapper = mountView({ isStale: true });
+    await flushPromises();
+    const staleBadge = wrapper.find('.header-top .stale-badge');
+    expect(staleBadge.exists()).toBe(true);
+    expect(staleBadge.text()).toBe('Stale');
+  });
+
+  it('renders the Orphaned anchor badge in the header when the conversation is anchor-orphaned', async () => {
+    const wrapper = mountView({ anchorOrphaned: true });
+    await flushPromises();
+    const orphanedBadge = wrapper.find('.header-top .orphaned-badge');
+    expect(orphanedBadge.exists()).toBe(true);
+    expect(orphanedBadge.text()).toBe('Orphaned anchor');
+  });
+
+  it('renders neither badge when the conversation is neither stale nor anchor-orphaned', async () => {
+    const wrapper = mountView({ isStale: false, anchorOrphaned: false });
+    await flushPromises();
+    expect(wrapper.find('.stale-badge').exists()).toBe(false);
+    expect(wrapper.find('.orphaned-badge').exists()).toBe(false);
+  });
+
+  it('still renders the primary status badge alongside the Stale badge', async () => {
+    const wrapper = mountView({ isStale: true, status: 'working' });
+    await flushPromises();
+    const statusBadge = wrapper.find('.header-top .status-badge');
+    expect(statusBadge.exists()).toBe(true);
+    expect(statusBadge.attributes('data-status')).toBe('working');
+  });
+});
+
 // Bug fix (005-canvas-conversation-threads follow-up): `ConversationThreadBox.vue` (the sidebar
 // box) has always rendered a freshly-created branch's parent's last user+assistant message as
 // read-only "continuity context" (see `MessageBubble.spec.ts`'s own
@@ -337,7 +395,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   it('is enabled, with the plain "Branch this conversation" tooltip, when under the cap', async () => {
     const wrapper = mountView({ atFocusCap: false, maxFocused: 3 });
     await flushPromises();
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeUndefined();
     expect(branchButton.attributes('title')).toBe('Branch this conversation');
   });
@@ -345,7 +403,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   it('is disabled, with a focus-limit tooltip naming the max, once at the cap', async () => {
     const wrapper = mountView({ atFocusCap: true, maxFocused: 2 });
     await flushPromises();
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toMatch(/max 2/);
     expect(branchButton.attributes('aria-label')).toMatch(/max 2/);
@@ -354,7 +412,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   it('prioritizes the existing "max depth reached" reason over the cap tooltip when both apply', async () => {
     const wrapper = mountView({ atFocusCap: true, maxFocused: 2, canBranch: false });
     await flushPromises();
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toBe('Maximum conversation depth reached');
     expect(branchButton.attributes('title')).not.toMatch(/max 2/);
@@ -363,7 +421,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   it('clicking while at the cap never calls the API and emits nothing', async () => {
     const wrapper = mountView({ atFocusCap: true, maxFocused: 2 });
     await flushPromises();
-    await wrapper.find('.branch-button').trigger('click');
+    await wrapper.find('[data-action="branch"]').trigger('click');
     expect(httpClient.branchConversation).not.toHaveBeenCalled();
     expect(wrapper.emitted('branch-created')).toBeUndefined();
   });
@@ -373,7 +431,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
     await flushPromises();
     vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
 
-    await wrapper.find('.branch-button').trigger('click');
+    await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
 
     expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv-1' });

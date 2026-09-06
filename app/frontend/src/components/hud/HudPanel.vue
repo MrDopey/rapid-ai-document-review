@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { orderConversationsByAnchor } from '../canvas/conversationLayout.js';
+import ConversationStatusBadges from '../conversation/ConversationStatusBadges.vue';
 
 // 005-canvas-conversation-threads: the "active"/"all" filter used to be purely local to this
 // panel — now `DocumentCanvas.vue` needs the exact same filter to decide which conversations get
@@ -234,13 +235,7 @@ onBeforeUnmount(() => {
             <span class="name">{{ conv.name }}</span>
           </button>
           <span class="conversation-status-cell">
-            <span class="badge status-badge" :data-status="conv.status">{{ conv.status }}</span>
-            <span
-              v-if="conv.isStale"
-              class="badge stale-badge"
-              title="Stale: the document has changed since this conversation last saw it. Use &quot;Refresh + Send&quot; to update its context before sending."
-              >Stale</span
-            >
+            <ConversationStatusBadges :conversation-id="conv.id" />
             <span v-if="conv.pendingEditCount > 0" class="badge pending-badge">{{ conv.pendingEditCount }}</span>
             <span v-if="store.queueInfo[conv.id]" class="badge queue-badge">
               Queued #{{ store.queueInfo[conv.id]!.queuePosition }}
@@ -400,30 +395,16 @@ onBeforeUnmount(() => {
   min-width: 0;
   gap: 0.35rem;
 }
-.stale-badge {
-  /* Fix: #b45309 fell to 4.22:1 against this row's darkened `.selected` tint — below 4.5:1. */
-  color: var(--warning-color, #92400e);
-}
 .pending-badge {
   color: var(--status-active-color, #1d4ed8);
 }
 .queue-badge {
   color: var(--queue-color, #6b21a8);
 }
-/* Fix 4: color-code conversation status, layered on top of the (unchanged) text label — never
-   relying on color alone (FR-043c). */
-.status-badge[data-status='idle'] {
-  color: var(--neutral-muted-color, #4b5563);
-}
-.status-badge[data-status='working'] {
-  color: var(--status-active-color, #1d4ed8);
-}
-.status-badge[data-status='errored'] {
-  color: var(--danger-color, #b91c1c);
-}
-.status-badge[data-status='closed'] {
-  color: var(--status-closed-color, #374151);
-}
+/* Fix 4 (color-code conversation status) and the `.stale-badge` warning color that used to live
+   here are both now in `ConversationStatusBadges.vue` — shared verbatim (see that component's own
+   doc comment for the one spot, the closed-status color, where this panel's own copy actually
+   differed from `ConversationThreadBox.vue`'s/`ConversationView.vue`'s and which value won). */
 /* 006-toolbar-reorg: Primary's notice/summary and the busy-switch dialog moved to
    `PrimaryPanel.vue` (its own visually-boxed section in App.vue's toolbar), and the primary-error
    banner moved to App.vue as a full-width strip beneath both toolbar columns — none of it lives

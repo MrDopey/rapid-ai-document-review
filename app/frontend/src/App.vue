@@ -1026,10 +1026,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
   font-size: 0.8rem;
 }
 .shortcuts-overlay {
-  z-index: 50;
+  z-index: var(--z-overlay, 50);
 }
 .help-overlay {
-  z-index: 50;
+  z-index: var(--z-overlay, 50);
 }
 .panes {
   position: relative;
@@ -1112,7 +1112,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
      `.panes`' entire box. Below the desktop breakpoint no inline `grid-column` is set, so this
      falls back to spanning `.panes`' full box, matching the pre-fix mobile layout. */
   inset: 0;
-  z-index: 55;
+  z-index: var(--z-overlay-detail, 55);
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: stretch;

@@ -217,4 +217,18 @@ async function onCopy(revision: number): Promise<void> {
   color: var(--danger-color, #b3261e);
   border-color: currentColor;
 }
+/* Fix: `.diff-overlay` previously relied on `.modal-overlay`'s shared base rule alone, which
+   (per that rule's own comment in style.css) deliberately leaves z-index to each caller since
+   overlays nest. Left at the resulting `z-index: auto`, this `position: fixed` overlay doesn't
+   establish its own stacking context and so painted in plain tree order within the page's root
+   stacking context — where EditorComponent.vue's `position: sticky` `.editor-toolbar`
+   (`--z-sticky`) DOES establish one and paints above any unstyled (auto) content in that same
+   root context, regardless of DOM order. That let the sticky editor header render on top of this
+   modal instead of behind it. Using `--z-overlay` — the same token as the other simple,
+   non-nesting modal overlays (App.vue's `.shortcuts-overlay`/`.help-overlay`, EditsList.vue's
+   `.preview-overlay`) — puts it well above `--z-sticky`, and below `--z-overlay-detail`/
+   `--z-overlay-primary`/`--z-indicator` per the scale defined on style.css's `:root`. */
+.diff-overlay {
+  z-index: var(--z-overlay, 50);
+}
 </style>

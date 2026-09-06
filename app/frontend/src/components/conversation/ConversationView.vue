@@ -9,7 +9,13 @@ import { loadPaneSizes, persistPaneSizes } from '../../composables/panePersisten
 import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
 import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { useConversationContinuity } from '../../composables/conversationContinuity.js';
-import { focusCapBranchTooltip } from '../../composables/focusConfig.js';
+import {
+  useConversationBranchAction,
+  useBulkToggleAction,
+  type ActionDescriptor,
+} from '../../composables/conversationActions.js';
+import ConversationStatusBadges from './ConversationStatusBadges.vue';
+import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
 import EditsList from '../edits/EditsList.vue';
 
@@ -26,10 +32,10 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   (e: 'select', id: string): void;
-  // Parity fix (auto-focus on branch): fired once `branchThisConversation` below successfully
-  // creates a new branch, carrying its id up to App.vue (via `ConversationDetailPanel.vue`), which
-  // decides whether to auto-focus it (only if there's a free slot under the live focus cap — see
-  // `branchThisConversation`'s own doc comment). Deliberately a distinct event from `select`
+  // Parity fix (auto-focus on branch): fired (via `useConversationBranchAction`'s `onBranchCreated`
+  // callback) once a new branch is successfully created, carrying its id up to App.vue (via
+  // `ConversationDetailPanel.vue`), which decides whether to auto-focus it (only if there's a free
+  // slot under the live focus cap). Deliberately a distinct event from `select`
   // above: `select` drives `replaceFocus` (swap *this* panel's own content for the new
   // conversation, e.g. FR-036's "Request review" navigation), whereas branching should *add* a
   // second panel alongside this one still open, never replace it.
@@ -193,71 +199,31 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 }
 
 // Parity fix (005-canvas-conversation-threads follow-up): the sidebar's compact
-// `ConversationThreadBox.vue` offers a bulk "Expand all"/"Collapse all" toggle (its own
-// `toggleAllMessages`, FR-009) over the exact same per-message `expandedByMessage` state this view
-// already owns above — this focused/detail view had no equivalent, even though it owns the richer
-// (unclamped-by-default) copy of that same state. Same semantics as the sidebar's: if any message
-// is currently collapsed, one click expands every message in this conversation; once all are
-// already expanded, the same control collapses them all instead.
-const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
-const bulkToggleLabel = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
-function toggleAllMessages(): void {
-  const nextExpanded = anyCollapsed.value;
-  const entries: Record<string, boolean> = {};
-  for (const message of messages.value) {
-    expandedByMessage.value[message.id] = nextExpanded;
-    entries[message.id] = nextExpanded;
-  }
-  persistMessageExpanded(entries);
-}
+// `ConversationThreadBox.vue` offers a bulk "Expand all"/"Collapse all" toggle (FR-009) over the
+// exact same per-message `expandedByMessage` state this view already owns above — this focused/
+// detail view had no equivalent, even though it owns the richer (unclamped-by-default) copy of that
+// same state. Now shared with `ConversationThreadBox.vue` via `useBulkToggleAction`.
+const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(
+  () => props.conversationId,
+  expandedByMessage,
+);
 
 // Parity fix: the sidebar's `ConversationThreadBox.vue` also offers a "Branch" action (branching
-// *this* conversation with no selection, US2/FR-006/FR-007 — see that component's
-// `branchThisConversation` doc comment for why a whole-conversation branch is the only kind this
-// data model supports) that this focused/detail view had no equivalent of. Same store call, same
-// server-computed `canBranch` gating (mirrors `maxConversationDepth`, already covers "closed
-// conversations can't be branched from" per the read-only banner above — no client-reimplemented
-// depth/status check needed here either).
+// *this* conversation with no selection, US2/FR-006/FR-007 — see `conversationActions.ts`'s own doc
+// comment for why a whole-conversation branch is the only kind this data model supports) that this
+// focused/detail view had no equivalent of. Now shared via `useConversationBranchAction`. Same
+// store call, same server-computed `canBranch` gating (mirrors `maxConversationDepth`, already
+// covers "closed conversations can't be branched from" per the read-only banner above).
 //
-// Auto-focus follow-up, superseded by the branch-cap parity fix below: branching from the focus
-// view emits `branch-created` on success so App.vue can auto-focus the new branch. Branch creation
-// used to be allowed regardless of how full the focus set was, silently skipping auto-focus once at
-// the cap (App.vue's `focusConversation` no-ops there) — that's now a behavior change: creation
-// itself is blocked at the cap (see below), so a free slot is always guaranteed by the time this
-// emits, and App.vue's own no-op guard is only ever defense in depth against a same-tick race.
-const branching = ref(false);
-const branchError = ref<string | null>(null);
-/** Branch-cap parity fix: the Branch button below is disabled whenever `atFocusCap` — this guard
- *  covers the same race `ConversationThreadBox.vue`'s equivalent guard does (e.g. another panel
- *  getting focused between render and click), not the common case. */
-async function branchThisConversation(): Promise<void> {
-  if (!conversation.value || props.atFocusCap) return;
-  branchError.value = null;
-  branching.value = true;
-  try {
-    const branched = await store.branch({ parentConversationId: conversation.value.id });
-    emit('branch-created', branched.id);
-  } catch (err) {
-    branchError.value =
-      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to branch this conversation.';
-  } finally {
-    branching.value = false;
-  }
-}
-
-/** Same disabled-reason priority as `ConversationThreadBox.vue`'s sidebar Branch button: the
- *  existing server-computed `canBranch` (closed/max-depth) wins, keeping its own pre-existing
- *  `title`/`aria-label` wording exactly as before this change; the shared cap tooltip only applies
- *  once `canBranch` isn't the active reason. */
-const branchTitle = computed(() => {
-  if (!conversation.value?.canBranch) return 'Maximum conversation depth reached';
-  if (props.atFocusCap) return focusCapBranchTooltip(props.maxFocused);
-  return 'Branch this conversation';
-});
-const branchAriaLabel = computed(() => {
-  if (!conversation.value?.canBranch) return 'Branch this conversation (maximum conversation depth reached)';
-  if (props.atFocusCap) return `Branch this conversation (${focusCapBranchTooltip(props.maxFocused)})`;
-  return 'Branch this conversation';
+// Auto-focus follow-up, superseded by the branch-cap parity fix: branching from the focus view
+// emits `branch-created` (via the composable's `onBranchCreated` callback) on success so App.vue
+// can auto-focus the new branch — creation itself is blocked at the cap, so a free slot is always
+// guaranteed by the time this fires, and App.vue's own no-op guard is only ever defense in depth
+// against a same-tick race.
+const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
+  atFocusCap: () => props.atFocusCap,
+  maxFocused: () => props.maxFocused,
+  onBranchCreated: (id) => emit('branch-created', id),
 });
 
 // Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
@@ -580,6 +546,32 @@ async function onRequestReview(): Promise<void> {
     reviewing.value = false;
   }
 }
+
+// Archive-or-Request-review stays local (not shared with `ConversationThreadBox.vue`, which has no
+// equivalent action of its own) — mutually exclusive by `conversation.status`/`kind`, unchanged
+// behavior: "Request review" once closed, "Archive" while still open (only for `kind !== 'main'`).
+const archiveOrReviewAction = computed<ActionDescriptor | null>(() => {
+  if (!conversation.value) return null;
+  if (conversation.value.status === 'closed') {
+    return { key: 'request-review', label: 'Request review', disabled: reviewing.value, onClick: () => void onRequestReview() };
+  }
+  if (conversation.value.kind !== 'main') {
+    return { key: 'archive', label: 'Archive', disabled: closing.value, danger: true, onClick: openCloseDialog };
+  }
+  return null;
+});
+
+// Every per-conversation action this view offers (parity fix + bug fix: this used to be scattered
+// per-button markup — see `ConversationActionButtons.vue`), in the same order as before: bulk
+// expand/collapse, Branch, then whichever single close-state action currently applies.
+const actions = computed<ActionDescriptor[]>(() => {
+  const list: ActionDescriptor[] = [];
+  if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
+  if (conversation.value) list.push(branchAction.value);
+  const archiveOrReview = archiveOrReviewAction.value;
+  if (archiveOrReview) list.push(archiveOrReview);
+  return list;
+});
 </script>
 
 <template>
@@ -626,54 +618,17 @@ async function onRequestReview(): Promise<void> {
           </div>
           <span v-if="renameError" class="rename-error" role="alert">{{ renameError }}</span>
         </div>
-        <span v-if="conversation" class="badge status-badge" :data-status="conversation.status">{{
-          conversation.status
-        }}</span>
+        <ConversationStatusBadges :conversation-id="conversationId" />
       </div>
       <div class="header-actions">
-        <!-- Parity fix: same bulk expand/collapse and Branch actions the sidebar's
-             `ConversationThreadBox.vue` offers, now also available from this focused/detail view
-             (see `toggleAllMessages`/`branchThisConversation` doc comments above). Shown alongside
-             Archive/Request review rather than replacing either — this slot now holds every
-             per-conversation action this view offers, not just one. -->
-        <button
-          v-if="messages.length > 1"
-          type="button"
-          class="bulk-toggle-button"
-          :aria-label="`${bulkToggleLabel} messages in this conversation`"
-          @click="toggleAllMessages"
-        >
-          {{ bulkToggleLabel }}
-        </button>
-        <button
-          v-if="conversation"
-          type="button"
-          class="branch-button"
-          :disabled="!conversation.canBranch || branching || atFocusCap"
-          :aria-label="branchAriaLabel"
-          :title="branchTitle"
-          @click="branchThisConversation"
-        >
-          Branch
-        </button>
-        <button
-          v-if="conversation?.status === 'closed'"
-          type="button"
-          class="review-button"
-          :disabled="reviewing"
-          @click="onRequestReview"
-        >
-          Request review
-        </button>
-        <button
-          v-else-if="conversation && conversation.kind !== 'main'"
-          type="button"
-          class="close-button"
-          :disabled="closing"
-          @click="openCloseDialog"
-        >
-          Archive
-        </button>
+        <!-- Bug fix: this used to render only a single status badge span, never the Stale/
+             Orphaned-anchor badges `HudPanel.vue`/`ConversationThreadBox.vue` already had — see
+             `ConversationStatusBadges.vue`. Parity fix: same bulk expand/collapse and Branch
+             actions the sidebar's `ConversationThreadBox.vue` offers, now also available from this
+             focused/detail view (see `conversationActions.ts`). Shown alongside Archive/Request
+             review rather than replacing either — this slot now holds every per-conversation action
+             this view offers, not just one. -->
+        <ConversationActionButtons :actions="actions" />
       </div>
     </header>
 
@@ -930,18 +885,10 @@ async function onRequestReview(): Promise<void> {
   gap: 0.5rem;
   max-width: 100%;
 }
-/* Color-consistency fix: same `--danger-color` treatment as `ConversationThreadBox.vue`'s own
-   `.close-button` (and this view's `.status-badge[data-status='closed']` above) — previously this
-   button had no color styling of its own at all. */
-.close-button {
-  color: var(--danger-color, #b91c1c);
-  border: 1px solid var(--danger-color, #b91c1c);
-}
-.close-button:hover:not(:disabled) {
-  background: var(--danger-color, #b91c1c);
-  border-color: var(--danger-color, #b91c1c);
-  color: #fff;
-}
+/* Per-button visual styling (bulk-toggle/branch/archive/review) now lives in
+   `ConversationActionButtons.vue`, shared with `ConversationThreadBox.vue` — the "Archive" action's
+   danger/red treatment (previously this file's own `.close-button` rule) comes from that action's
+   `danger: true` descriptor flag instead of a class name (see `archiveOrReviewAction` above). */
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 /* `.text-wrap-safe`'s shared overflow-wrap handling (applied to the h2 in the template) now lives
    in style.css — closes a gap where a long conversation name had no wrap protection even though
@@ -950,25 +897,8 @@ async function onRequestReview(): Promise<void> {
   margin: 0;
   font-size: 1rem;
 }
-.status-badge[data-status='idle'] {
-  color: var(--neutral-muted-color, #4b5563);
-}
-.status-badge[data-status='working'] {
-  color: var(--status-active-color, #1d4ed8);
-}
-.status-badge[data-status='errored'] {
-  color: var(--danger-color, #b91c1c);
-}
-/* Color-consistency fix: this badge previously used the neutral `--status-closed-color` token
-   while the "Archive" button below (the action that produces this exact state) had no color
-   styling at all, defaulting to plain button text — two different "this conversation is
-   closed/archived" signals reading as two different colors. Both now reference the same
-   `--danger-color` token (already established elsewhere in this codebase as the closing/danger
-   color — see `ConversationThreadBox.vue`'s own `.close-button`, and the `errored` status color
-   directly above). */
-.status-badge[data-status='closed'] {
-  color: var(--danger-color, #b91c1c);
-}
+/* Status badge colors now live in `ConversationStatusBadges.vue` (shared verbatim with
+   `HudPanel.vue`/`ConversationThreadBox.vue` — see that component's own doc comment). */
 /* New: `.transcript-edits` is a flex child of `.conversation-view` (flex: 1; min-height: 0) so it
    always fills whatever height this component is actually given, never a fixed viewport amount.
    It's a grid with a default `1fr auto` row template — transcript takes all remaining space,
@@ -1186,7 +1116,7 @@ async function onRequestReview(): Promise<void> {
   font-family: inherit;
 }
 .close-dialog-overlay {
-  z-index: 60;
+  z-index: var(--z-overlay-primary, 60);
 }
 .close-dialog {
   background: var(--bg-color, #fff);

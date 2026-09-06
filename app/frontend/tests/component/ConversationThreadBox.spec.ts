@@ -110,26 +110,24 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
 
   it('emits toggle-focus with this conversation\'s id when the Focus button is clicked', async () => {
     const wrapper = mountBox();
-    await wrapper.find('.focus-button').trigger('click');
+    await wrapper.find('[data-action="focus"]').trigger('click');
     expect(wrapper.emitted('toggle-focus')?.[0]).toEqual(['conv-1']);
   });
 
   it('renders no Close button, and no disabled affordance, when not focused and under the cap', () => {
     const wrapper = mountBox({ isFocused: false, focusDisabled: false });
-    expect(wrapper.find('.close-button').exists()).toBe(false);
-    const focusButton = wrapper.find('.focus-button');
-    expect(focusButton.classes()).not.toContain('is-focused');
-    expect(focusButton.classes()).not.toContain('focus-disabled');
+    expect(wrapper.find('[data-action="close"]').exists()).toBe(false);
+    const focusButton = wrapper.find('[data-action="focus"]');
+    expect(focusButton.attributes('aria-pressed')).toBe('false');
     expect(focusButton.attributes('aria-disabled')).toBe('false');
   });
 
   it('renders a Close button (also wired to toggle-focus) and marks the Focus button pressed when focused', async () => {
     const wrapper = mountBox({ isFocused: true });
-    const focusButton = wrapper.find('.focus-button');
+    const focusButton = wrapper.find('[data-action="focus"]');
     expect(focusButton.attributes('aria-pressed')).toBe('true');
-    expect(focusButton.classes()).toContain('is-focused');
 
-    const closeButton = wrapper.find('.close-button');
+    const closeButton = wrapper.find('[data-action="close"]');
     expect(closeButton.exists()).toBe(true);
     await closeButton.trigger('click');
     expect(wrapper.emitted('toggle-focus')?.[0]).toEqual(['conv-1']);
@@ -137,8 +135,7 @@ describe('ConversationThreadBox — focus-aware Focus/Close buttons', () => {
 
   it('dims and aria-disables the Focus button when focusing would exceed the cap, with a title naming the max', () => {
     const wrapper = mountBox({ isFocused: false, focusDisabled: true, maxFocused: 2 });
-    const focusButton = wrapper.find('.focus-button');
-    expect(focusButton.classes()).toContain('focus-disabled');
+    const focusButton = wrapper.find('[data-action="focus"]');
     expect(focusButton.attributes('aria-disabled')).toBe('true');
     expect(focusButton.attributes('title')).toMatch(/max 2/);
   });
@@ -170,14 +167,14 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
 
   it('is enabled, with the plain "Branch this conversation" tooltip, when under the cap', () => {
     const wrapper = mountBox({ atFocusCap: false, maxFocused: 3 });
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeUndefined();
     expect(branchButton.attributes('title')).toBe('Branch this conversation');
   });
 
   it('is disabled, with a focus-limit tooltip naming the max, once at the cap', () => {
     const wrapper = mountBox({ atFocusCap: true, maxFocused: 2 });
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toMatch(/max 2/);
     expect(branchButton.attributes('aria-label')).toMatch(/max 2/);
@@ -185,7 +182,7 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
 
   it('prioritizes the existing "max depth reached" reason over the cap tooltip when both apply', () => {
     const wrapper = mountBox({ atFocusCap: true, maxFocused: 2, canBranch: false });
-    const branchButton = wrapper.find('.branch-button');
+    const branchButton = wrapper.find('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toBe('Maximum conversation depth reached');
     expect(branchButton.attributes('title')).not.toMatch(/max 2/);
@@ -193,7 +190,7 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
 
   it('clicking while at the cap never calls the API and emits nothing', async () => {
     const wrapper = mountBox({ atFocusCap: true, maxFocused: 2 });
-    await wrapper.find('.branch-button').trigger('click');
+    await wrapper.find('[data-action="branch"]').trigger('click');
     expect(httpClient.branchConversation).not.toHaveBeenCalled();
     expect(wrapper.emitted('branch-created')).toBeUndefined();
   });
@@ -201,7 +198,7 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
   it('branches successfully and emits branch-created with the new id when under the cap', async () => {
     vi.mocked(httpClient.branchConversation).mockResolvedValue(conversationFixture({ id: 'branch-9' }));
     const wrapper = mountBox({ atFocusCap: false });
-    await wrapper.find('.branch-button').trigger('click');
+    await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
 
     expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv-1' });

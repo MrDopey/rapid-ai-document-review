@@ -216,7 +216,7 @@ describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
 // handler just forwards the new id into `focusConversation` (guaranteed a free slot by the time it
 // fires); these tests exercise the whole chain end to end: real `ConversationDetailPanel`/
 // `ConversationView` (unlike the "Sync scroll" suite above, which stubs `ConversationDetailPanel`
-// out entirely), a real click on `.branch-button`, and the resulting focus-set/`lastInteractedId`
+// out entirely), a real click on the Branch action button, and the resulting focus-set/`lastInteractedId`
 // state, observed via which `ConversationDetailPanel` instances render and each one's own `active`
 // prop.
 describe('App.vue — auto-focus on branch from the focus view', () => {
@@ -332,7 +332,7 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     const branch = conversationFixture({ id: 'branch-1', parentId: 'main-1', branchDepth: 1 });
     vi.mocked(httpClient.branchConversation).mockResolvedValue(branch);
 
-    await wrapper.get('.branch-button').trigger('click');
+    await wrapper.get('[data-action="branch"]').trigger('click');
     await flushPromises();
 
     expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'main-1' });
@@ -361,7 +361,7 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     // with a tooltip naming the focus limit, and a click (jsdom, like a real browser, never fires a
     // `click` handler for a `disabled` native button) never reaches the API at all.
     const c1Panel = wrapper.findAllComponents(ConversationDetailPanel).find((p) => p.props('conversationId') === 'c1')!;
-    const branchButton = c1Panel.get('.branch-button');
+    const branchButton = c1Panel.get('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toMatch(/max 3/);
 

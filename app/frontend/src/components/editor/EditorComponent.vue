@@ -278,13 +278,16 @@ defineExpose({
      `.document-canvas`, the actual scrolling ancestor — so without this, scrolling a long document
      scrolls this toolbar away with it. `position: sticky` pins it to the top of that scrollport
      instead; the opaque `background` above already prevents content from showing through
-     underneath. `z-index: 2` only needs to beat this same stacking context's own unstyled
-     (z-index: auto) content scrolling beneath it — it's far below every app-level overlay's z-index
-     (App.vue's `.conversation-detail-overlay` at 50/55, `PrimaryPanel.vue`/`ConversationView.vue`
-     at 60, `ReconnectingIndicator.vue` at 1000), so it can never sit on top of any of those. */
+     underneath. `--z-sticky` only needs to beat this same stacking context's own unstyled
+     (z-index: auto) content scrolling beneath it — it's far below every app-level overlay's
+     z-index (style.css's `--z-overlay`/`--z-overlay-detail`/`--z-overlay-primary`/`--z-indicator`
+     scale, used by App.vue's `.shortcuts-overlay`/`.help-overlay`/`.conversation-detail-overlay`,
+     HistoryPanel.vue's `.diff-overlay`, EditsList.vue's `.preview-overlay`, PrimaryPanel.vue's/
+     ConversationView.vue's confirmation dialogs, and ReconnectingIndicator.vue), so it can never
+     sit on top of any of those. */
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--z-sticky, 2);
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 .branch-buttons {

@@ -167,7 +167,7 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
 
   it('renders no bulk toggle for a conversation with only one message', () => {
     const wrapper = mountBox([makeMessage({ id: 'm1' })]);
-    expect(wrapper.find('.bulk-toggle-button').exists()).toBe(false);
+    expect(wrapper.find('[data-action="bulk-toggle"]').exists()).toBe(false);
   });
 
   it('bulk-expands every message at once, then an individual toggle overrides just that one message', async () => {
@@ -183,14 +183,14 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     await wrapper.vm.$nextTick();
 
     // Both start collapsed (FR-008 default) — the bulk control offers to expand everything.
-    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Expand all');
-    await wrapper.get('.bulk-toggle-button').trigger('click');
+    expect(wrapper.get('[data-action="bulk-toggle"]').text()).toBe('Expand all');
+    await wrapper.get('[data-action="bulk-toggle"]').trigger('click');
     await wrapper.vm.$nextTick();
 
     const expandedBubbles = wrapper.findAllComponents(MessageBubble);
     expect(expandedBubbles.every((b) => b.props('expanded') === true)).toBe(true);
     // Once every message is expanded, the same control offers to collapse everything instead.
-    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Collapse all');
+    expect(wrapper.get('[data-action="bulk-toggle"]').text()).toBe('Collapse all');
 
     // Individual override: collapsing just the first message must not touch the second.
     await expandedBubbles[0]!.find('.expand-toggle-button').trigger('click');
@@ -540,7 +540,7 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
 
   it('renders no bulk toggle for a conversation with only one message', () => {
     const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })]);
-    expect(wrapper.find('.bulk-toggle-button').exists()).toBe(false);
+    expect(wrapper.find('[data-action="bulk-toggle"]').exists()).toBe(false);
   });
 
   it('bulk-expands every message at once via the focused view\'s own "Expand all" button, same as the sidebar box', async () => {
@@ -555,13 +555,13 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     for (const bubble of bubbles) mockTallScrollHeight(bubble.get('.message-text').element);
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Expand all');
-    await wrapper.get('.bulk-toggle-button').trigger('click');
+    expect(wrapper.get('[data-action="bulk-toggle"]').text()).toBe('Expand all');
+    await wrapper.get('[data-action="bulk-toggle"]').trigger('click');
     await wrapper.vm.$nextTick();
 
     const expandedBubbles = wrapper.findAllComponents(MessageBubble);
     expect(expandedBubbles.every((b) => b.props('expanded') === true)).toBe(true);
-    expect(wrapper.get('.bulk-toggle-button').text()).toBe('Collapse all');
+    expect(wrapper.get('[data-action="bulk-toggle"]').text()).toBe('Collapse all');
   });
 
   it('renders a Branch button, calling store.branch (httpClient.branchConversation) with this conversation as parent', async () => {
@@ -570,7 +570,7 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     );
     const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })]);
 
-    const branchButton = wrapper.get('.branch-button');
+    const branchButton = wrapper.get('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeUndefined();
     await branchButton.trigger('click');
     await flushPromises();
@@ -580,7 +580,7 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
 
   it('disables the Branch button when the server-computed canBranch is false (e.g. max depth reached)', () => {
     const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })], { canBranch: false });
-    const branchButton = wrapper.get('.branch-button');
+    const branchButton = wrapper.get('[data-action="branch"]');
     expect(branchButton.attributes('disabled')).toBeDefined();
     expect(branchButton.attributes('title')).toMatch(/maximum conversation depth/i);
   });

@@ -94,7 +94,11 @@ const name = computed(() => store.conversations.find((c) => c.id === props.conve
   height: 1.75rem;
   line-height: 1;
   padding: 0;
-  z-index: 1;
+  /* `--z-raised` (style.css `:root`) — this only needs to beat this dialog's own unstyled (auto)
+     content directly below it in the same stacking context; `.conversation-detail-dialog` (the
+     dialog itself, `position: relative`) already establishes its own via this button's own
+     `position: absolute`, so this can never collide with any app-level overlay's z-index. */
+  z-index: var(--z-raised, 1);
 }
 /* Fix (overlapping close controls): `ConversationView.vue`'s own header-actions "Close"/"Request
    review" button is the last cell of a 3-column grid that reaches all the way to this dialog's own

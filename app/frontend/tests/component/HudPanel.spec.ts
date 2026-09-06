@@ -261,3 +261,60 @@ describe('HudPanel — focus toggle/cap affordance', () => {
     expect(wrapper.emitted('toggle-focus')).toBeUndefined();
   });
 });
+
+// Bug fix regression coverage (consolidation of `ConversationStatusBadges.vue`/
+// `ConversationActionButtons.vue`, shared with `ConversationThreadBox.vue`/`ConversationView.vue`):
+// this topnav panel is the one surface that mounts the shared status badges but deliberately never
+// mounts `ConversationActionButtons` — no action icons show here by design, and clicking anywhere on
+// the row (title, status cell, or badges) must keep meaning "toggle this conversation's focus",
+// unaffected by the badges now living in a child component.
+describe('HudPanel — shared status badges, no action buttons', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountHud(overrides: { activeId?: string | null; focusedIds?: ReadonlySet<string>; focusCap?: number } = {}) {
+    return mount(HudPanel, {
+      props: {
+        activeId: overrides.activeId ?? null,
+        focusedIds: overrides.focusedIds ?? new Set(),
+        focusCap: overrides.focusCap ?? 3,
+        filter: 'all',
+      },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  function seedStaleConversation(): void {
+    const store = useConversationsStore();
+    store.loaded = true;
+    store.conversations = [
+      conversationFixture({ id: 'main', name: 'Main', kind: 'main', isStale: true, createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+  }
+
+  it('renders the Stale badge for a stale conversation, via the shared ConversationStatusBadges component', () => {
+    seedStaleConversation();
+    const wrapper = mountHud();
+    const row = wrapper.find('.conversation-row[data-conversation-id="main"]');
+    expect(row.find('.stale-badge').exists()).toBe(true);
+    expect(row.find('.stale-badge').text()).toBe('Stale');
+  });
+
+  it('renders no action buttons for any row (topnav shows no action icons, by design)', () => {
+    seedStaleConversation();
+    const wrapper = mountHud();
+    expect(wrapper.find('.action-button').exists()).toBe(false);
+    expect(wrapper.find('[data-action]').exists()).toBe(false);
+  });
+
+  it('a click anywhere on the row (including over the badges) still emits toggle-focus', async () => {
+    seedStaleConversation();
+    const wrapper = mountHud();
+    await wrapper.find('.stale-badge').trigger('click');
+    expect(wrapper.emitted('toggle-focus')?.[0]).toEqual(['main']);
+  });
+});

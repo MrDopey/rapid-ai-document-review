@@ -26,7 +26,11 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
       await expect(page.getByRole('heading', { name: 'Paste your document' })).toBeVisible();
       await page.getByLabel('Document content').fill(`# History Diff Fixture\n\n${MARKER_REMOVED}\n`);
       await page.getByRole('button', { name: 'Start reviewing' }).click();
-      await expect(page.locator('.toolbar h1')).toHaveText('History Diff Fixture');
+      // Fix: `.toolbar h1` no longer exists (006-toolbar-reorg moved the document title out of
+      // the topbar into the browser tab only — see App.vue's `document.title` watch comment) —
+      // this assertion was stale from before that refactor. `.preview-pane`'s own rendered
+      // heading is the resilient replacement already used a few lines below in this same file.
+      await expect(page.locator('.preview-pane').getByRole('heading', { name: 'History Diff Fixture' })).toBeVisible();
     });
 
     await test.step('edit the document and wait for the debounce to create revision 2', async () => {
@@ -64,6 +68,28 @@ test.describe('History — Diff view (FR-001..FR-008)', () => {
 
       const diffDialog = page.getByRole('dialog', { name: 'Compare revisions' });
       await expect(diffDialog).toBeVisible();
+
+      // Regression guard: the diff modal's backdrop (`.diff-overlay` in HistoryPanel.vue) is
+      // `position: fixed` with no explicit z-index of its own inherited from the shared
+      // `.modal-overlay` base rule — left at that default `z-index: auto`, EditorComponent.vue's
+      // `position: sticky` `.editor-toolbar` (`z-index: 2`, establishing its own stacking
+      // context) painted above it instead of behind it, since a sticky/positioned element with an
+      // explicit z-index always wins over auto/unpositioned content in the same stacking context
+      // regardless of DOM order. Confirm the dialog's own header — which visually sits at the
+      // same top-of-viewport band as the sticky editor toolbar — really is the topmost element at
+      // that point, not merely "visible" (`toBeVisible()`/`toBeInViewport()` below don't check
+      // what's painted on top at a given point).
+      const dialogHeaderBox = await diffDialog.locator('.diff-header').boundingBox();
+      expect(dialogHeaderBox).not.toBeNull();
+      const topElementHandle = await page.evaluateHandle(
+        ({ x, y }) => document.elementFromPoint(x, y),
+        { x: dialogHeaderBox!.x + dialogHeaderBox!.width / 2, y: dialogHeaderBox!.y + dialogHeaderBox!.height / 2 },
+      );
+      const topElementInDialog = await page.evaluate(
+        ([el, dialogEl]) => !!el && !!dialogEl && dialogEl.contains(el),
+        [topElementHandle, await diffDialog.elementHandle()],
+      );
+      expect(topElementInDialog).toBe(true);
 
       // Regression guard: the dialog previously had no `max-height`, so inside
       // `.modal-overlay`'s viewport-centering flexbox a long document's diff could grow far
