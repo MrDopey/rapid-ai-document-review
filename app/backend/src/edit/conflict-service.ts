@@ -74,10 +74,6 @@ function renderConflictMessage(
  * PiService (which itself depends on EditService to build the `propose_document_edit` tool).
  */
 export class ConflictService {
-  /** conversationId -> the staged_edit id a redelivered/new proposal should link to via
-   *  `supersedes_id` (agent-tools.md §Conflict recovery — the agent never supplies it itself). */
-  private readonly awaitingReplacement = new Map<string, string>();
-
   private readonly storage: StorageAdapter;
   private readonly eventService: EventService;
   private readonly eventHub: EventHub;
@@ -92,11 +88,44 @@ export class ConflictService {
     this.publisher = new EventPublisher(eventService, eventHub);
   }
 
-  /** Consumed by `EditService.stage` when creating a new proposal for `conversationId`. */
+  /** Consumed by `EditService.stage` when creating a new proposal for `conversationId`.
+   *
+   *  This pointer is derived by querying persisted `staged_edit` rows rather than tracked in an
+   *  in-memory `Map` (as it originally was): a `Map` bridging "conflict recorded as superseded" to
+   *  "replacement staged" is silently dropped by a process restart in between, breaking FR-032a's
+   *  chain-budget accounting with no error surfaced. Deriving it from storage means the pointer
+   *  survives a restart, and — since `EditService.stage` persists the replacement with
+   *  `supersedesId` pointing back at the superseded edit as part of the very same call that
+   *  consumes this value — the query is naturally self-consuming: once that successor row exists,
+   *  the superseded edit no longer qualifies as "awaiting" on any later call. No explicit
+   *  delete/consume step is needed. */
   consumeAwaitingReplacement(conversationId: string): string | null {
-    const id = this.awaitingReplacement.get(conversationId) ?? null;
-    if (id) this.awaitingReplacement.delete(conversationId);
-    return id;
+    return this.findAwaitingReplacementId(conversationId);
+  }
+
+  /** A staged edit is "awaiting replacement" when it was superseded by a conflict (`status ===
+   *  'superseded'`), no successor has been staged for it yet (no other edit in the conversation
+   *  has `supersedesId` pointing back at it), and the chain-wide attempt budget had not been
+   *  exhausted at the moment it was superseded — recomputed here via `getChainAttempts` so it
+   *  exactly mirrors the `willRequest` decision `recordConflict` made when it set that status.
+   *  When more than one such candidate exists (shouldn't happen in the normal single-active-chain
+   *  flow, but mirrors the prior Map's last-write-wins semantics for safety) the most recently
+   *  created one wins. */
+  private findAwaitingReplacementId(conversationId: string): string | null {
+    const edits = this.storage.listStagedEditsByConversation(conversationId);
+    const alreadySucceeded = new Set(
+      edits.map((e) => e.supersedesId).filter((id): id is string => id !== null),
+    );
+    const maxAttempts = this.storage.getSettings().maxReplacementAttempts;
+
+    const candidates = edits
+      .filter((e) => e.status === 'superseded' && !alreadySucceeded.has(e.id))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    for (const candidate of candidates) {
+      if (this.getChainAttempts(candidate.id) < maxAttempts) return candidate.id;
+    }
+    return null;
   }
 
   /** Walks `supersedes_id` back to the root of `editId`'s supersession chain and returns the
@@ -128,9 +157,10 @@ export class ConflictService {
     const nextAttempt = chainAttempts + 1;
     const attemptsRemaining = Math.max(0, maxAttempts - nextAttempt);
 
-    if (willRequest) {
-      this.awaitingReplacement.set(edit.conversationId, edit.id);
-    }
+    // No explicit "awaiting replacement" marker to set here: `edit` now has `status: 'superseded'`
+    // persisted above, and — when `willRequest` is true — `findAwaitingReplacementId` derives the
+    // pending-replacement pointer straight from that row (see its doc comment) until a successor
+    // staged edit points `supersedesId` back at it.
 
     this.publish(edit.documentId, edit.conversationId, 'staged_edit_superseded', {
       stagedEditId: edit.id,
