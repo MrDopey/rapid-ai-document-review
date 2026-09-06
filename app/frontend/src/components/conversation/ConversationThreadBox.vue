@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
-import { ApiError } from '../../transport/http-client.js';
-import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
 import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { useConversationContinuity } from '../../composables/conversationContinuity.js';
+import { useConversationRename } from '../../composables/conversationRename.js';
 import {
   useConversationBranchAction,
   useBulkToggleAction,
   type ActionDescriptor,
 } from '../../composables/conversationActions.js';
+import { useConversationStatusBadges } from '../../composables/conversationStatusBadges.js';
 import ConversationStatusBadges from './ConversationStatusBadges.vue';
 import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
@@ -61,60 +61,20 @@ const store = useConversationsStore();
 
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
 const messages = computed(() => store.messagesFor(props.conversationId));
+// De-dup fix: `isPrimary` now computed once by `conversationStatusBadges.ts`, shared with
+// `ConversationView.vue`/`HudPanel.vue` — see that composable's own doc comment.
+const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
 // Rename affordance: click-to-edit title, following the same "one action per slot" convention as
 // the Branch action below — an inline text input replaces the plain-text `.thread-title`
 // span rather than opening a modal/dialog, since this is a single-field, low-stakes edit. Save on
 // Enter/blur, cancel on Escape (constitution's "UI Conventions": no confirmation dialog for a
-// reversible, single-field text edit).
-const isEditingName = ref(false);
-const nameDraft = ref('');
-const renameError = ref<string | null>(null);
-const renameSaving = ref(false);
+// reversible, single-field text edit). Shared with `ConversationView.vue`'s focus/detail view via
+// `useConversationRename` (same store action, `store.rename`, so renaming from either view updates
+// both — they share the same Pinia store).
 const nameInputEl = ref<HTMLInputElement | null>(null);
-
-async function startEditingName(): Promise<void> {
-  if (!conversation.value) return;
-  nameDraft.value = conversation.value.name;
-  renameError.value = null;
-  isEditingName.value = true;
-  await nextTick();
-  nameInputEl.value?.focus();
-  nameInputEl.value?.select();
-}
-
-function cancelEditingName(): void {
-  isEditingName.value = false;
-  renameError.value = null;
-}
-
-async function saveName(): Promise<void> {
-  if (!isEditingName.value || !conversation.value) return;
-  const trimmed = nameDraft.value.trim();
-  if (!trimmed) {
-    // FR: empty-name validation — rejected inline, editing stays open so the user can fix it
-    // (matching `branchError`'s inline-message convention below) rather than silently reverting.
-    renameError.value = 'Name cannot be empty';
-    return;
-  }
-  if (trimmed === conversation.value.name) {
-    // No-op edit (e.g. blur with nothing changed): close without a network round trip.
-    isEditingName.value = false;
-    renameError.value = null;
-    return;
-  }
-  renameSaving.value = true;
-  try {
-    await store.rename(conversation.value.id, trimmed);
-    isEditingName.value = false;
-    renameError.value = null;
-  } catch (err) {
-    renameError.value =
-      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to rename conversation.';
-  } finally {
-    renameSaving.value = false;
-  }
-}
+const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName } =
+  useConversationRename(() => props.conversationId, nameInputEl);
 
 // Branch-lineage cue (sidebar list view): a plain-text breadcrumb naming this conversation's
 // parent, if any. Note on scope: this data model has no message-level fork-point field at all —
@@ -143,27 +103,18 @@ const { parentConversation, continuityMessages } = useConversationContinuity(() 
 // (data-model.md's `MessageDisplayState` is "purely a batch write over the same per-message
 // field", not a separate stored bulk mode). Seeded from `localStorage` per message the first time
 // each message is seen (streaming deltas update `message.text` in place without changing `id`, so
-// this only runs once per real message).
-// Bug fix (assistant messages expanded by default): `loadMessageExpanded`'s second argument is the
-// default to fall back to only when nothing has ever been explicitly stored for this exact message
-// id — an assistant reply now starts fully shown rather than clamped/requiring a click, without
-// disturbing any message (of either role) the user has already toggled by hand. User messages keep
-// the pre-existing collapsed-by-default behaviour: they're the ones the user themselves just typed
-// (so their own content is never a surprise), tend to be short, and the user only asked about
-// "assistant returned messages" here — changing their default too would be an unrequested, and
-// arguably regressive, behaviour change for a case this task doesn't cover.
-const expandedByMessage = ref<Record<string, boolean>>({});
-watch(
-  messages,
-  (list) => {
-    for (const message of list) {
-      if (!(message.id in expandedByMessage.value)) {
-        expandedByMessage.value[message.id] = loadMessageExpanded(message.id, message.role === 'assistant');
-      }
-    }
-  },
-  { immediate: true },
-);
+// this only runs once per real message) — see `ensureMessageExpandedSeeded` in
+// `stores/conversations.ts` for the role-aware default (assistant replies start expanded, user
+// messages stay collapsed-by-default) and the full reasoning.
+//
+// Bug fix (state divergence): this used to be a local `ref<Record<string, boolean>>` — since this
+// box and `ConversationView.vue`'s focus/detail view can both be mounted at once for the same
+// conversation, two independent local refs could silently show different expanded/collapsed state
+// for the same message. Now backed by `conversationsStore.expandedByMessage` (keyed by
+// conversationId then messageId) so both components read/write the exact same reactive source —
+// `localStorage` stays purely the persistence layer underneath it.
+const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
+watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
 
 // Root DOM node of the sticky header — passed to `scrollMessageTopIntoView` below so it can offset
 // for the header's own live rendered height (see that composable's doc comment for why a fixed CSS
@@ -179,8 +130,7 @@ const threadHeaderEl = ref<HTMLElement | null>(null);
 // content the user hasn't seen yet.
 function setMessageExpanded(messageId: string, expanded: boolean): void {
   const wasExpanded = expandedByMessage.value[messageId];
-  expandedByMessage.value[messageId] = expanded;
-  persistMessageExpanded({ [messageId]: expanded });
+  store.setMessageExpanded(props.conversationId, messageId, expanded);
   if (expanded && !wasExpanded) {
     scrollMessageTopIntoView(rootEl.value, messageId, threadHeaderEl.value);
   }
@@ -190,13 +140,9 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // collapsed, one click expands all of them; once every message is already expanded, the same
 // control collapses all of them instead. Individual messages stay independently toggleable
 // afterward (setMessageExpanded above is unchanged by this bulk path).
-// Now shared with `ConversationView.vue` via `useBulkToggleAction` — see that composable's own doc
-// comment for why it still needs this box's own `expandedByMessage` ref passed in rather than
-// owning an independent copy of that state.
-const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(
-  () => props.conversationId,
-  expandedByMessage,
-);
+// Now shared with `ConversationView.vue` via `useBulkToggleAction`, backed by the shared store slice
+// above rather than this box's own local ref.
+const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
 
 // Root element exposed so `DocumentCanvas.vue` can attach a `ResizeObserver` to it (Phase 4/US2's
 // sibling-collision stacking needs each box's *actual* rendered height, not a fixed assumption).
@@ -289,7 +235,7 @@ defineExpose({ el: rootEl });
     v-if="conversation"
     ref="rootEl"
     class="conversation-thread-box"
-    :class="{ 'is-primary': conversation.isPrimary }"
+    :class="{ 'is-primary': isPrimary }"
     :data-conversation-id="conversationId"
   >
     <span class="pane-eyebrow">Conversation</span>
@@ -381,18 +327,19 @@ defineExpose({ el: rootEl });
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 /* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
-   background tint) had no equivalent on this box — reused verbatim for visual consistency across
-   all three surfaces that display a conversation (HudPanel, `ConversationView.vue`, this box).
-   `box-shadow` is a single property, so this rule restates the base rule's own drop-shadow
-   alongside the two new inset shadows rather than losing it to a separate `.is-primary` override;
-   both inset shadows automatically follow this box's own `border-radius: 6px` (an inset shadow is
-   always clipped to the padding box's rounded corners, same as the border it sits just inside of),
-   so there's no separate corner-radius fix needed here. */
+   background tint) had no equivalent on this box — the shadow value itself now lives once in
+   style.css's `--primary-indicator-shadow` custom property (shared with `ConversationView.vue`'s/
+   `HudPanel.vue`'s own `.is-primary` rules), reused here for visual consistency across all three
+   surfaces that display a conversation. `box-shadow` is a single property, so this rule still
+   restates the base rule's own drop-shadow alongside `--primary-indicator-shadow` rather than
+   losing it to a separate `.is-primary` override; both inset shadows automatically follow this
+   box's own `border-radius: 6px` (an inset shadow is always clipped to the padding box's rounded
+   corners, same as the border it sits just inside of), so there's no separate corner-radius fix
+   needed here. */
 .conversation-thread-box.is-primary {
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.08),
-    inset 3px 0 0 0 var(--accent-color, #2563eb),
-    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
+    var(--primary-indicator-shadow);
 }
 /* Header consolidation: title+status stays a single top row; lineage + actions stack beneath it.
    Previously `.thread-header` was a single 3-column grid holding only title | Open | status — the
@@ -471,52 +418,16 @@ defineExpose({ el: rootEl });
   font-size: 0.85rem;
   min-width: 0;
 }
-/* Icon-only button, same 24x24 minimum hit area as `.thread-action-button` (research.md §4) —
-   deliberately borderless/transparent at rest so it doesn't compete visually with the title text,
-   picking up a visible border only on hover/focus (same treatment as `.thread-action-button`'s own
-   hover state, just starting from a quieter baseline appropriate to a secondary, always-visible
-   affordance). */
-.thread-rename-button {
-  flex-shrink: 0;
-  min-width: 24px;
-  min-height: 24px;
-  font-size: 0.75rem;
-  line-height: 1;
-  padding: 0.15rem 0.3rem;
-  color: var(--neutral-muted-color, #4b5563);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.thread-rename-button:hover,
-.thread-rename-button:focus-visible {
-  color: var(--text-color, #111);
-  background: var(--panel-bg-alt, #eef0f3);
-  border-color: var(--neutral-muted-color, #4b5563);
-}
-.thread-rename-button:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: 1px;
-}
+/* `.thread-rename-button`/`.rename-error` shared shape now lives in style.css (identical to
+   `ConversationView.vue`'s own copy). `.thread-title-input`'s shared shape (flex/border/padding)
+   also lives there — this override layers just the three properties that differ from
+   `ConversationView.vue`'s own copy (matching this box's own compact title styling rather than an
+   `h2`). */
 .thread-title-input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
   font-weight: 600;
   font-size: 0.85rem;
   color: var(--text-color, #111);
   background: var(--panel-bg, #f7f7f8);
-  border: 1px solid var(--accent-color, #2563eb);
-  border-radius: 4px;
-  padding: 0.1rem 0.3rem;
-}
-.thread-title-input:disabled {
-  opacity: 0.7;
-}
-.rename-error {
-  color: var(--danger-color, #b91c1c);
-  font-size: 0.7rem;
 }
 .thread-status {
   display: flex;
@@ -554,35 +465,10 @@ defineExpose({ el: rootEl });
   display: flex;
   flex-direction: column;
 }
-/* Read-only continuity context (branch placeholder with zero of its own messages): dimmed +
-   dashed, distinguishing it from `.thread-messages`'s real, interactive transcript below — same
-   "context, not a real message" visual language `MessageBubble.vue`'s own `.seed-card` uses. */
-.continuity-context {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  margin-bottom: 0.4rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px dashed var(--seed-border, #9ca3af);
-  border-radius: 6px;
-  background: var(--seed-bg, #f3f4f6);
-  opacity: 0.85;
-}
-/* Contrast fix (a11y audit), same reasoning as `MessageBubble.vue`'s `.message-role-label` fix:
-   `.continuity-context`'s own `--seed-bg` tint is further lightened by its `opacity: 0.85`, which
-   blends it (and this label's text) toward whatever backdrop sits behind it — composited contrast
-   for the flat-surface `--neutral-muted-color` measures right at ~4.5:1 with no margin there,
-   risking a drop below AA depending on the real backdrop. style.css's tinted-surface token,
-   `--neutral-muted-color-on-tint`, is the one meant for exactly this case and clears 5:1+ with
-   real margin against every composited backdrop tested in dark mode; light mode is unaffected
-   since dark text on this light/tinted-light card already has a huge margin. */
-.continuity-label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--neutral-muted-color-on-tint, #c3cad3);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
+/* Read-only continuity context (branch placeholder with zero of its own messages): shared shape/
+   `.continuity-label` now live in style.css (identical to `ConversationView.vue`'s own copy,
+   including this exact `margin-bottom` — no override needed here). See that stylesheet's own
+   comment for the `--neutral-muted-color-on-tint` contrast reasoning. */
 .branch-error {
   color: var(--danger-color, #b91c1c);
   font-size: 0.7rem;

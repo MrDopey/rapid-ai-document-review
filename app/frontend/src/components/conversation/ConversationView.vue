@@ -6,14 +6,15 @@ import { ApiError } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import { clamp, useResizeHandle } from '../../composables/useResizeHandle.js';
 import { loadPaneSizes, persistPaneSizes } from '../../composables/panePersistence.js';
-import { loadMessageExpanded, persistMessageExpanded } from '../../composables/messageDisplayState.js';
 import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { useConversationContinuity } from '../../composables/conversationContinuity.js';
+import { useConversationRename } from '../../composables/conversationRename.js';
 import {
   useConversationBranchAction,
   useBulkToggleAction,
   type ActionDescriptor,
 } from '../../composables/conversationActions.js';
+import { useConversationStatusBadges } from '../../composables/conversationStatusBadges.js';
 import ConversationStatusBadges from './ConversationStatusBadges.vue';
 import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
@@ -88,64 +89,19 @@ function dismissDirectEditHint(): void {
 
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
+// De-dup fix: `isPrimary` now computed once by `conversationStatusBadges.ts`, shared with
+// `ConversationThreadBox.vue`/`HudPanel.vue` — see that composable's own doc comment.
+const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
 // Rename affordance (parity fix): the sidebar's `ConversationThreadBox.vue` offers a click-to-edit
 // title (an inline `<input>` replacing the plain-text title, save on Enter/blur, cancel on
 // Escape — see that component's own doc comment for the "one action per slot"/no-confirmation-
-// dialog rationale) that this focused/detail view had no equivalent of. Duplicated here rather than
-// extracted into a shared composable (contrast `useConversationContinuity` below, genuinely shared
-// by both call sites) — this task's scope keeps `ConversationThreadBox.vue` untouched, so a
-// composable would have exactly one consumer and wouldn't actually reduce any duplication. Same
-// store action (`store.rename`) as the sidebar, so renaming from either view updates both (they
-// share the same Pinia store).
-const isEditingName = ref(false);
-const nameDraft = ref('');
-const renameError = ref<string | null>(null);
-const renameSaving = ref(false);
+// dialog rationale) that this focused/detail view had no equivalent of. Shared with that component
+// via `useConversationRename` (same store action, `store.rename`, so renaming from either view
+// updates both — they share the same Pinia store).
 const nameInputEl = ref<HTMLInputElement | null>(null);
-
-async function startEditingName(): Promise<void> {
-  if (!conversation.value) return;
-  nameDraft.value = conversation.value.name;
-  renameError.value = null;
-  isEditingName.value = true;
-  await nextTick();
-  nameInputEl.value?.focus();
-  nameInputEl.value?.select();
-}
-
-function cancelEditingName(): void {
-  isEditingName.value = false;
-  renameError.value = null;
-}
-
-async function saveName(): Promise<void> {
-  if (!isEditingName.value || !conversation.value) return;
-  const trimmed = nameDraft.value.trim();
-  if (!trimmed) {
-    // FR: empty-name validation — rejected inline, editing stays open so the user can fix it
-    // (matching `branchError`'s inline-message convention below) rather than silently reverting.
-    renameError.value = 'Name cannot be empty';
-    return;
-  }
-  if (trimmed === conversation.value.name) {
-    // No-op edit (e.g. blur with nothing changed): close without a network round trip.
-    isEditingName.value = false;
-    renameError.value = null;
-    return;
-  }
-  renameSaving.value = true;
-  try {
-    await store.rename(conversation.value.id, trimmed);
-    isEditingName.value = false;
-    renameError.value = null;
-  } catch (err) {
-    renameError.value =
-      err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to rename conversation.';
-  } finally {
-    renameSaving.value = false;
-  }
-}
+const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName } =
+  useConversationRename(() => props.conversationId, nameInputEl);
 
 // Bug fix (005-canvas-conversation-threads follow-up): the sidebar's compact
 // `ConversationThreadBox.vue` renders the parent's last user+assistant message as read-only
@@ -168,22 +124,19 @@ const { parentConversation, continuityMessages } = useConversationContinuity(() 
 // default via `messageDisplayState.ts` without colliding, even with several focused panels for
 // different conversations open at once).
 // Bug fix (assistant messages expanded by default): same role-aware default as
-// `ConversationThreadBox.vue`'s own `expandedByMessage` watcher (see its doc comment for the full
-// reasoning) — an assistant reply starts fully shown, a user message keeps the pre-existing
-// collapsed-by-default behaviour, and any message the user has explicitly toggled by hand (of
-// either role) keeps exactly that choice regardless of this default.
-const expandedByMessage = ref<Record<string, boolean>>({});
-watch(
-  messages,
-  (list) => {
-    for (const message of list) {
-      if (!(message.id in expandedByMessage.value)) {
-        expandedByMessage.value[message.id] = loadMessageExpanded(message.id, message.role === 'assistant');
-      }
-    }
-  },
-  { immediate: true },
-);
+// `ConversationThreadBox.vue`'s own seeding (see `ensureMessageExpandedSeeded`'s doc comment in
+// `stores/conversations.ts` for the full reasoning) — an assistant reply starts fully shown, a
+// user message keeps the pre-existing collapsed-by-default behaviour, and any message the user has
+// explicitly toggled by hand (of either role) keeps exactly that choice regardless of this default.
+//
+// Bug fix (state divergence): this used to be a local `ref<Record<string, boolean>>` — since
+// `ConversationThreadBox.vue`'s canvas box and this focused/detail view can both be mounted at once
+// for the same conversation, two independent local refs could silently show different
+// expanded/collapsed state for the same message. Now backed by `conversationsStore.expandedByMessage`
+// (keyed by conversationId then messageId) so both components read/write the exact same reactive
+// source — `localStorage` stays purely the persistence layer underneath it.
+const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
+watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
 // Bug fix (scroll-to-top-of-message): expanding a single message scrolls so its own top edge
 // becomes visible — see `ConversationThreadBox.vue`'s identical `setMessageExpanded` doc comment
 // for why only the collapsed -> expanded direction triggers this, and why the bulk toggle below
@@ -191,8 +144,7 @@ watch(
 // `.thread-header`), so `scrollMessageTopIntoView` is called with no offset element.
 function setMessageExpanded(messageId: string, expanded: boolean): void {
   const wasExpanded = expandedByMessage.value[messageId];
-  expandedByMessage.value[messageId] = expanded;
-  persistMessageExpanded({ [messageId]: expanded });
+  store.setMessageExpanded(props.conversationId, messageId, expanded);
   if (expanded && !wasExpanded) {
     scrollMessageTopIntoView(listRef.value, messageId);
   }
@@ -203,10 +155,7 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // exact same per-message `expandedByMessage` state this view already owns above — this focused/
 // detail view had no equivalent, even though it owns the richer (unclamped-by-default) copy of that
 // same state. Now shared with `ConversationThreadBox.vue` via `useBulkToggleAction`.
-const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(
-  () => props.conversationId,
-  expandedByMessage,
-);
+const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
 
 // Parity fix: the sidebar's `ConversationThreadBox.vue` also offers a "Branch" action (branching
 // *this* conversation with no selection, US2/FR-006/FR-007 — see `conversationActions.ts`'s own doc
@@ -282,6 +231,14 @@ const transcriptEditsStyle = computed(() => {
   if (!hasEdits.value) return undefined;
   return { gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr` };
 });
+
+/** Accessibility fix (WCAG "Required ARIA attribute not present: aria-valuenow", confirmed via a
+ *  live axe-core scan on every screen): this `role="separator"` handle carried no
+ *  `aria-valuenow`/`aria-valuemin`/`aria-valuemax` at all. Expressed as a 0-100 percentage of the
+ *  transcript/edits split (same live fraction `transcriptEditsStyle` above already renders), so an
+ *  assistive-tech user gets the same "how is this split right now" information sighted users read
+ *  off the handle's own position. */
+const editsSplitPercent = computed(() => Math.round((transcriptFr.value / (transcriptFr.value + editsFr.value)) * 100));
 
 const editsResize = useResizeHandle({
   axis: 'vertical',
@@ -575,7 +532,11 @@ const actions = computed<ActionDescriptor[]>(() => {
 </script>
 
 <template>
-  <section class="conversation-view" :class="{ 'is-primary': conversation?.isPrimary }" aria-label="Conversation">
+  <section
+    class="conversation-view"
+    :class="{ 'is-primary': isPrimary, 'primary-indicator': isPrimary }"
+    aria-label="Conversation"
+  >
     <!-- UI convention: title | status | action (see .specify/memory/constitution.md
          "UI Conventions") — the same 3-section pattern as HudPanel.vue's conversation-list rows,
          laid out as two explicit rows rather than one (see `.conversation-header`'s doc comment
@@ -689,6 +650,9 @@ const actions = computed<ActionDescriptor[]>(() => {
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize transcript and proposed edits"
+        :aria-valuenow="editsSplitPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
         tabindex="0"
         @pointerdown="editsResize.startDrag($event)"
         @keydown="editsResize.onKeydown($event)"
@@ -759,9 +723,16 @@ const actions = computed<ActionDescriptor[]>(() => {
           <input v-model="foldSummaryIntoParent" type="checkbox" />
           Fold a compact summary into the parent conversation
         </label>
+        <!-- Bug fix (dark-pattern ordering): "Close conversation" is irreversible (see the "This
+             cannot be undone" text above) — it used to be the first, auto-focused button (this
+             dialog's `useFocusTrap` focuses whichever focusable element is first in DOM order),
+             visually identical to Cancel. Cancel now comes first (so it's the one that gets
+             auto-focused) and "Close conversation" carries explicit danger styling, consistent with
+             how the "Archive" action that opens this dialog is already styled (`danger: true` in
+             `archiveOrReviewAction` above). -->
         <div class="close-dialog-actions">
-          <button type="button" :disabled="closing" @click="confirmClose">Close conversation</button>
           <button type="button" :disabled="closing" @click="cancelCloseDialog">Cancel</button>
+          <button type="button" class="danger" :disabled="closing" @click="confirmClose">Close conversation</button>
         </div>
       </div>
     </div>
@@ -776,18 +747,14 @@ const actions = computed<ActionDescriptor[]>(() => {
   min-height: 0;
 }
 /* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
-   background tint, both via `box-shadow` so they layer independently of any other border/background
-   this root element might have) had no equivalent here — this focused/detail view showed no visual
-   cue at all for the Primary conversation. Same recipe, reused verbatim for visual consistency
-   across all three surfaces that display a conversation (HudPanel, this view,
-   `ConversationThreadBox.vue`). Never color alone: the closed-conversation `.readonly-banner` above
-   already spells out "no Primary" in words, and `PrimaryPanel.vue`'s Make/Clear-Primary controls
-   name this conversation by its title, not by this styling alone. */
-.conversation-view.is-primary {
-  box-shadow:
-    inset 3px 0 0 0 var(--accent-color, #2563eb),
-    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
-}
+   background tint) had no equivalent here — this focused/detail view showed no visual cue at all
+   for the Primary conversation. De-dup fix: the actual box-shadow value now lives once in
+   style.css's shared `.primary-indicator` class (applied alongside `.is-primary` in the template)
+   rather than being redefined here — reused for visual consistency across all three surfaces that
+   display a conversation (HudPanel, this view, `ConversationThreadBox.vue`). Never color alone: the
+   closed-conversation `.readonly-banner` above already spells out "no Primary" in words, and
+   `PrimaryPanel.vue`'s Make/Clear-Primary controls name this conversation by its title, not by this
+   styling alone. */
 /* Layout fix: an explicit two-row column (rather than a single-row 3-column grid with
    `.header-actions` wrapping onto a second line when it overflows) — the row-wrap fallback still
    worked, but let the action row's wrap point drift with however wide the title/status happened to
@@ -834,54 +801,17 @@ const actions = computed<ActionDescriptor[]>(() => {
   gap: 0.25rem;
   min-width: 0;
 }
-/* Icon-only button, same 24x24 minimum hit area and quiet-at-rest/visible-on-hover treatment as
-   `ConversationThreadBox.vue`'s own `.thread-rename-button` (duplicated rather than shared — see
-   that class's doc comment in this file's script for why). */
-.thread-rename-button {
-  flex-shrink: 0;
-  min-width: 24px;
-  min-height: 24px;
-  font-size: 0.75rem;
-  line-height: 1;
-  padding: 0.15rem 0.3rem;
-  color: var(--neutral-muted-color, #4b5563);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.thread-rename-button:hover,
-.thread-rename-button:focus-visible {
-  color: var(--text-color, #111);
-  background: var(--panel-bg, #f7f7f8);
-  border-color: var(--neutral-muted-color, #4b5563);
-}
-.thread-rename-button:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: 1px;
-}
-/* Sized/weighted to match the `h2` title it replaces while editing (see `.conversation-header h2`
-   below), background matched to this header's own `--panel-bg-alt` surface — same "background
-   matches the surrounding box" convention as `ConversationThreadBox.vue`'s own `.thread-title-input`
-   (which matches its own box's `--panel-bg`). */
+/* `.thread-rename-button`/`.rename-error` shared shape now lives in style.css (identical between
+   this view and `ConversationThreadBox.vue`). `.thread-title-input`'s shared shape (flex/border/
+   padding) also lives there — this override layers just the three properties that differ from
+   `ConversationThreadBox.vue`'s own copy: sized/weighted to match the `h2` title it replaces while
+   editing (see `.conversation-header h2` below), background matched to this header's own
+   `--panel-bg-alt` surface. */
 .thread-title-input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
   font-weight: 700;
   font-size: 1rem;
   color: var(--text-color, #111);
   background: var(--panel-bg-alt, #eef0f3);
-  border: 1px solid var(--accent-color, #2563eb);
-  border-radius: 4px;
-  padding: 0.1rem 0.3rem;
-}
-.thread-title-input:disabled {
-  opacity: 0.7;
-}
-.rename-error {
-  color: var(--danger-color, #b91c1c);
-  font-size: 0.7rem;
 }
 /* Row 2: the header's action row (title | status | action, per .specify/memory/constitution.md
    "UI Conventions", now on its own row below row 1). Up to three buttons can render here at once
@@ -936,28 +866,12 @@ const actions = computed<ActionDescriptor[]>(() => {
   scrollbar-gutter: stable;
   padding: 0.75rem;
 }
-/* Read-only continuity context (branch placeholder with zero of its own messages): same treatment
-   as `ConversationThreadBox.vue`'s own `.continuity-context`/`.continuity-label` (dimmed + dashed,
-   same "context, not a real message" visual language `MessageBubble.vue`'s own `.seed-card` uses) —
-   duplicated here (rather than shared globally) since each `<style scoped>` block is its own
-   component, same as this file's other sidebar-parity rules (`.resize-handle--vertical`, etc). */
+/* Read-only continuity context (branch placeholder with zero of its own messages): shared shape/
+   `.continuity-label` now live in style.css (identical to `ConversationThreadBox.vue`'s own copy) —
+   this overrides just the one property that differed between the two (`margin-bottom`: this view
+   uses a touch more breathing room than the sidebar box's compact card). */
 .continuity-context {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
   margin-bottom: 0.5rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px dashed var(--seed-border, #9ca3af);
-  border-radius: 6px;
-  background: var(--seed-bg, #f3f4f6);
-  opacity: 0.85;
-}
-.continuity-label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--neutral-muted-color-on-tint, #c3cad3);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
 }
 .error-banner {
   display: flex;
@@ -1042,11 +956,8 @@ const actions = computed<ActionDescriptor[]>(() => {
   border-top: 1px solid var(--info-border, #bfdbfe);
   font-size: 0.75rem;
 }
-.dismiss-notice-button {
-  flex: 0 0 auto;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-}
+/* `.dismiss-notice-button` shared shape now lives in style.css (shared with PrimaryPanel.vue's
+   Primary-notice dismiss button). */
 /* New: draggable, keyboard-operable resize handle between the transcript and proposed-edits list
    — same look/behaviour as App.vue's `.resize-handle--vertical` (a separate, identically-named
    rule here since each `<style scoped>` block is its own component). */
@@ -1150,5 +1061,18 @@ const actions = computed<ActionDescriptor[]>(() => {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+/* Bug fix (dark-pattern styling): "Close conversation" is the one irreversible action in this
+   dialog — same danger treatment `ConversationActionButtons.vue`'s `.action-button.danger` already
+   gives the "Archive" action that opens this dialog, reused here since this button isn't rendered
+   through that shared component. */
+.close-dialog-actions button.danger {
+  color: var(--danger-color, #b91c1c);
+  border-color: var(--danger-color, #b91c1c);
+}
+.close-dialog-actions button.danger:hover:not(:disabled) {
+  background: var(--danger-color, #b91c1c);
+  border-color: var(--danger-color, #b91c1c);
+  color: #fff;
 }
 </style>
