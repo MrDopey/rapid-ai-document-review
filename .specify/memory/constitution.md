@@ -1,20 +1,13 @@
 <!--
 Sync Impact Report
-Version change: 1.5.0 → 2.0.0
-Rationale: MAJOR — removed the "Quality & Review Gates" bullet (added in 1.5.0) requiring a
-duplicated small CSS pattern to be hoisted into style.css's shared utility-class layer, and
-requiring any unbounded/dynamic text element to use `.text-wrap-safe`/`.text-wrap-safe-pre`. This
-is not dropped guidance — it is relocated to the per-feature planning workflow (a new subsection
-in `.specify/templates/plan-template.md`, plus an explicit read-`style.css` step added to
-`.claude/skills/speckit-plan/SKILL.md` and `.claude/skills/speckit-implement/SKILL.md`), because it
-describes how to plan/implement a UI change rather than a rarely-changing, project-wide governance
-principle. The versioning policy below only lists "removal" under MAJOR (MINOR is additions-only),
-so this relocation is versioned as a MAJOR removal of a governance rule from this document,
-regardless of the guidance surviving elsewhere.
-Modified principles: n/a (no Core Principle redefined)
-Added sections: none
-Removed sections: none (the "Quality & Review Gates" section itself is retained; only its
-CSS-hoisting bullet, added in 1.5.0, is removed from it)
+Version change: 2.0.0 → 2.1.0
+Rationale: MINOR — added a new Core Principle (VIII. Comments Are Durable, Not Historical)
+governing when and how code comments should be written. This is new, materially expanded
+guidance rather than a redefinition of an existing principle, so it is versioned as MINOR per the
+policy below.
+Modified principles: n/a (no existing Core Principle redefined)
+Added sections: Core Principles → VIII. Comments Are Durable, Not Historical
+Removed sections: none
 Deferred items: none
 -->
 
@@ -86,6 +79,21 @@ be introduced later, but only once the Pi SDK has been demonstrated to be insuff
 specific, stated requirement.
 **Rationale**: Avoids speculative infrastructure; keeps the integration surface with Pi as small as
 possible until a concrete need proves otherwise (YAGNI applied to the Pi integration boundary).
+
+### VIII. Comments Are Durable, Not Historical
+Code comments MUST be used sparingly, and only where they survive a refactor or rewrite without
+becoming stale or misleading. A comment MUST NOT describe the current change, reference a task,
+ticket, or prior implementation, or otherwise narrate history — that content belongs in commit
+messages and PR descriptions, not in the codebase. A comment that exists primarily to describe what
+a specific change did, rather than a durable fact about the code as it now stands, MUST NOT be
+written. Where a comment is warranted, it MUST be clear and concise, and MUST call out a gotcha that
+cannot be discovered by reading the surrounding code — a non-obvious invariant, a hidden constraint,
+or a behavior that would otherwise surprise a future reader. A comment written to justify an
+exception to a rule or convention is a signal that the exception is masking a poor design decision;
+in that case the design MUST be fixed rather than documented around.
+**Rationale**: Comments that narrate a change's history rot the moment the surrounding code moves
+on, and comments that over-explain drown out the rare comment that actually earns its place;
+keeping comments sparse, durable, and focused on non-obvious gotchas keeps them trustworthy.
 
 ## Technology & Platform Constraints
 
@@ -189,4 +197,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-08-30
+**Version**: 2.1.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-06
