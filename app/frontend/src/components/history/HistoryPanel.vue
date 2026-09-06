@@ -4,6 +4,7 @@ import type { PendingProposalReconciliationEntry } from '@rapid-ai-document-revi
 import { useDocumentStore } from '../../stores/document.js';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { useEditsStore } from '../../stores/edits.js';
+import { useFocusTrap } from '../../a11y/focus-manager.js';
 import RevisionDiffViewer from '../diff/RevisionDiffViewer.vue';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -13,6 +14,16 @@ const conversationsStore = useConversationsStore();
 const editsStore = useEditsStore();
 
 const diffingRevision = ref<number | null>(null);
+
+// Fix: Restore instantly overwrites the live document with no undo — every other state-changing
+// action in this app (e.g. closing a conversation, ConversationView.vue's close dialog) gates
+// behind a confirmation dialog first. Mirrors that same role="alertdialog"/focus-trap pattern.
+const restoreDialogOpen = ref(false);
+const restoreTarget = ref<number | null>(null);
+const restoreDialogEl = ref<HTMLElement | null>(null);
+const restoring = ref(false);
+
+useFocusTrap(restoreDialogEl, restoreDialogOpen, { onEscape: () => cancelRestoreDialog() });
 
 /** Set only right after a restore whose response included `pendingProposalReconciliation`
  *  (http-api.md §POST /revisions/:revision/restore) — purely informational: the restore has
@@ -30,6 +41,28 @@ onMounted(() => {
     void store.loadRevisions();
   }
 });
+
+function openRestoreDialog(revision: number): void {
+  restoreTarget.value = revision;
+  restoreDialogOpen.value = true;
+}
+
+function cancelRestoreDialog(): void {
+  restoreDialogOpen.value = false;
+  restoreTarget.value = null;
+}
+
+async function confirmRestore(): Promise<void> {
+  if (restoreTarget.value === null) return;
+  restoring.value = true;
+  try {
+    await onRestore(restoreTarget.value);
+  } finally {
+    restoring.value = false;
+    restoreDialogOpen.value = false;
+    restoreTarget.value = null;
+  }
+}
 
 async function onRestore(revision: number): Promise<void> {
   const result = await store.restore(revision);
@@ -111,7 +144,7 @@ async function onCopy(revision: number): Promise<void> {
         <div v-if="rev.note" class="note text-wrap-safe">{{ rev.note }}</div>
         <time :datetime="rev.createdAt">{{ formatLocal(rev.createdAt) }}</time>
         <div class="actions">
-          <button type="button" @click="onRestore(rev.revision)">Restore</button>
+          <button type="button" class="restore-button" @click="openRestoreDialog(rev.revision)">Restore</button>
           <a :href="exportUrl(rev.revision)" download>Download</a>
           <button type="button" @click="onCopy(rev.revision)">Copy</button>
           <button v-if="rev.revision > 1" type="button" @click="diffingRevision = rev.revision">Diff</button>
@@ -127,6 +160,17 @@ async function onCopy(revision: number): Promise<void> {
         :previous-revision="diffingRevision - 1"
         @close="diffingRevision = null"
       />
+    </div>
+    <div v-if="restoreDialogOpen" class="modal-overlay restore-dialog-overlay">
+      <div ref="restoreDialogEl" class="restore-dialog" role="alertdialog" aria-modal="true" aria-label="Restore revision">
+        <p>Restore to revision {{ restoreTarget }}? This will overwrite the current document content.</p>
+        <div class="restore-dialog-actions">
+          <button type="button" class="restore-button" :disabled="restoring" @click="confirmRestore">
+            {{ restoring ? 'Restoring…' : 'Restore' }}
+          </button>
+          <button type="button" :disabled="restoring" @click="cancelRestoreDialog">Cancel</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -186,6 +230,17 @@ async function onCopy(revision: number): Promise<void> {
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
+/* Fix: Restore overwrites the live document with no undo, unlike Download/Copy/Diff (all
+   read-only) — give it a danger-toned treatment (same pattern as DropAllButton.vue) so it doesn't
+   read as an equally-weighted peer of the three safe actions beside it. */
+.restore-button {
+  background: transparent;
+  border-color: var(--danger-color, #b91c1c);
+  color: var(--danger-color, #b91c1c);
+}
+.restore-button:hover:not(:disabled) {
+  background: var(--danger-bg, #fef2f2);
+}
 .reconciliation-panel {
   border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
@@ -230,5 +285,25 @@ async function onCopy(revision: number): Promise<void> {
    `--z-overlay-primary`/`--z-indicator` per the scale defined on style.css's `:root`. */
 .diff-overlay {
   z-index: var(--z-overlay, 50);
+}
+/* Same alertdialog/focus-trap pattern and z-index tier as ConversationView.vue's
+   .close-dialog-overlay/.close-dialog/.close-dialog-actions — above the simple, non-nesting
+   .diff-overlay above. */
+.restore-dialog-overlay {
+  z-index: var(--z-overlay-primary, 60);
+}
+.restore-dialog {
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #111);
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 22rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.restore-dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
 }
 </style>
