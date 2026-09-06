@@ -135,12 +135,14 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
     scope: 'Global',
   },
   {
-    keys: 'Ctrl+Alt+L / Ctrl+Alt+ArrowRight',
+    keys: 'Ctrl+Alt+L / Ctrl+Alt+N / Ctrl+Alt+ArrowRight',
     description:
       'Focus the next conversation among the currently-focused conversation panels, wrapping from the last ' +
       'back to the first. No-op with fewer than two focused conversations. Also fires while typing in a ' +
       'conversation composer (its main use case), but not from the document editor, the conversation-rename ' +
-      'field, or while any dialog is open.',
+      'field, or while any dialog is open. Ctrl+Alt+N is an alternate for Ctrl+Alt+L, in case your OS/window ' +
+      'manager claims that combo (e.g. as a "Lock screen" shortcut, a common default on several Linux desktop ' +
+      'environments).',
     scope: 'Global',
   },
   {
@@ -175,8 +177,9 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
       'conversations are visible under that filter, if the conversation isn\'t already focused and the ' +
       'simultaneously-focused limit has already been reached (un-focusing an already-focused conversation is ' +
       'always allowed), or while the History panel\'s diff view, the Help/Keyboard-shortcuts dialog, or any ' +
-      'other modal dialog is open. Works from anywhere except the document editor, the composer, or an open ' +
-      'dialog.',
+      'other modal dialog is open. Also fires while typing in a conversation composer (most commonly used to ' +
+      'un-focus/close the panel you\'re currently typing in, or jump to another), but not from the document ' +
+      'editor, the conversation-rename field, or while any dialog is open.',
     scope: 'Global',
   },
 ] as const;
@@ -314,6 +317,18 @@ export interface HotkeyBinding {
 
 // Ctrl+Alt+1..9 (`focus-toggle-1`..`focus-toggle-9`): generated from a range rather than
 // hand-written, so there's exactly one place that ever has to get "9" right.
+//
+// `composerExempt: true` (bug fix): a user's most common reason to press Ctrl+Alt+<N> is to
+// un-focus (or jump away from) the very conversation panel they're currently typing a reply
+// into — exactly the same "fires from inside a composer" use case the cycle-focused-
+// conversations shortcut (`cycle-conversation-prev`/`-next` below) was built around. Before this
+// fix these bindings left `composerExempt` unset (`false`), so `isEditingContext`'s blanket "any
+// textarea is an editing context" rule applied even to a conversation composer's own textarea —
+// silently swallowing every Ctrl+Alt+<N> keypress typed there, since a composer textarea is the
+// one place a user is likely to actually press it. `isEditingContext`'s `allowComposer` option
+// (see its own doc comment above) exists for precisely this, and `onGlobalKeydown` below already
+// threads `binding.composerExempt` through for every binding — this only needed flipping the flag
+// here to match the cycle shortcut's existing behavior.
 const FOCUS_TOGGLE_BINDINGS: readonly HotkeyBinding[] = Array.from({ length: 9 }, (_, i) => {
   const n = i + 1;
   return {
@@ -322,7 +337,7 @@ const FOCUS_TOGGLE_BINDINGS: readonly HotkeyBinding[] = Array.from({ length: 9 }
     code: `Digit${n}`,
     scope: 'Global',
     description: `Toggle focus for conversation position ${n} (1-based, top to bottom) in the conversation list.`,
-    composerExempt: false,
+    composerExempt: true,
   } satisfies HotkeyBinding;
 });
 
@@ -335,7 +350,7 @@ const FOCUS_TOGGLE_BINDINGS: readonly HotkeyBinding[] = Array.from({ length: 9 }
  *
  * Owned by App.vue's `onGlobalKeydown` (`scope: 'Global'`):
  *   toggle-reasoning, toggle-history, toggle-sync-scroll, toggle-preview, toggle-editor,
- *   focus-toggle-1..9, cycle-conversation-prev(-arrow), cycle-conversation-next(-arrow).
+ *   focus-toggle-1..9, cycle-conversation-prev(-arrow), cycle-conversation-next(-arrow|-alt).
  * Owned by HudPanel.vue's own `onGlobalKeydown` (`scope: 'Conversation list'`):
  *   toggle-filter, cycle-next, cycle-prev.
  */
@@ -411,6 +426,26 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     scope: 'Global',
     composerExempt: true,
     description: 'Focus the next currently-focused conversation panel (wraps).',
+  },
+  // `cycle-conversation-next-alt` (bug fix): a bare Ctrl+Alt+L is, by default, "Lock screen" on
+  // several mainstream Linux desktop environments (e.g. Xfce's `xflock4` accelerator, MATE, and
+  // Cinnamon/Linux Mint all ship this exact combo bound to locking the session) — the OS/window
+  // manager consumes that keypress before it ever reaches the browser tab at all, so no amount of
+  // fixing this app's own dispatch logic can make plain Ctrl+Alt+L "work" on a machine where it's
+  // already claimed. This is the same class of un-fixable-in-JS collision already documented (and
+  // mitigated the same way — adding a redundant binding) for HudPanel.vue's bare Alt+J/K, later
+  // strengthened to Ctrl+Alt+J/K. Ctrl+Alt+L and Ctrl+Alt+ArrowRight both stay exactly as they were
+  // (removing the letter binding would break it for every user whose OS doesn't claim it, and
+  // Ctrl+Alt+ArrowRight was never reported affected) — this just adds Ctrl+Alt+N ("N"ext) as a
+  // guaranteed-reachable alternate trigger for the same action, exactly mirroring why
+  // `cycle-conversation-next-arrow` already exists alongside the letter binding above.
+  {
+    id: 'cycle-conversation-next-alt',
+    modifiers: { ctrl: true, alt: true, shift: false },
+    code: 'KeyN',
+    scope: 'Global',
+    composerExempt: true,
+    description: 'Focus the next currently-focused conversation panel (wraps). Alternate for Ctrl+Alt+L, in case the OS/window manager claims that combo (e.g. as a "Lock screen" shortcut).',
   },
   {
     id: 'toggle-filter',

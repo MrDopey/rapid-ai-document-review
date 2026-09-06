@@ -99,11 +99,14 @@ function hudStatusBadge(page: Page, name: string) {
   return page.locator('.hud-panel .conversation-row', { hasText: name }).locator('.status-badge');
 }
 
-/** The HUD row's own Make/Clear Primary button for `name` (006-toolbar-reorg: per-row, not a
- *  single global button) — `.conversation-primary-row` is a sibling of `.conversation-row` within
- *  the same `<li>`, so this scopes to the enclosing list item rather than the row itself. */
+/** The sidebar/canvas box's own Make/Clear Primary button for `name` (006-toolbar-reorg second
+ *  refactor: the HUD list is now purely informational — no buttons of any kind render there any
+ *  more. The button moved to `ConversationThreadBox.vue`'s own action row, rendered through the
+ *  shared `ConversationActionButtons.vue` — hence the generic `[data-action="primary"]` attribute
+ *  selector rather than the bespoke `.primary-button`/`.make-primary-button`/`.clear-primary-button`
+ *  classes this used to target.) */
 function primaryButton(page: Page, name: string) {
-  return page.locator('.hud-panel li', { hasText: name }).locator('.primary-button');
+  return page.locator('.conversation-thread-box', { hasText: name }).locator('[data-action="primary"]');
 }
 
 test.describe('US5 — Designate a Primary conversation for automatic edits', () => {
@@ -191,13 +194,14 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'working');
 
-      // Make/Clear Primary is now a per-row button (006-toolbar-reorg) — act directly on the
-      // branch's own row; still select it first (as before) so its detail panel is open, which the
-      // "switch now" step below relies on for the `.is-primary` assertion's targeting to read
-      // naturally alongside the rest of this test's row-focus conventions.
+      // Make/Clear Primary now lives on the sidebar box's own action row (006-toolbar-reorg
+      // second refactor) — act directly on the branch's own box; still select the HUD row first
+      // (as before) so its detail panel is open, which the "switch now" step below relies on for
+      // the `.is-primary` assertion's targeting to read naturally alongside the rest of this
+      // test's row-focus conventions.
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
       await branchRow.locator('.conversation-row').click();
-      await branchRow.locator('.primary-button').click();
+      await primaryButton(page, branchName).click();
 
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
@@ -214,7 +218,7 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     await test.step('4. "switch now" moves Primary immediately without interrupting Main\'s in-flight run (FR-030)', async () => {
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
-      await branchRow.locator('.primary-button').click();
+      await primaryButton(page, branchName).click();
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
       await dialog.getByRole('button', { name: 'Switch now' }).click();
@@ -222,10 +226,12 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
       // The "Primary" text badge on the row was replaced by styling (a left accent + background
       // tint via `.is-primary`); the old global "Primary" box's own "Primary: {{ name }}" text is
-      // gone entirely (006-toolbar-reorg) — assert via the row's class and its own now-per-row
-      // "Clear Primary" button's title/aria-label instead.
+      // gone entirely (006-toolbar-reorg) — assert via the row's class and its own (now sidebar-box)
+      // "Clear Primary" button's pressed state/title/aria-label instead.
       await expect(branchRow.locator('.conversation-row')).toHaveClass(/is-primary/, { timeout: 10_000 });
-      await expect(branchRow.locator('.clear-primary-button')).toHaveAttribute(
+      const branchPrimaryButton = primaryButton(page, branchName);
+      await expect(branchPrimaryButton).toHaveAttribute('aria-pressed', 'true');
+      await expect(branchPrimaryButton).toHaveAttribute(
         'aria-label',
         new RegExp(branchName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       );

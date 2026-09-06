@@ -65,13 +65,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string)
   });
 }
 
-// 006-toolbar-reorg (confirmed layout): the Primary designation error is rendered here as a
-// full-width strip beneath both toolbar columns — `HudPanel.vue` still owns the read/write logic
-// (its per-row Make/Clear Primary buttons and the busy-switch dialog) and mirrors it up via
-// `update:error` (the same "controlled value, locally-owned writes" split its own `update:filter`
-// prop uses).
-const primaryErrorMessage = ref<string | null>(null);
-
 // 005-canvas-conversation-threads (multi-focus overlay): up to `focusCap` conversations may have an
 // open detail panel (`ConversationDetailPanel.vue`, one instance per id) simultaneously, rendered
 // in `.conversation-detail-overlay` below. The state machine itself (which ids are focused, the
@@ -421,10 +414,11 @@ const OVERLAY_GUARDED_BINDING_IDS = new Set<string>([
   'cycle-conversation-prev-arrow',
   'cycle-conversation-next',
   'cycle-conversation-next-arrow',
+  'cycle-conversation-next-alt',
 ]);
 
-/** Ctrl+Alt+H/Ctrl+Alt+ArrowLeft (previous) and Ctrl+Alt+L/Ctrl+Alt+ArrowRight (next): moves which
- *  already-focused conversation panel is "active" (`lastInteractedId`) among
+/** Ctrl+Alt+H/Ctrl+Alt+ArrowLeft (previous) and Ctrl+Alt+L/Ctrl+Alt+N/Ctrl+Alt+ArrowRight (next):
+ *  moves which already-focused conversation panel is "active" (`lastInteractedId`) among
  *  `orderedFocusedConversations` — the same list/order the multi-focus overlay below renders —
  *  wrapping at both ends. Mirrors HudPanel.vue's own `cycleByOffset` (Ctrl+Alt+J/K) but cycles only
  *  the currently-focused subset, never adding/removing a focused panel the way `toggleFocus`/
@@ -456,15 +450,19 @@ const globalBindingHandlers: Record<string, () => void> = {
   'cycle-conversation-prev-arrow': () => cycleFocusedConversation(-1),
   'cycle-conversation-next': () => cycleFocusedConversation(1),
   'cycle-conversation-next-arrow': () => cycleFocusedConversation(1),
+  'cycle-conversation-next-alt': () => cycleFocusedConversation(1),
 };
 
 function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.metaKey) return;
   const binding = GLOBAL_BINDINGS.find((b) => matchesBinding(event, b));
   if (!binding) return;
-  // `composerExempt` bindings (the cycle-focused-conversations shortcut) fire even while the
-  // event's target is a conversation composer's own textarea — every other binding here keeps the
-  // blanket "any textarea/input/select/contenteditable blocks a global shortcut" rule unchanged.
+  // `composerExempt` bindings (the cycle-focused-conversations shortcut, and Ctrl+Alt+1..9's
+  // conversation-focus toggle) fire even while the event's target is a conversation composer's own
+  // textarea — a user's most common reason to press either is from inside the very composer they're
+  // typing in (e.g. to un-focus/close that panel, or jump to another). Every other binding here
+  // keeps the blanket "any textarea/input/select/contenteditable blocks a global shortcut" rule
+  // unchanged.
   if (isEditingContext(event, { allowComposer: binding.composerExempt === true })) return;
   if (OVERLAY_GUARDED_BINDING_IDS.has(binding.id) && isOverlayOpen()) return;
   event.preventDefault();
@@ -706,7 +704,6 @@ async function onToggleReasoning(event: Event): Promise<void> {
               :focus-cap="focusCap"
               :filter="conversationFilter"
               @update:filter="conversationFilter = $event"
-              @update:error="primaryErrorMessage = $event"
               @toggle-focus="onHudToggleFocus"
               @cycle-focus="onHudCycleFocus"
             />
@@ -715,7 +712,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
         <div class="toolbar-right">
           <!-- Global Actions: two side-by-side columns — checkboxes on the left, buttons on the
                right — now `.toolbar-right`'s only content, since Primary's own visible chrome moved
-               into HudPanel.vue's per-row buttons. -->
+               into `ConversationThreadBox.vue`/`ConversationView.vue`'s own per-conversation action
+               rows (see `composables/primaryAction.ts`). -->
           <div class="actions-group">
             <div class="actions-col actions-col-checkboxes">
               <label class="reasoning-toggle">
@@ -767,16 +765,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
           </div>
         </div>
       </div>
-      <div v-if="primaryErrorMessage" class="toolbar-error-banner" role="alert">
-        {{ primaryErrorMessage }}
-      </div>
       <!-- `documentStore.conflictMessage` (stores/document.ts) is set when the server rejects a
            manual edit because the document changed elsewhere while it was in flight (a 409). Same
-           dismissible-notice shape as `HudPanel.vue`'s own busy-switch dialog surroundings (the
-           app's existing convention for a dismissible inline notice), rather than the plain
-           non-dismissible `.toolbar-error-banner` strip above, since this one has a real
-           per-viewer dismiss action (`clearConflictMessage`) rather than just reflecting still-live
-           state. -->
+           dismissible-notice shape as the app's busy-switch dialog surroundings (the app's existing
+           convention for a dismissible inline notice), with a real per-viewer dismiss action
+           (`clearConflictMessage`) rather than just reflecting still-live state. -->
       <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
         <span>{{ store.conflictMessage }}</span>
         <button
@@ -963,9 +956,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
   min-width: 0;
 }
 /* "Global Actions" is now `.toolbar-right`'s only content (Primary's own visible chrome moved into
-   HudPanel.vue's per-row buttons), so it alone absorbs the column's stretched height, keeping the
-   column's bottom edge level with the HUD box's own bottom edge. Two side-by-side columns: the
-   checkbox toggles on the left, the action buttons on the right (see `.actions-col` below). */
+   `ConversationThreadBox.vue`/`ConversationView.vue`'s own action rows), so it alone absorbs the
+   column's stretched height, keeping the column's bottom edge level with the HUD box's own bottom
+   edge. Two side-by-side columns: the checkbox toggles on the left, the action buttons on the
+   right (see `.actions-col` below). */
 .actions-group {
   flex: 1 1 auto;
   display: flex;
@@ -1038,15 +1032,6 @@ async function onToggleReasoning(event: Event): Promise<void> {
   background: var(--warning-bg, #fef3c7);
   color: var(--warning-color, #92400e);
   border: 1px solid var(--warning-border, #fde68a);
-  border-radius: 4px;
-  font-size: 0.8rem;
-}
-/* Error banner: the Primary designation error (see `HudPanel.vue`'s `update:error`) — a full-width
-   strip beneath BOTH toolbar columns, only rendered when there's an error. */
-.toolbar-error-banner {
-  padding: 0.4rem 0.5rem;
-  background: var(--danger-bg, #fee2e2);
-  color: var(--danger-color, #991b1b);
   border-radius: 4px;
   font-size: 0.8rem;
 }

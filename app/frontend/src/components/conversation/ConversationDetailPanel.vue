@@ -44,7 +44,7 @@ const dialogEl = ref<HTMLElement | null>(null);
 // first-focusable element ("Close full view", per DOM order — see the template below) — this both
 // fixes the pre-existing bug where activating a panel focused the close button instead of the
 // composer, and is what makes the cycle-focused-conversations hotkey (App.vue's
-// `cycleFocusedConversation`, fired from Ctrl+Alt+H/L or the Arrow variants) land the user back in
+// `cycleFocusedConversation`, fired from Ctrl+Alt+H/L/N or the Arrow variants) land the user back in
 // the newly-active panel's composer, ready to keep typing, rather than needing an extra Tab press.
 //
 // `restoreFocusOnExit: false` — this panel's `active` prop is a SELECTION signal among possibly

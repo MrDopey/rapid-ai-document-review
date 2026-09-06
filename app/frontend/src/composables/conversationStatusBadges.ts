@@ -75,7 +75,8 @@ export function useConversationStatusBadges(
     // disappearing or moving once its highlighted text has been edited or removed — this badge is
     // the visual flag for that state.
     if (conv.anchorOrphaned) {
-      const orphanedText = 'The anchored text has since been edited or removed from the document.';
+      const orphanedText =
+        'This conversation was originally attached to a specific highlighted passage, but that text has since been edited or removed.';
       list.push({
         key: 'orphaned',
         className: 'orphaned-badge',

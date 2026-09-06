@@ -50,6 +50,24 @@
   --success-bg: #d1fae5;
   --accent-color: #2563eb;
   --status-active-color: #1d4ed8;
+  /* Light-bg counterpart to `--status-active-color`, for a pill badge that pairs the "active/blue"
+     text color with its own light background rather than sitting on a panel surface (see
+     `.pending-badge` in ConversationStatusBadges.vue, the one current consumer — `.orphaned-badge`
+     used to share this pair too, but now uses its own `--neutral-muted-bg` below since Orphaned's
+     purely-informational, no-action-needed status doesn't semantically match "active") — the same
+     text-on-light-bg pattern already used by `--warning-color`/`--warning-bg`,
+     `--danger-color`/`--danger-bg`, and `--success-color`/`--success-bg` above. */
+  --status-active-bg: #dbeafe;
+  /* Light-bg counterpart to `--neutral-muted-color`, for a pill badge that pairs the "neutral/gray"
+     text color with its own light background rather than sitting on a panel surface (see
+     `.orphaned-badge` in ConversationStatusBadges.vue, the one current consumer) — added following
+     the exact same text-color/light-bg pairing pattern used for `--status-active-bg` above (and
+     `--warning-color`/`--warning-bg`, `--danger-color`/`--danger-bg`,
+     `--success-color`/`--success-bg`). Deliberately a visibly gray tone (not just a lighter shade
+     of `--panel-bg`/`--panel-bg-alt`) so the badge reads as its own neutral color rather than
+     blending into the page chrome or being mistaken for `--status-active-bg`'s blue. Measures
+     ~5.1:1 against `--neutral-muted-color` (#4b5563) here, clearing WCAG AA's 4.5:1. */
+  --neutral-muted-bg: #d1d5db;
   --status-closed-color: #374151;
   --queue-color: #6b21a8;
   --seed-bg: #f3f4f6;
@@ -149,6 +167,11 @@
     --success-bg: #04331f;
     --accent-color: #60a5fa;
     --status-active-color: #60a5fa;
+    --status-active-bg: #172554;
+    /* Dark counterpart to `--neutral-muted-bg` above, paired against dark mode's
+       `--neutral-muted-color` (#9aa3af) — measures ~5.2:1, clearing WCAG AA's 4.5:1 with a margin
+       comparable to `--status-active-bg` above (~5.8:1 against its own dark-mode text color). */
+    --neutral-muted-bg: #2b303a;
     --status-closed-color: #cbd5e1;
     --queue-color: #c084fc;
     --seed-bg: #262a33;

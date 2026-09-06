@@ -70,6 +70,7 @@ vi.mock('../../src/transport/http-client.js', () => ({
 }));
 
 import { httpClient } from '../../src/transport/http-client.js';
+import { HOTKEY_BINDINGS, findConflicts } from '../../src/a11y/keymap-registry.js';
 import { useConversationsStore } from '../../src/stores/conversations.js';
 import { useDocumentStore } from '../../src/stores/document.js';
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
@@ -981,6 +982,57 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
     expect(focusedIds(wrapper)).toEqual(['c1']);
   });
 
+  // Bug fix regression test: before this fix, `focus-toggle-<N>` bindings left `composerExempt`
+  // unset (`false`) in `HOTKEY_BINDINGS` (a11y/keymap-registry.ts), so `isEditingContext`'s blanket
+  // "any textarea is an editing context" rule silently swallowed every Ctrl+Alt+<N> keypress typed
+  // from inside a conversation composer's own textarea — exactly the place a user is most likely to
+  // press it (e.g. to un-focus/close the panel they're currently typing in). Dispatched on the real
+  // composer element (not `document`) so `isEditingContext`'s `target.closest`/`allowComposer` path
+  // is actually exercised, matching how a real keypress while typing reaches this handler.
+  it('fires from inside a conversation composer textarea, un-focusing the conversation currently being typed in', async () => {
+    const conversations = [conversationFixture({ id: 'c1' }), conversationFixture({ id: 'c2' })];
+    const wrapper = await mountWithConversations(conversations);
+
+    pressDigit(1);
+    await flushPromises();
+    expect(focusedIds(wrapper)).toEqual(['c1']);
+
+    const composer = document.querySelector<HTMLTextAreaElement>('#composer-c1');
+    expect(composer).not.toBeNull();
+    composer!.focus();
+    composer!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Digit1', ctrlKey: true, altKey: true, bubbles: true }),
+    );
+    await flushPromises();
+
+    expect(focusedIds(wrapper)).toEqual([]);
+  });
+
+  // Same scenario, but focusing (not un-focusing) a *different* conversation than the one currently
+  // being typed in — the other half of "toggle" this composer-exempt fix must preserve.
+  it('fires from inside a conversation composer textarea to focus a different conversation', async () => {
+    const conversations = [
+      conversationFixture({ id: 'c1' }),
+      conversationFixture({ id: 'c2' }),
+      conversationFixture({ id: 'c3' }),
+    ];
+    const wrapper = await mountWithConversations(conversations);
+
+    pressDigit(1);
+    await flushPromises();
+    expect(focusedIds(wrapper)).toEqual(['c1']);
+
+    const composer = document.querySelector<HTMLTextAreaElement>('#composer-c1');
+    expect(composer).not.toBeNull();
+    composer!.focus();
+    composer!.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Digit2', ctrlKey: true, altKey: true, bubbles: true }),
+    );
+    await flushPromises();
+
+    expect(focusedIds(wrapper).sort()).toEqual(['c1', 'c2']);
+  });
+
   it("respects the HUD's Active-only filter, skipping closed conversations when numbering", async () => {
     const conversations = [
       conversationFixture({ id: 'c1', status: 'closed' }),
@@ -1151,7 +1203,7 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     document.dispatchEvent(new KeyboardEvent('keydown', { code, ctrlKey: true, altKey: true, ...extra }));
   }
 
-  it('Ctrl+Alt+L (and Ctrl+Alt+ArrowRight) focuses the next currently-focused panel, wrapping from the last back to the first', async () => {
+  it('Ctrl+Alt+L (and Ctrl+Alt+ArrowRight, Ctrl+Alt+N) focuses the next currently-focused panel, wrapping from the last back to the first', async () => {
     const conversations = [
       conversationFixture({ id: 'c1' }),
       conversationFixture({ id: 'c2' }),
@@ -1167,6 +1219,35 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     pressCycle('ArrowRight');
     await flushPromises();
     expect(activeConversationId(wrapper)).toBe('c2');
+
+    pressCycle('KeyN');
+    await flushPromises();
+    expect(activeConversationId(wrapper)).toBe('c3');
+  });
+
+  // Bug investigation regression test: a real user reported Ctrl+Alt+L not advancing to the next
+  // panel while Ctrl+Alt+H (previous) worked. Thorough investigation (binding definition, App.vue's
+  // dispatch table, registry-wide collision check, a byte-level scan for a stray typo/whitespace in
+  // the `code` string, and reproducing from both a `document` target and a real composer target —
+  // see the suite above and below) found no in-app defect: `cycle-conversation-next`'s `code` is a
+  // clean `'KeyL'` with no collision anywhere in `HOTKEY_BINDINGS`, and its handler
+  // (`cycleFocusedConversation(1)`) is exactly as symmetric with `cycle-conversation-prev`'s
+  // `cycleFocusedConversation(-1)` as the passing suite above already demonstrates. The most
+  // consistent explanation left is that the user's OS/window manager claims the bare Ctrl+Alt+L
+  // combo itself before it ever reaches the browser (see the `cycle-conversation-next-alt` binding's
+  // own doc comment in keymap-registry.ts) — unfixable by this app's own keydown handler, since the
+  // event never arrives. This test locks in that the in-app dispatch for `KeyL` is correct (so any
+  // *future* regression here is still caught), and the tests below cover the new Ctrl+Alt+N alternate
+  // this fix adds as a guaranteed-reachable fallback.
+  it('regression: KeyL is defined once, with no registry collision, and its handler is symmetric with KeyH\'s', () => {
+    const keyLBindings = HOTKEY_BINDINGS.filter((b) => b.code === 'KeyL');
+    expect(keyLBindings).toHaveLength(1);
+    expect(keyLBindings[0]).toMatchObject({
+      id: 'cycle-conversation-next',
+      modifiers: { ctrl: true, alt: true, shift: false },
+      composerExempt: true,
+    });
+    expect(findConflicts(HOTKEY_BINDINGS)).toEqual([]);
   });
 
   it('Ctrl+Alt+H (and Ctrl+Alt+ArrowLeft) focuses the previous currently-focused panel, wrapping from the first back to the last', async () => {
@@ -1216,6 +1297,37 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
     await flushPromises();
 
     expect(activeConversationId(wrapper)).toBe('c1');
+  });
+
+  // Bug 2 investigation: the "previous" direction above only ever exercised KeyH from a real
+  // composer target — there was no equivalent test dispatching Ctrl+Alt+L (the reported-broken
+  // "next" key) from a real element (only from `document`, in the wrapping test above). Adding it
+  // closes that gap: this passes on the current code (confirming the in-app dispatch for KeyL, from
+  // exactly the scenario a real user hits while typing, is correct — see the "regression: KeyL is
+  // defined once..." test above for why the real bug lives outside this app's own code), and
+  // Ctrl+Alt+N (this fix's new alternate) is exercised the same way right after.
+  it('KeyL and its new KeyN alternate both fire from inside a conversation composer textarea', async () => {
+    const conversations = [
+      conversationFixture({ id: 'c1' }),
+      conversationFixture({ id: 'c2' }),
+      conversationFixture({ id: 'c3' }),
+    ];
+    const wrapper = await mountWithFocused(conversations, ['c1', 'c2', 'c3']);
+    expect(activeConversationId(wrapper)).toBe('c3');
+
+    let composer = document.querySelector<HTMLTextAreaElement>('#composer-c3');
+    expect(composer).not.toBeNull();
+    composer!.focus();
+    composer!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', ctrlKey: true, altKey: true, bubbles: true }));
+    await flushPromises();
+    expect(activeConversationId(wrapper)).toBe('c1'); // wraps from the last (c3) to the first
+
+    composer = document.querySelector<HTMLTextAreaElement>('#composer-c1');
+    expect(composer).not.toBeNull();
+    composer!.focus();
+    composer!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyN', ctrlKey: true, altKey: true, bubbles: true }));
+    await flushPromises();
+    expect(activeConversationId(wrapper)).toBe('c2');
   });
 
   it('does not fire while any modal dialog is open', async () => {

@@ -10,6 +10,7 @@ import {
   type ActionDescriptor,
 } from '../../composables/conversationActions.js';
 import { useConversationStatusBadges } from '../../composables/conversationStatusBadges.js';
+import { usePrimaryAction } from '../../composables/primaryAction.js';
 import ConversationStatusBadges from './ConversationStatusBadges.vue';
 import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
@@ -155,6 +156,22 @@ const { action: branchAction, error: branchError } = useConversationBranchAction
   onBranchCreated: (id) => emit('branch-created', id),
 });
 
+// 006-toolbar-reorg (second refactor): the HUD's per-row Make/Clear Primary button is gone (the
+// HUD list is purely informational now) — this sidebar/canvas box is one of its two new homes
+// (alongside `ConversationView.vue`'s focus/detail view), via the shared `usePrimaryAction`
+// composable (`composables/primaryAction.ts`) so the busy-switch confirmation dialog's state/
+// resolution logic isn't duplicated between the two hosts. `primaryDialogEl` is this box's own
+// template ref for that dialog's root, following the same "host owns the template ref, composable
+// wires `useFocusTrap` through it" convention as `nameInputEl` above.
+const primaryDialogEl = ref<HTMLElement | null>(null);
+const {
+  action: primaryAction,
+  busyPrompt: primaryBusyPrompt,
+  busyConversationName: primaryBusyConversationName,
+  resolveBusyPrompt: resolvePrimaryBusyPrompt,
+  error: primaryError,
+} = usePrimaryAction(() => props.conversationId, primaryDialogEl);
+
 // `ConversationView.vue` is not permanently mounted for every conversation — this compact box is
 // the only thing that renders for a conversation by default, so it has to trigger the message
 // fetch itself. Guarded so remounting this box (e.g. during layout reflow) doesn't refetch
@@ -208,6 +225,7 @@ const actions = computed<ActionDescriptor[]>(() => {
   if (props.isFocused) list.push(closeAction.value);
   if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
   list.push(branchAction.value);
+  list.push(primaryAction.value);
   return list;
 });
 
@@ -265,8 +283,32 @@ defineExpose({ el: rootEl });
       <div class="thread-actions">
         <ConversationActionButtons :actions="actions" />
         <span v-if="branchError" class="branch-error" role="alert">{{ branchError }}</span>
+        <span v-if="primaryError" class="branch-error" role="alert">{{ primaryError }}</span>
       </div>
     </header>
+    <!-- FR-029/FR-043d: the Make/Clear Primary busy-switch three-choice warning — see
+         `usePrimaryAction` (composables/primaryAction.ts) for the shared state/resolution logic
+         this and `ConversationView.vue`'s own copy both drive. -->
+    <Transition name="modal">
+      <div v-if="primaryBusyPrompt" class="modal-overlay primary-busy-dialog-overlay">
+        <div
+          ref="primaryDialogEl"
+          class="primary-busy-dialog dialog-box"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Primary conversation is busy"
+        >
+          <p>
+            {{ primaryBusyConversationName }} is still working. What should happen to the Primary designation?
+          </p>
+          <div class="primary-busy-choices">
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">Switch now</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('cancel')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
     <!-- 005-canvas-conversation-threads: read-only continuity context for a freshly-created,
          zero-message branch — borrowed from the parent, never part of this conversation's own
          `.thread-messages` list below (kept in a visually distinct wrapper, labeled, so it can
@@ -419,5 +461,22 @@ defineExpose({ el: rootEl });
 .branch-error {
   color: var(--danger-color, #b91c1c);
   font-size: 0.7rem;
+}
+/* Make/Clear Primary's busy-switch confirmation dialog (see `usePrimaryAction`) — same shape as
+   `ConversationView.vue`'s own copy of this dialog (and the removed `HudPanel.vue` original it's
+   descended from): `--z-overlay-primary`, `.dialog-box` shared chrome, only width/padding/spacing
+   stay local to each host. */
+.primary-busy-dialog-overlay {
+  z-index: var(--z-overlay-primary, 60);
+}
+.primary-busy-dialog {
+  padding: 1rem;
+  max-width: 22rem;
+}
+.primary-busy-choices {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
 }
 </style>

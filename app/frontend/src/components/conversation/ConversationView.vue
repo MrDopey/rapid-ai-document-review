@@ -15,6 +15,7 @@ import {
   type ActionDescriptor,
 } from '../../composables/conversationActions.js';
 import { useConversationStatusBadges } from '../../composables/conversationStatusBadges.js';
+import { usePrimaryAction } from '../../composables/primaryAction.js';
 import ConversationStatusBadges from './ConversationStatusBadges.vue';
 import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
@@ -155,6 +156,22 @@ const { action: branchAction, error: branchError } = useConversationBranchAction
   maxFocused: () => props.maxFocused,
   onBranchCreated: (id) => emit('branch-created', id),
 });
+
+// 006-toolbar-reorg (second refactor): the HUD's per-row Make/Clear Primary button is gone (the
+// HUD list is purely informational now) — this focus/detail view is one of its two new homes
+// (alongside `ConversationThreadBox.vue`'s sidebar box), via the shared `usePrimaryAction`
+// composable (`composables/primaryAction.ts`) so the busy-switch confirmation dialog's state/
+// resolution logic isn't duplicated between the two hosts. `primaryDialogEl` is this view's own
+// template ref for that dialog's root, same "host owns the template ref" convention `nameInputEl`
+// above already establishes.
+const primaryDialogEl = ref<HTMLElement | null>(null);
+const {
+  action: primaryAction,
+  busyPrompt: primaryBusyPrompt,
+  busyConversationName: primaryBusyConversationName,
+  resolveBusyPrompt: resolvePrimaryBusyPrompt,
+  error: primaryError,
+} = usePrimaryAction(() => props.conversationId, primaryDialogEl);
 
 // A visible, low-noise "sent — awaiting response" indicator for the gap between the turn being
 // queued (`conversation.status === 'working'`, server-driven via the `conversation_status_changed`
@@ -502,6 +519,7 @@ const actions = computed<ActionDescriptor[]>(() => {
   const list: ActionDescriptor[] = [];
   if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
   if (conversation.value) list.push(branchAction.value);
+  if (conversation.value) list.push(primaryAction.value);
   const archiveOrReview = archiveOrReviewAction.value;
   if (archiveOrReview) list.push(archiveOrReview);
   return list;
@@ -515,14 +533,15 @@ const actions = computed<ActionDescriptor[]>(() => {
     aria-label="Conversation"
   >
     <!-- UI convention: title | status | action (see .specify/memory/constitution.md
-         "UI Conventions") — the same 3-section pattern as HudPanel.vue's conversation-list rows,
-         laid out as two explicit rows rather than one (see `.conversation-header`'s doc comment
-         for why). Row 1 holds title (left) and status (right); row 2 holds every per-conversation
-         action this view offers: the bulk expand/collapse toggle and Branch (parity with
-         `ConversationThreadBox.vue`'s sidebar box, always shown when applicable) alongside
-         whichever single close-state action currently applies — "Request review" once closed, or
-         "Archive" while still open, for every kind including `main`
-         (specs/006-archivable-main-conversation, US1). -->
+         "UI Conventions") — the same 3-section pattern HudPanel.vue's own conversation-list rows
+         use for title/status (that list is purely informational, with no action section of its
+         own any more), laid out as two explicit rows rather than one (see `.conversation-header`'s
+         doc comment for why). Row 1 holds title (left) and status (right); row 2 holds every
+         per-conversation action this view offers: the bulk expand/collapse toggle, Branch, and
+         Make/Clear Primary (parity with `ConversationThreadBox.vue`'s sidebar box, always shown
+         when applicable) alongside whichever single close-state action currently applies —
+         "Request review" once closed, or "Archive" while still open, for every kind including
+         `main` (specs/006-archivable-main-conversation, US1). -->
     <header class="conversation-header">
       <div class="header-top">
         <div class="header-titles">
@@ -577,6 +596,7 @@ const actions = computed<ActionDescriptor[]>(() => {
     <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
     <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
     <div v-if="branchError" class="error-banner" role="alert">{{ branchError }}</div>
+    <div v-if="primaryError" class="error-banner" role="alert">{{ primaryError }}</div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
@@ -705,6 +725,30 @@ const actions = computed<ActionDescriptor[]>(() => {
         </div>
       </div>
     </Transition>
+
+    <!-- FR-029/FR-043d: the Make/Clear Primary busy-switch three-choice warning — see
+         `usePrimaryAction` (composables/primaryAction.ts) for the shared state/resolution logic
+         this and `ConversationThreadBox.vue`'s own copy both drive. -->
+    <Transition name="modal">
+      <div v-if="primaryBusyPrompt" class="modal-overlay primary-busy-dialog-overlay">
+        <div
+          ref="primaryDialogEl"
+          class="primary-busy-dialog dialog-box"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Primary conversation is busy"
+        >
+          <p>
+            {{ primaryBusyConversationName }} is still working. What should happen to the Primary designation?
+          </p>
+          <div class="primary-busy-choices">
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_now')">Switch now</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolvePrimaryBusyPrompt('cancel')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </section>
 </template>
 
@@ -779,9 +823,10 @@ const actions = computed<ActionDescriptor[]>(() => {
   background: var(--panel-bg-alt, #eef0f3);
 }
 /* Row 2: the header's action row (title | status | action, per .specify/memory/constitution.md
-   "UI Conventions", now on its own row below row 1). Up to three buttons can render here at once
-   (bulk expand/collapse, Branch, and one of Request review/Archive — see the template comment
-   above `.header-actions`), so this is a genuine (wrapping) group, not a single control.
+   "UI Conventions", now on its own row below row 1). Up to four buttons can render here at once
+   (bulk expand/collapse, Branch, Make/Clear Primary, and one of Request review/Archive — see the
+   template comment above `.header-actions`), so this is a genuine (wrapping) group, not a single
+   control.
    `flex-wrap: wrap` (same idiom `ConversationThreadBox.vue`'s own `.thread-actions` already uses
    for the identical set of buttons) lets extra buttons drop to a further line rather than overflow
    at narrow widths. Left-aligned (no `justify-content` override, so the flex default
@@ -1035,5 +1080,22 @@ const actions = computed<ActionDescriptor[]>(() => {
   background: var(--danger-color, #b91c1c);
   border-color: var(--danger-color, #b91c1c);
   color: #fff;
+}
+/* Make/Clear Primary's busy-switch confirmation dialog (see `usePrimaryAction`) — same shape as
+   `ConversationThreadBox.vue`'s own copy of this dialog (and the removed `HudPanel.vue` original
+   it's descended from): `--z-overlay-primary`, `.dialog-box` shared chrome, only width/padding/
+   spacing stay local to each host. */
+.primary-busy-dialog-overlay {
+  z-index: var(--z-overlay-primary, 60);
+}
+.primary-busy-dialog {
+  padding: 1rem;
+  max-width: 22rem;
+}
+.primary-busy-choices {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
 }
 </style>

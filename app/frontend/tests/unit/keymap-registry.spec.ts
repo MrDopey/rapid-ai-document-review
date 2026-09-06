@@ -27,6 +27,31 @@ describe('findConflicts', () => {
     expect(findConflicts(HOTKEY_BINDINGS)).toEqual([]);
   });
 
+  // Bug fix regression: Ctrl+Alt+1..9 (focus-toggle-1..9) must be reachable from inside a
+  // conversation composer's own textarea, exactly like the cycle-focused-conversations shortcut —
+  // see FOCUS_TOGGLE_BINDINGS' own doc comment in keymap-registry.ts for the bug this fixes.
+  it('every focus-toggle-<N> binding is composer-exempt', () => {
+    const focusToggleBindings = HOTKEY_BINDINGS.filter((b) => b.id.startsWith('focus-toggle-'));
+    expect(focusToggleBindings).toHaveLength(9);
+    for (const b of focusToggleBindings) {
+      expect(b.composerExempt).toBe(true);
+    }
+  });
+
+  // Bug fix regression: `cycle-conversation-next-alt` (Ctrl+Alt+N) is a guaranteed-reachable
+  // alternate for `cycle-conversation-next` (Ctrl+Alt+L), added since a bare Ctrl+Alt+L is a common
+  // OS-level "Lock screen" shortcut on several Linux desktop environments — see that binding's own
+  // doc comment in keymap-registry.ts.
+  it('cycle-conversation-next-alt (Ctrl+Alt+N) exists as a composer-exempt, Global alternate for KeyL', () => {
+    const alt = HOTKEY_BINDINGS.find((b) => b.id === 'cycle-conversation-next-alt');
+    expect(alt).toMatchObject({
+      code: 'KeyN',
+      scope: 'Global',
+      modifiers: { ctrl: true, alt: true, shift: false },
+      composerExempt: true,
+    });
+  });
+
   it('flags two distinct bindings sharing an identical modifiers+code combo within reachable scopes', () => {
     const bindings = [
       binding({ id: 'a', code: 'KeyZ', scope: 'Global' }),

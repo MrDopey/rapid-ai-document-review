@@ -76,4 +76,11 @@ defineProps<{ actions: ActionDescriptor[] }>();
   cursor: not-allowed;
   opacity: 0.55;
 }
+/* Make/Clear Primary (006-toolbar-reorg): same "pressed" visual cue as the Focus button above,
+   keyed off the identical generic `data-action`/`aria-pressed` attributes — a Primary conversation's
+   own button reads as "Clear Primary" (pressed) with the accent treatment. */
+.action-button[data-action='primary'][aria-pressed='true'] {
+  border-color: var(--accent-color, #2563eb);
+  color: var(--accent-color, #2563eb);
+}
 </style>

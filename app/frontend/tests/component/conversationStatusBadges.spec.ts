@@ -79,7 +79,9 @@ describe('useConversationStatusBadges', () => {
     const orphaned = badges.value.find((b) => b.key === 'orphaned')!;
     expect(orphaned.className).toBe('orphaned-badge');
     expect(orphaned.label).toBe('Orphaned');
-    expect(orphaned.title).toBe('The anchored text has since been edited or removed from the document.');
+    expect(orphaned.title).toBe(
+      'This conversation was originally attached to a specific highlighted passage, but that text has since been edited or removed.',
+    );
     // Unlike the other two badges, this one's accessible name is deliberately the fuller `title`
     // text, matching `ConversationThreadBox.vue`'s pre-existing behavior for this one badge.
     expect(orphaned.ariaLabel).toBe(orphaned.title);

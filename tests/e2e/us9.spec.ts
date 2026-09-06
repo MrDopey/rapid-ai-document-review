@@ -231,12 +231,13 @@ function rowFor(page: Page, conversationId: string) {
   return page.locator(`.hud-panel .conversation-row[data-conversation-id="${conversationId}"]`);
 }
 
-/** The HUD row's own Make/Clear Primary button for `conversationId` (006-toolbar-reorg: per-row,
- *  not a single global button) — `.conversation-primary-row` is a sibling of `.conversation-row`
- *  within the same `<li>`, so this scopes to the enclosing list item via `:has()` rather than
- *  `rowFor`'s own `.conversation-row` element. */
+/** The sidebar/canvas box's own Make/Clear Primary button for `conversationId` (006-toolbar-reorg
+ *  second refactor: the HUD list is now purely informational — no buttons of any kind render there
+ *  any more). `ConversationThreadBox.vue`'s root element already carries the same
+ *  `data-conversation-id` `rowFor` above matches on, so this scopes directly to it rather than via
+ *  `:has()` the way the removed HUD-row version needed to. */
 function primaryButtonFor(page: Page, conversationId: string) {
-  return page.locator(`.hud-panel li:has(.conversation-row[data-conversation-id="${conversationId}"]) .primary-button`);
+  return page.locator(`.conversation-thread-box[data-conversation-id="${conversationId}"] [data-action="primary"]`);
 }
 
 async function sendToOpenMain(page: Page, text: string): Promise<void> {

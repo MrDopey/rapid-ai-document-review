@@ -135,7 +135,6 @@ import HistoryPanel from '../../src/components/history/HistoryPanel.vue';
 import RevisionDiffViewer from '../../src/components/diff/RevisionDiffViewer.vue';
 import EditsList from '../../src/components/edits/EditsList.vue';
 import ConversationView from '../../src/components/conversation/ConversationView.vue';
-import HudPanel from '../../src/components/hud/HudPanel.vue';
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
 import App from '../../src/App.vue';
 
@@ -357,7 +356,7 @@ describe('z-index scale — ConversationView.vue .close-dialog-overlay uses --z-
   });
 });
 
-describe('z-index scale — HudPanel.vue .primary-busy-dialog-overlay uses --z-overlay-primary', () => {
+describe('z-index scale — ConversationThreadBox.vue .primary-busy-dialog-overlay uses --z-overlay-primary', () => {
   let pinia: Pinia;
 
   beforeEach(() => {
@@ -370,6 +369,7 @@ describe('z-index scale — HudPanel.vue .primary-busy-dialog-overlay uses --z-o
     const store = useConversationsStore();
     store.loaded = true;
     store.conversations = [conversationFixture({ id: 'active-1', kind: 'branch', status: 'idle', isPrimary: false })];
+    store.messagesByConversation['active-1'] = [];
     vi.mocked(httpClient.designatePrimary).mockRejectedValue(
       new (await import('../../src/transport/http-client.js')).ApiError(
         409,
@@ -379,15 +379,15 @@ describe('z-index scale — HudPanel.vue .primary-busy-dialog-overlay uses --z-o
       ),
     );
 
-    // 006-toolbar-reorg: the busy-switch dialog moved from the old global "Primary" box
-    // (`PrimaryPanel.vue`, now removed) into `HudPanel.vue`, triggered from a conversation row's
-    // own "Make Primary" button rather than a single global one.
-    const wrapper = mount(HudPanel, {
-      props: { activeId: 'active-1', focusedIds: new Set(), filter: 'all', focusCap: 3 },
+    // 006-toolbar-reorg (second refactor): the busy-switch dialog moved off the HUD's per-row
+    // button (that list is purely informational now) onto `ConversationThreadBox.vue`'s own
+    // Make/Clear Primary action button, via the shared `usePrimaryAction` composable.
+    const wrapper = mount(ConversationThreadBox, {
+      props: { conversationId: 'active-1' },
       global: { plugins: [pinia] },
     });
 
-    await wrapper.get('.make-primary-button').trigger('click');
+    await wrapper.get('[data-action="primary"]').trigger('click');
     await flushPromises();
 
     const overlay = wrapper.find('.primary-busy-dialog-overlay');
