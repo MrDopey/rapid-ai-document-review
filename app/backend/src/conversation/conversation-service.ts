@@ -329,7 +329,10 @@ export class ConversationService {
       seedExcerpt = extractSeedExcerpt(documentContent, from, to);
     }
 
-    const name = request.name ?? (seedSelection ? deriveBranchName(seedExcerpt, seedSelection.text) : 'Branch');
+    // Disambiguate only the auto-generated case (FR-014 follow-up): an explicit `request.name` is
+    // left exactly as the caller supplied it, same as before this fix.
+    const autoName = seedSelection ? deriveBranchName(seedExcerpt, seedSelection.text) : 'Branch';
+    const name = request.name ?? this.dedupeConversationName(document.id, autoName);
     const now = new Date().toISOString();
     const id = newId('conv');
     const piSessionPath = join(dirname(parent.piSessionPath), `${id}.jsonl`);
@@ -886,6 +889,28 @@ export class ConversationService {
     const lastUserMessage = this.getLastUserMessageText(conversationId);
     await this.send(conversationId, lastUserMessage);
     return { accepted: true, status: 'working' };
+  }
+
+  /**
+   * Minor UX fix: auto-generated branch names (`deriveBranchName`, derived from the seeded
+   * selection's heading/leading words) just truncate the passage, so branching the same or
+   * adjacent text repeatedly produces multiple conversations with identical-looking names — a
+   * confirmed first-time-user pain point (can't tell them apart in the sidebar). When `name`
+   * collides with an existing conversation in the same document, appends the lowest-numbered
+   * " (N)" suffix (starting at 2) not already in use, so sidebar entries stay distinguishable. A
+   * non-colliding name (the common case) is returned untouched.
+   */
+  private dedupeConversationName(documentId: string, name: string): string {
+    const existingNames = new Set(this.storage.listAllConversations(documentId).map((c) => c.name));
+    if (!existingNames.has(name)) return name;
+
+    let suffix = 2;
+    let candidate = `${name} (${suffix})`;
+    while (existingNames.has(candidate)) {
+      suffix += 1;
+      candidate = `${name} (${suffix})`;
+    }
+    return candidate;
   }
 
   private getConversationOrThrow(conversationId: string): ConversationRow {
