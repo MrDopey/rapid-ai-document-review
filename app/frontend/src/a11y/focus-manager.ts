@@ -27,6 +27,38 @@ export interface FocusTrapOptions {
   /** Called when Escape is pressed while the trap is active — wire to the same handler as the
    *  dialog's own Cancel/Close control (never call it directly; let the option decide). */
   onEscape?: () => void;
+  /**
+   * Optional getter for the element focus should move to the moment the trap activates, tried
+   * BEFORE falling back to the container's first focusable element. Added for
+   * `ConversationDetailPanel.vue`: it returns that panel's own composer textarea (`#composer-<id>`)
+   * so switching between focused conversations (including via the cycle-focused-conversations
+   * hotkey) lands the user's cursor back in the composer, ready to keep typing, instead of on the
+   * panel's "Close full view" button — the plain first-focusable default every other trap still
+   * uses. Only consulted at the instant `active` turns true; a stale/absent element (returns
+   * `null`/`undefined`, or an element that isn't actually inside the trapped container) falls
+   * straight through to the default first-focusable behavior, so this is safe to leave unset or to
+   * return `null` for the common case (every other dialog in the app).
+   */
+  getPreferredInitialFocus?: () => HTMLElement | null;
+  /**
+   * Whether `exit()` restores focus to whatever had it before the trap activated. Defaults to
+   * `true`, matching every pre-existing caller (a genuine "open a modal, close it, give focus back
+   * to the control that opened it" dialog). Set to `false` for `ConversationDetailPanel.vue`: its
+   * `active` prop isn't an open/close signal the way every other caller's is — several panels can
+   * be simultaneously mounted at once (the multi-focus overlay), with `active` only marking which
+   * ONE is currently the interacted-with member of that set, so going from `active: true` to
+   * `false` usually means "a *different*, still-open sibling panel just became active," not "this
+   * dialog is closing." Restoring focus in that case is actively harmful: `previouslyFocused` was
+   * captured whenever THIS panel itself last activated, which can be a stale reference sitting
+   * inside a co-existing sibling panel (e.g. that sibling's own composer) rather than a genuine
+   * "what was focused before any of this opened" snapshot — refocusing it fires a real `focusin` on
+   * that sibling's own root, which `ConversationDetailPanel.vue` treats as "this panel was just
+   * interacted with" (`@focusin="emit('interact')"`), silently flipping `lastInteractedId` right
+   * back and undoing whatever switch (a digit-focus press, or the cycle-focused-conversations
+   * hotkey) just happened. Tab/Escape trapping and the initial-focus-on-activate behavior above are
+   * unaffected either way — only the exit-time restoration is skipped.
+   */
+  restoreFocusOnExit?: boolean;
 }
 
 /**
@@ -104,7 +136,17 @@ export function useFocusTrap(
       const container = containerRef.value;
       if (!container) return;
       const focusables = focusablesIn(container);
-      (focusables[0] ?? container).focus();
+      // Checked via `container.contains(...)` rather than membership in `focusables` above: the
+      // latter runs through `isVisible`'s `el.offsetParent !== null` check, which jsdom's
+      // `HTMLElement` always reports as `null` (no real layout engine) regardless of whether the
+      // element is genuinely visible — so relying on it here would make the preferred element
+      // silently and permanently unreachable under every component test using jsdom, while still
+      // working by coincidence in a real browser. A plain "is this element actually inside the
+      // trapped container" containment check is sufficient: every caller only ever returns an
+      // element it just rendered (or null), never a stale/disabled one.
+      const preferred = options.getPreferredInitialFocus?.() ?? null;
+      const target = preferred && container.contains(preferred) ? preferred : (focusables[0] ?? container);
+      target.focus();
     });
   }
 
@@ -114,9 +156,13 @@ export function useFocusTrap(
     document.removeEventListener('keydown', handleKeydown, true);
     const index = activeTraps.indexOf(self);
     if (index !== -1) activeTraps.splice(index, 1);
-    // The triggering control (e.g. "Preview"/"Close") may itself have been removed from the DOM
-    // in the meantime (unlikely, but not impossible) — focus() on a detached element is a no-op.
-    previouslyFocused?.focus?.();
+    // See `restoreFocusOnExit`'s own doc comment above for why `ConversationDetailPanel.vue` opts
+    // out of this (default-on) restoration.
+    if (options.restoreFocusOnExit !== false) {
+      // The triggering control (e.g. "Preview"/"Close") may itself have been removed from the DOM
+      // in the meantime (unlikely, but not impossible) — focus() on a detached element is a no-op.
+      previouslyFocused?.focus?.();
+    }
     previouslyFocused = null;
   }
 

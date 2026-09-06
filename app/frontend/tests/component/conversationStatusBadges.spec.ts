@@ -72,20 +72,20 @@ describe('useConversationStatusBadges', () => {
     expect(stale.dataStatus).toBeUndefined();
   });
 
-  it('adds an Orphaned anchor badge (in addition to the status badge) when anchorOrphaned is true', () => {
+  it('adds an Orphaned badge (in addition to the status badge) when anchorOrphaned is true', () => {
     useConversationsStore().conversations = [conversationFixture({ id: 'c1', anchorOrphaned: true })];
     const { badges } = useConversationStatusBadges(() => 'c1');
     expect(badges.value.map((b) => b.key)).toEqual(['status', 'orphaned']);
     const orphaned = badges.value.find((b) => b.key === 'orphaned')!;
     expect(orphaned.className).toBe('orphaned-badge');
-    expect(orphaned.label).toBe('Orphaned anchor');
-    expect(orphaned.title).toMatch(/highlighted text/);
+    expect(orphaned.label).toBe('Orphaned');
+    expect(orphaned.title).toBe('The anchored text has since been edited or removed from the document.');
     // Unlike the other two badges, this one's accessible name is deliberately the fuller `title`
     // text, matching `ConversationThreadBox.vue`'s pre-existing behavior for this one badge.
     expect(orphaned.ariaLabel).toBe(orphaned.title);
   });
 
-  it('renders all three badges together (status + Stale + Orphaned anchor), in that fixed order', () => {
+  it('renders all three badges together (status + Stale + Orphaned), in that fixed order', () => {
     useConversationsStore().conversations = [
       conversationFixture({ id: 'c1', status: 'working', isStale: true, anchorOrphaned: true }),
     ];

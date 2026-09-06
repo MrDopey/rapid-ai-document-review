@@ -99,6 +99,13 @@ function hudStatusBadge(page: Page, name: string) {
   return page.locator('.hud-panel .conversation-row', { hasText: name }).locator('.status-badge');
 }
 
+/** The HUD row's own Make/Clear Primary button for `name` (006-toolbar-reorg: per-row, not a
+ *  single global button) — `.conversation-primary-row` is a sibling of `.conversation-row` within
+ *  the same `<li>`, so this scopes to the enclosing list item rather than the row itself. */
+function primaryButton(page: Page, name: string) {
+  return page.locator('.hud-panel li', { hasText: name }).locator('.primary-button');
+}
+
 test.describe('US5 — Designate a Primary conversation for automatic edits', () => {
   test('Primary defaults, auto-apply, switch-while-busy, staging, and Primary conflict (FR-027 - FR-030)', async ({
     page,
@@ -119,12 +126,11 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       expect(main?.isPrimary).toBe(true);
       expect(conversations.filter((c) => c.isPrimary)).toHaveLength(1);
 
-      // The summary area's "Primary: {{ name }}" text was dropped as redundant with the row's own
-      // Primary styling (accent + tint via `.is-primary`) — assert via the row and the "Clear
-      // Primary" button's title/aria-label (the only place that now names the Primary conversation
-      // in this area) instead.
+      // The old global "Primary" box's "Primary: {{ name }}" text is gone entirely (006-toolbar-
+      // reorg) — assert via the row's own Primary styling (accent + tint via `.is-primary`) and its
+      // now-per-row "Clear Primary" button's title/aria-label instead.
       await expect(page.locator('.conversation-row', { hasText: 'Main' })).toHaveClass(/is-primary/);
-      await expect(page.locator('.primary-summary .clear-primary-button')).toHaveAttribute('aria-label', /Main/);
+      await expect(primaryButton(page, 'Main')).toHaveAttribute('aria-label', /Main/);
     });
 
     await test.step('2. Main auto-applies an edit immediately, with no pending proposal left behind (FR-027)', async () => {
@@ -185,12 +191,13 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'working');
 
-      // "Make Primary" is colocated with "Clear Primary" in the panel's summary area, contextual
-      // to whichever conversation is currently *selected* (it's no longer a per-row button) —
-      // select the branch first, then act via the summary area.
+      // Make/Clear Primary is now a per-row button (006-toolbar-reorg) — act directly on the
+      // branch's own row; still select it first (as before) so its detail panel is open, which the
+      // "switch now" step below relies on for the `.is-primary` assertion's targeting to read
+      // naturally alongside the rest of this test's row-focus conventions.
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
       await branchRow.locator('.conversation-row').click();
-      await page.locator('.primary-summary').getByRole('button', { name: 'Make primary' }).click();
+      await branchRow.locator('.primary-button').click();
 
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
@@ -207,18 +214,18 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     await test.step('4. "switch now" moves Primary immediately without interrupting Main\'s in-flight run (FR-030)', async () => {
       const branchRow = page.locator('.hud-panel li', { hasText: branchName });
-      await page.locator('.primary-summary').getByRole('button', { name: 'Make primary' }).click();
+      await branchRow.locator('.primary-button').click();
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
       await expect(dialog).toBeVisible({ timeout: 10_000 });
       await dialog.getByRole('button', { name: 'Switch now' }).click();
       await expect(dialog).toHaveCount(0);
 
       // The "Primary" text badge on the row was replaced by styling (a left accent + background
-      // tint via `.is-primary`); the summary area's own "Primary: {{ name }}" text was later
-      // dropped as redundant with that row styling too — assert via the row's class and the
-      // "Clear Primary" button's now-only place for the name, its title/aria-label, instead.
+      // tint via `.is-primary`); the old global "Primary" box's own "Primary: {{ name }}" text is
+      // gone entirely (006-toolbar-reorg) — assert via the row's class and its own now-per-row
+      // "Clear Primary" button's title/aria-label instead.
       await expect(branchRow.locator('.conversation-row')).toHaveClass(/is-primary/, { timeout: 10_000 });
-      await expect(page.locator('.primary-summary .clear-primary-button')).toHaveAttribute(
+      await expect(branchRow.locator('.clear-primary-button')).toHaveAttribute(
         'aria-label',
         new RegExp(branchName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       );

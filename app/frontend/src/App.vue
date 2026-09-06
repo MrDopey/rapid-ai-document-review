@@ -11,7 +11,6 @@ import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
 import ReconnectingIndicator from './components/hud/ReconnectingIndicator.vue';
 import HudPanel, { type ConversationFilter } from './components/hud/HudPanel.vue';
-import PrimaryPanel from './components/hud/PrimaryPanel.vue';
 import ConversationDetailPanel from './components/conversation/ConversationDetailPanel.vue';
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
@@ -29,7 +28,8 @@ import {
 import { attachScrollSync } from './composables/scrollSync.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { useFocusPanelState } from './composables/focusPanelState.js';
-import { isEditingContext } from './a11y/keymap-registry.js';
+import { HOTKEY_BINDINGS, matchesBinding, isEditingContext, isOverlayOpen } from './a11y/keymap-registry.js';
+import { orderConversationsByAnchor } from './components/canvas/conversationLayout.js';
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
@@ -65,12 +65,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string)
   });
 }
 
-// 006-toolbar-reorg (confirmed layout): the "Primary" box's own error state (`PrimaryPanel.vue`'s
-// `primaryError`) is now rendered here instead, as a full-width strip beneath both toolbar
-// columns — `PrimaryPanel.vue` still owns the read/write logic and mirrors it up via `update:error`
-// (the same "controlled value, locally-owned writes" split its own `update:filter` prop uses).
+// 006-toolbar-reorg (confirmed layout): the Primary designation error is rendered here as a
+// full-width strip beneath both toolbar columns — `HudPanel.vue` still owns the read/write logic
+// (its per-row Make/Clear Primary buttons and the busy-switch dialog) and mirrors it up via
+// `update:error` (the same "controlled value, locally-owned writes" split its own `update:filter`
+// prop uses).
 const primaryErrorMessage = ref<string | null>(null);
-const primaryPanelRef = ref<InstanceType<typeof PrimaryPanel> | null>(null);
 
 // 005-canvas-conversation-threads (multi-focus overlay): up to `focusCap` conversations may have an
 // open detail panel (`ConversationDetailPanel.vue`, one instance per id) simultaneously, rendered
@@ -80,6 +80,18 @@ const primaryPanelRef = ref<InstanceType<typeof PrimaryPanel> | null>(null);
 // App.vue's own job is just wiring it up (computing `focusCap` from `.panes`' measured width below,
 // and threading the resulting state through the toolbar/HUD/overlay templates).
 const conversationFilter = ref<ConversationFilter>('all');
+
+// Ctrl+Alt+1..9 (`onGlobalKeydown` below): the Nth conversation is whichever one is Nth in this
+// same order — mirrors HudPanel.vue's own `filteredConversations`/`orderedConversations` computeds
+// exactly (its "Active only"/"All" filter, then `orderConversationsByAnchor`'s HUD ordering) so the
+// two can never disagree about "which conversation is Nth in the list the HUD is currently
+// showing".
+const orderedVisibleConversations = computed(() => {
+  const all = conversationsStore.conversations;
+  const filtered = conversationFilter.value === 'active' ? all.filter((c) => c.status !== 'closed') : all;
+  const byId = new Map(all.map((c) => [c.id, c]));
+  return orderConversationsByAnchor(filtered, byId);
+});
 
 // Live cap = clamp(env default 3, [1, however-many-panels-fit-side-by-side-in-`.panes`]) — see
 // `focusConfig.ts`. `panesWidth` is tracked via a `ResizeObserver` on `.panes` (the same element
@@ -174,8 +186,8 @@ const previewSplitDragging = ref(false);
 // At least one of Preview/Editor must always stay visible — `togglePreviewVisible`/
 // `toggleEditorVisible` below silently no-op (rather than throwing or forcing the other back open)
 // if the requested toggle would hide the last visible one; the two buttons in `.actions-group`
-// mirror that with a `disabled` attribute computed from the same condition, and Ctrl+Alt+1/
-// Ctrl+Alt+2 (`onGlobalKeydown` below) share these same functions, so all three entry points
+// mirror that with a `disabled` attribute computed from the same condition, and Ctrl+Alt+P/
+// Ctrl+Alt+E (`onGlobalKeydown` below) share these same functions, so all three entry points
 // enforce the invariant identically.
 //
 // Judgment call: this guard's purpose is preserving "some view of the document's actual content"
@@ -388,48 +400,84 @@ function onPreviewHandlePointerDown(event: PointerEvent): void {
 // Alt+A/Ctrl+Alt+J/K) or any single dialog — they're global controls living in the toolbar's
 // "Global Actions" box (History, Show reasoning) or the "Primary" box (dismiss notice). Same
 // per-component `document`-level listener pattern as HudPanel.vue's own `onGlobalKeydown`
-// (mounted/removed alongside this component, since it's alive for the document's whole lifetime),
-// including the same shared `isEditingContext` guard (a11y/keymap-registry.ts, imported above)
-// against hijacking normal typing or an open dialog's own keys.
+// (mounted/removed alongside this component, since it's alive for the document's whole lifetime).
+//
+// Hotkey-consolidation refactor: this used to be a hand-rolled `if (event.ctrlKey && ...)` chain
+// per shortcut. Every binding's own modifiers+code+scope now lives once in
+// `a11y/keymap-registry.ts`'s `HOTKEY_BINDINGS` (the machine-checkable source of truth
+// `findConflicts` scans for collisions) — this function only still owns the *handlers* (what
+// happens when a binding fires), looked up from `globalBindingHandlers` below by the matched
+// binding's `id`. `matchesBinding`/`isEditingContext`/`isOverlayOpen` are the shared guard/match
+// helpers imported above.
+const GLOBAL_BINDINGS = HOTKEY_BINDINGS.filter((b) => b.scope === 'Global');
+// Ctrl+Alt+1..9 and the new cycle-focused-conversations shortcut both change *which* conversation
+// panel(s) are focused/active — like the pre-existing digit shortcuts, these must stay a no-op
+// while any dialog is open (`isOverlayOpen`), not just while the event's own target happens to sit
+// inside one (`isEditingContext` alone only covers that narrower case) — see `isOverlayOpen`'s own
+// doc comment in a11y/keymap-registry.ts.
+const OVERLAY_GUARDED_BINDING_IDS = new Set<string>([
+  ...GLOBAL_BINDINGS.filter((b) => b.id.startsWith('focus-toggle-')).map((b) => b.id),
+  'cycle-conversation-prev',
+  'cycle-conversation-prev-arrow',
+  'cycle-conversation-next',
+  'cycle-conversation-next-arrow',
+]);
 
-/** Ctrl+Alt+P/R/H/Y/1/2 — see the doc comment above for why these (and only these) live here
- *  rather than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global
- *  Actions" box for the same reason: a global, toolbar-level toggle, not owned by any single pane.
- *  1/2 (Preview/Editor visibility) share `togglePreviewVisible`/`toggleEditorVisible` with the two
- *  buttons in `.actions-group`, so the "never hide both" guard is enforced in exactly one place
- *  regardless of entry point. */
-function onGlobalKeydown(event: KeyboardEvent): void {
-  if (event.metaKey || event.shiftKey) return;
-  if (isEditingContext(event)) return;
-  if (!event.ctrlKey || !event.altKey) return;
-  if (event.code === 'KeyP') {
-    event.preventDefault();
-    // One-shot action matching the existing "Dismiss" button, not a toggle — a no-op once the
-    // notice is already dismissed (see PrimaryPanel.vue's `dismissNotice`).
-    primaryPanelRef.value?.dismissNotice();
-    return;
-  }
-  if (event.code === 'KeyR') {
-    event.preventDefault();
-    void settingsStore.update({ thinkingVisible: !settingsStore.thinkingVisible });
-    return;
-  }
-  if (event.code === 'KeyH') {
-    event.preventDefault();
+/** Ctrl+Alt+H/Ctrl+Alt+ArrowLeft (previous) and Ctrl+Alt+L/Ctrl+Alt+ArrowRight (next): moves which
+ *  already-focused conversation panel is "active" (`lastInteractedId`) among
+ *  `orderedFocusedConversations` — the same list/order the multi-focus overlay below renders —
+ *  wrapping at both ends. Mirrors HudPanel.vue's own `cycleByOffset` (Ctrl+Alt+J/K) but cycles only
+ *  the currently-focused subset, never adding/removing a focused panel the way `toggleFocus`/
+ *  `replaceFocus` do. A no-op with 0 or 1 focused conversations — there's nothing to cycle to. */
+function cycleFocusedConversation(offset: number): void {
+  const list = orderedFocusedConversations.value;
+  if (list.length <= 1) return;
+  const currentIndex = list.findIndex((c) => c.id === lastInteractedId.value);
+  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + list.length) % list.length;
+  lastInteractedId.value = list[nextIndex]!.id;
+}
+
+/** Every `HOTKEY_BINDINGS` id this component owns, mapped to its actual handler — Y ("sync") sits
+ *  alongside R/H's "Global Actions" box for the same reason: a global, toolbar-level toggle, not
+ *  owned by any single pane. P/E (Preview/Editor visibility) share `togglePreviewVisible`/
+ *  `toggleEditorVisible` with the two buttons in `.actions-group`, so the "never hide both" guard
+ *  is enforced in exactly one place regardless of entry point. `focus-toggle-<N>` isn't listed here
+ *  — its handler needs the matched digit itself, so `onGlobalKeydown` below special-cases it
+ *  directly rather than threading the digit through this table. */
+const globalBindingHandlers: Record<string, () => void> = {
+  'toggle-reasoning': () => void settingsStore.update({ thinkingVisible: !settingsStore.thinkingVisible }),
+  'toggle-history': () => {
     historyOpen.value = !historyOpen.value;
+  },
+  'toggle-sync-scroll': toggleSyncScroll,
+  'toggle-preview': togglePreviewVisible,
+  'toggle-editor': toggleEditorVisible,
+  'cycle-conversation-prev': () => cycleFocusedConversation(-1),
+  'cycle-conversation-prev-arrow': () => cycleFocusedConversation(-1),
+  'cycle-conversation-next': () => cycleFocusedConversation(1),
+  'cycle-conversation-next-arrow': () => cycleFocusedConversation(1),
+};
+
+function onGlobalKeydown(event: KeyboardEvent): void {
+  if (event.metaKey) return;
+  const binding = GLOBAL_BINDINGS.find((b) => matchesBinding(event, b));
+  if (!binding) return;
+  // `composerExempt` bindings (the cycle-focused-conversations shortcut) fire even while the
+  // event's target is a conversation composer's own textarea — every other binding here keeps the
+  // blanket "any textarea/input/select/contenteditable blocks a global shortcut" rule unchanged.
+  if (isEditingContext(event, { allowComposer: binding.composerExempt === true })) return;
+  if (OVERLAY_GUARDED_BINDING_IDS.has(binding.id) && isOverlayOpen()) return;
+  event.preventDefault();
+
+  const digitMatch = /^focus-toggle-(\d)$/.exec(binding.id);
+  if (digitMatch) {
+    const index = Number(digitMatch[1]) - 1;
+    const target = orderedVisibleConversations.value[index];
+    if (target) toggleFocus(target.id);
+    return;
   }
-  if (event.code === 'KeyY') {
-    event.preventDefault();
-    toggleSyncScroll();
-  }
-  if (event.code === 'Digit1') {
-    event.preventDefault();
-    togglePreviewVisible();
-  }
-  if (event.code === 'Digit2') {
-    event.preventDefault();
-    toggleEditorVisible();
-  }
+
+  globalBindingHandlers[binding.id]?.();
 }
 
 /** The initial document load, wrapped so it can be re-run verbatim by the Retry button below —
@@ -591,19 +639,63 @@ async function onToggleReasoning(event: Event): Promise<void> {
   </section>
 
   <div v-else class="editor-layout">
-    <!-- A two-column layout (~80/20): the document title shows via `.document-title-bar` above
-         both columns (and in the browser tab — see the `document.title` watch in <script>); the
-         left column holds just the "Conversations (HUD)" box; the right column, top-aligned with
-         the HUD box and extending down through its bottom (plain flex-row stretch gives this for
-         free), stacks two visually-boxed sub-sections: Primary on top, Global Actions below. The
-         error banner is pulled out of the Primary box entirely and rendered as its own full-width
+    <!-- A two-column layout (~80/20): the document title, plus the Keyboard-shortcuts/Help icon
+         triggers pinned to its right, shows via `.document-title-bar` above both columns (and in
+         the browser tab — see the `document.title` watch in <script>); the left column holds just
+         the "Conversations (HUD)" box (whose rows now also carry their own Make/Clear Primary
+         button — see HudPanel.vue); the right column, top-aligned with the HUD box and extending
+         down through its bottom (plain flex-row stretch gives this for free), holds just the
+         Global Actions box. The Primary designation error banner is rendered as its own full-width
          strip beneath both columns. -->
     <header class="toolbar">
       <!-- `store.document` is always set here (this whole branch is `v-else` of `!hasDocument`
            above), so `.title` is always available; the `'AI Document Review'` fallback is purely
            defensive (an empty-string title, say) rather than something this branch is ever
            expected to hit in practice. -->
-      <h1 class="document-title-bar">{{ store.document?.title || 'AI Document Review' }}</h1>
+      <div class="document-title-bar">
+        <h1 class="document-title-text">{{ store.document?.title || 'AI Document Review' }}</h1>
+        <!-- Icon-only controls (labels dropped, aria-label/title kept for a11y), pinned to the
+             title bar's right edge. -->
+        <div class="title-bar-icons">
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts"
+            @click="shortcutsOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <path
+                d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Help"
+            title="Help"
+            @click="helpOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+              <path
+                d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        </div>
+      </div>
       <div class="toolbar-columns">
         <div class="toolbar-left">
           <div class="hud-box">
@@ -614,69 +706,18 @@ async function onToggleReasoning(event: Event): Promise<void> {
               :focus-cap="focusCap"
               :filter="conversationFilter"
               @update:filter="conversationFilter = $event"
+              @update:error="primaryErrorMessage = $event"
               @toggle-focus="onHudToggleFocus"
               @cycle-focus="onHudCycleFocus"
             />
           </div>
         </div>
         <div class="toolbar-right">
-          <!-- Row 1: Primary controls (col 1) and the Keyboard-shortcuts/Help icon triggers
-               (col 2), side by side. -->
-          <div class="toolbar-right-row-1">
-            <PrimaryPanel
-              ref="primaryPanelRef"
-              class="primary-box"
-              :active-id="lastInteractedId"
-              @update:error="primaryErrorMessage = $event"
-            />
-            <!-- Icon-only controls (labels dropped, aria-label/title kept for a11y), rendered as
-                 a tight centered cluster rather than stretched half-width cells. -->
-            <div class="info-group">
-              <button
-                type="button"
-                class="icon-button"
-                aria-label="Keyboard shortcuts"
-                title="Keyboard shortcuts"
-                @click="shortcutsOpen = true"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                  <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
-                  <path
-                    d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="icon-button"
-                aria-label="Help"
-                title="Help"
-                @click="helpOpen = true"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                  <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-                  <path
-                    d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <!-- Rows 2 & 3 (006-toolbar-reorg): explicit, fixed 2-row grouping — row 2 is the two
-               checkbox toggles, row 3 is the three buttons. `.actions-group` is `.toolbar-right`'s
-               own second child and absorbs the column's stretched height directly (see its
-               `flex: 1 1 auto` below). -->
+          <!-- Global Actions: two side-by-side columns — checkboxes on the left, buttons on the
+               right — now `.toolbar-right`'s only content, since Primary's own visible chrome moved
+               into HudPanel.vue's per-row buttons. -->
           <div class="actions-group">
-            <div class="actions-row actions-row-1">
+            <div class="actions-col actions-col-checkboxes">
               <label class="reasoning-toggle">
                 <input type="checkbox" :checked="settingsStore.thinkingVisible" @change="onToggleReasoning" />
                 Show reasoning
@@ -686,8 +727,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
                 Sync scroll
               </label>
             </div>
-            <div class="actions-row actions-row-2">
-              <button type="button" @click="historyOpen = !historyOpen">
+            <div class="actions-col actions-col-buttons">
+              <button
+                type="button"
+                :title="
+                  historyOpen
+                    ? 'Hide the History panel. Keyboard shortcut: Ctrl+Alt+Shift+H'
+                    : 'Show the History panel. Keyboard shortcut: Ctrl+Alt+Shift+H'
+                "
+                @click="historyOpen = !historyOpen"
+              >
                 {{ historyOpen ? 'Hide history' : 'History' }}
               </button>
               <button
@@ -695,8 +744,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
                 :disabled="previewVisible && !editorVisible"
                 :title="
                   previewVisible
-                    ? 'Hide the Preview pane — the Canvas pane expands to fill the space. Keyboard shortcut: Ctrl+Alt+1'
-                    : 'Show the Preview pane. Keyboard shortcut: Ctrl+Alt+1'
+                    ? 'Hide the Preview pane — the Canvas pane expands to fill the space. Keyboard shortcut: Ctrl+Alt+P'
+                    : 'Show the Preview pane. Keyboard shortcut: Ctrl+Alt+P'
                 "
                 @click="togglePreviewVisible"
               >
@@ -707,8 +756,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
                 :disabled="editorVisible && !previewVisible"
                 :title="
                   editorVisible
-                    ? 'Hide the document editor — the conversation sidebar stays visible and expands to fill the space. Keyboard shortcut: Ctrl+Alt+2'
-                    : 'Show the document editor. Keyboard shortcut: Ctrl+Alt+2'
+                    ? 'Hide the document editor — the conversation sidebar stays visible and expands to fill the space. Keyboard shortcut: Ctrl+Alt+E'
+                    : 'Show the document editor. Keyboard shortcut: Ctrl+Alt+E'
                 "
                 @click="toggleEditorVisible"
               >
@@ -723,11 +772,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
       </div>
       <!-- `documentStore.conflictMessage` (stores/document.ts) is set when the server rejects a
            manual edit because the document changed elsewhere while it was in flight (a 409). Same
-           dismissible-notice shape as `PrimaryPanel.vue`'s own
-           `.primary-notice`/`.dismiss-notice-button` (the app's existing convention for a
-           dismissible inline notice), rather than the plain non-dismissible `.toolbar-error-banner`
-           strip above, since this one has a real per-viewer dismiss action
-           (`clearConflictMessage`) rather than just reflecting still-live state. -->
+           dismissible-notice shape as `HudPanel.vue`'s own busy-switch dialog surroundings (the
+           app's existing convention for a dismissible inline notice), rather than the plain
+           non-dismissible `.toolbar-error-banner` strip above, since this one has a real
+           per-viewer dismiss action (`clearConflictMessage`) rather than just reflecting still-live
+           state. -->
       <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
         <span>{{ store.conflictMessage }}</span>
         <button
@@ -895,11 +944,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
   flex-direction: column;
   gap: 0.5rem;
 }
-/* The "Conversations (HUD)" box and the right column's boxed sub-sections are each their own
+/* The "Conversations (HUD)" box and the right column's "Global Actions" box are each their own
    visually-boxed section, styled identically so the two-column layout reads as one system. */
 .hud-box,
-.primary-box,
-.info-group,
 .actions-group {
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
@@ -915,70 +962,27 @@ async function onToggleReasoning(event: Event): Promise<void> {
   flex: 1 1 auto;
   min-width: 0;
 }
-/* Row 1 of `.toolbar-right`: `.primary-box` (col 1) and `.info-group` (col 2) side by side.
-   `.primary-box` gets the lion's share of the width; `.info-group`'s icon cluster only needs
-   its content width. `align-items: flex-start` (rather than the flex default `stretch`) keeps
-   `.info-group` hugging its own content height instead of stretching to match however tall the
-   Primary notice/buttons happen to be. Neither grows vertically here — row 2/3's
-   `.actions-group` (below) is the one that absorbs the column's stretched height.
-   `flex-wrap: wrap` matches the same narrow-width behavior `.actions-row` (below) already relies
-   on: at the ~20%-width right column's narrowest breakpoints there isn't room for both the
-   Primary box's text/buttons *and* the icon cluster's own minimum content width on one line, so
-   `.info-group` drops to its own line beneath `.primary-box` instead of forcing this row wider
-   than `.toolbar-right` and overflowing its border. */
-.toolbar-right-row-1 {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-/* A 10rem flex-basis (rather than `auto`) matters here specifically because `.primary-box` is a
-   plain `<div>` with no intrinsic width of its own — `flex-basis: auto` on a sizeless block
-   resolves to fill the available space, which would leave no room for `.info-group` beside it
-   and force a wrap even at comfortable widths. 10rem is enough to fit `.primary-box`'s content at
-   this column's typical (~1400px-viewport) width without wrapping, while still being the first
-   thing to give up its share of space (`min-width: 0`) once the column gets too narrow for both
-   columns — at that point `flex-wrap` above takes over and drops `.info-group` to its own line. */
-.primary-box {
-  flex: 1 1 10rem;
-  min-width: 0;
-}
-/* Rows 2 & 3 of `.toolbar-right`: "Show reasoning" + "Sync scroll" (row 2) and "History" +
-   "Hide/Show preview" + "Hide/Show editor" (row 3). Explicit, fixed 2-row grouping — rather than
-   relying on `grid-template-columns: repeat(auto-fit, ...)` to happen to wrap into that same
-   grouping at a given container width — each row is its own flex container so the grouping is
-   structural (survives any width) instead of incidental to wrapping. `.actions-group` is
-   `.toolbar-right`'s second (and last) child, so `flex: 1 1 auto` lets it absorb whatever extra
-   height the stretched column has beyond row 1's height, keeping the column's bottom edge level
-   with the HUD box's own bottom edge. */
+/* "Global Actions" is now `.toolbar-right`'s only content (Primary's own visible chrome moved into
+   HudPanel.vue's per-row buttons), so it alone absorbs the column's stretched height, keeping the
+   column's bottom edge level with the HUD box's own bottom edge. Two side-by-side columns: the
+   checkbox toggles on the left, the action buttons on the right (see `.actions-col` below). */
 .actions-group {
   flex: 1 1 auto;
   display: flex;
+  gap: 0.75rem;
+}
+.actions-col {
+  display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 1 1 0%;
+  min-width: 0;
 }
-.actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
+.actions-col-buttons {
+  align-items: stretch;
 }
-.actions-row > * {
-  flex: 1 1 6.5rem;
-  min-width: 6.5rem;
-}
-/* "Keyboard shortcuts" + "Help", icon-only. Deliberately NOT a 2-column stretch — a tight,
-   centered cluster with normal gap spacing reads better than half-width icon cells; it doesn't
-   grow to fill row 1's height beyond its own content. `flex-shrink` is left at its default
-   (1, not 0) as a second line of defense alongside `.toolbar-right-row-1`'s `flex-wrap`: even
-   once this has wrapped onto its own line beneath `.primary-box`, shrinking lets it settle to
-   the line's width rather than overflowing `.toolbar-right`'s border by a few pixels. */
-.info-group {
-  flex: 0 1 auto;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
+.actions-col-buttons > button {
+  width: 100%;
 }
 .reasoning-toggle {
   display: flex;
@@ -997,8 +1001,17 @@ async function onToggleReasoning(event: Event): Promise<void> {
   color: inherit;
 }
 /* Deliberately small/unobtrusive — this two-column toolbar layout (see the comment on
-   `.toolbar-columns` below) has no spare vertical room for a large heading. */
+   `.toolbar-columns` below) has no spare vertical room for a large heading. A flex row: the title
+   text takes the available space (truncating with an ellipsis, per `.document-title-text` below)
+   with the Keyboard-shortcuts/Help icon buttons pinned to the right. */
 .document-title-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.document-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
@@ -1006,8 +1019,14 @@ async function onToggleReasoning(event: Event): Promise<void> {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Same dismissible-notice shape as `PrimaryPanel.vue`'s own `.primary-notice`, but amber/
-   warning-toned rather than that one's neutral info-blue — this reflects a real, already-happened
+.title-bar-icons {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* A dismissible-notice shape shared with `HistoryPanel.vue`'s conventions elsewhere, but amber/
+   warning-toned rather than a neutral info-blue — this reflects a real, already-happened
    data-loss event (the user's last edit was dropped), not just informational first-time guidance. */
 .toolbar-conflict-banner {
   display: flex;
@@ -1022,8 +1041,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
   border-radius: 4px;
   font-size: 0.8rem;
 }
-/* Error banner: pulled out of the Primary box entirely (see `PrimaryPanel.vue`'s `update:error`) —
-   a full-width strip beneath BOTH toolbar columns, only rendered when there's an error. */
+/* Error banner: the Primary designation error (see `HudPanel.vue`'s `update:error`) — a full-width
+   strip beneath BOTH toolbar columns, only rendered when there's an error. */
 .toolbar-error-banner {
   padding: 0.4rem 0.5rem;
   background: var(--danger-bg, #fee2e2);

@@ -8,7 +8,7 @@ import {
   persistEditorSplit,
 } from '../../src/composables/panePersistence.js';
 
-// Preview/Editor visibility toggles (App.vue's `.actions-group`, Ctrl+Alt+1/Ctrl+Alt+2): persisted
+// Preview/Editor visibility toggles (App.vue's `.actions-group`, Ctrl+Alt+P/Ctrl+Alt+E): persisted
 // per-viewer via their own localStorage keys, same "defaults to on, best-effort, non-throwing"
 // convention `loadSyncScrollEnabled`/`persistSyncScrollEnabled` already use — these loader/setter
 // pairs are unit-tested directly here (rather than only indirectly through App.vue) the same way

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { orderConversationsByAnchor } from '../canvas/conversationLayout.js';
 import { PRIMARY_EXPLANATION } from '../../composables/constants.js';
-import { isEditingContext } from '../../a11y/keymap-registry.js';
+import { HOTKEY_BINDINGS, matchesBinding, isEditingContext } from '../../a11y/keymap-registry.js';
+import { ApiError } from '../../transport/http-client.js';
+import type { PrimaryWhenBusy } from '@rapid-ai-document-review/shared/contracts/http';
+import { useFocusTrap } from '../../a11y/focus-manager.js';
 import ConversationStatusBadges from '../conversation/ConversationStatusBadges.vue';
 
 // 005-canvas-conversation-threads: the "active"/"all" filter used to be purely local to this
@@ -17,11 +20,12 @@ export type ConversationFilter = 'active' | 'all';
 // "which one conversation's detail view is open") were replaced by App.vue's
 // `focusedConversationIds: Set<string>` (which of possibly several conversations currently have an
 // open detail panel — row click is now a toggle, see `onRowClick` below) plus a separate
-// `activeId` scalar ("last-interacted" — still exactly one at a time, backing this panel's own
-// Make-Primary/Clear-Primary targeting and row highlight/`aria-current`, and driving which panel's
-// focus-trap is active in App.vue). `focusCap` is the live per-viewport cap (App.vue's
-// `useFocusCap`) purely so a row that would exceed it can render its own disabled-looking
-// affordance with the right "max N" number.
+// `activeId` scalar ("last-interacted" — still exactly one at a time, backing this panel's own row
+// highlight/`aria-current`, and driving which panel's focus-trap is active in App.vue). Make/Clear
+// Primary (006-toolbar-reorg) targets whichever conversation's own row the button lives on, not
+// `activeId`. `focusCap` is the live per-viewport cap (App.vue's `useFocusCap`) purely so a row
+// that would exceed it can render its own disabled-looking affordance with the right "max N"
+// number.
 
 const props = defineProps<{
   activeId: string | null;
@@ -33,8 +37,105 @@ const emit = defineEmits<{
   (e: 'toggle-focus', id: string): void;
   (e: 'cycle-focus', id: string): void;
   (e: 'update:filter', value: ConversationFilter): void;
+  (e: 'update:error', value: string | null): void;
 }>();
 const store = useConversationsStore();
+
+// 006-toolbar-reorg (per-row Primary controls): the global "Primary" box (formerly
+// `PrimaryPanel.vue`) is gone — each conversation row now carries its own Make/Clear Primary
+// button (see the template below), targeting that row's own conversation rather than a separate
+// "active" concept. Since the button already lives on the row it targets, and the busy-switch
+// dialog it can open has no other natural surface once the global box is gone, that whole
+// designation flow (state + the busy-switch confirmation dialog) moves here rather than living on
+// as a near-empty dialog-only component of its own.
+/** FR-029: the target/current-Primary-busy warning, offering exactly the three `whenBusy`
+ *  choices — set only while a designation request is awaiting the user's decision. */
+const busyPrompt = ref<{ conversationId: string; currentPrimaryId: string | null; busyConversationId: string } | null>(
+  null,
+);
+const primaryError = ref<string | null>(null);
+watch(primaryError, (value) => emit('update:error', value));
+
+const primaryBusyId = ref<string | null>(null);
+const busyDialogEl = ref<HTMLElement | null>(null);
+const busyDialogOpen = computed(() => busyPrompt.value !== null);
+
+// FR-043d: opening the busy-switch warning moves focus to its first choice; Escape (or Cancel)
+// returns focus to the row button that triggered it.
+useFocusTrap(busyDialogEl, busyDialogOpen, { onEscape: () => void resolveBusyPrompt('cancel') });
+
+function conversationName(id: string | null): string {
+  if (!id) return 'none';
+  return store.conversations.find((c) => c.id === id)?.name ?? id;
+}
+
+/** Issues (or re-issues, with an explicit choice) a designation request. On `409
+ *  PRIMARY_TARGET_BUSY`, opens the three-choice warning instead of surfacing an error. */
+async function makePrimary(conversationId: string, whenBusy?: PrimaryWhenBusy): Promise<void> {
+  primaryError.value = null;
+  primaryBusyId.value = conversationId;
+  try {
+    const result = await store.designatePrimary(conversationId, whenBusy);
+    if (result.applied !== 'cancelled') busyPrompt.value = null;
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 'PRIMARY_TARGET_BUSY') {
+      const details = (err.details ?? {}) as { currentPrimaryId?: string | null; busyConversationId?: string };
+      busyPrompt.value = {
+        conversationId,
+        currentPrimaryId: details.currentPrimaryId ?? null,
+        busyConversationId: details.busyConversationId ?? conversationId,
+      };
+    } else {
+      primaryError.value = err instanceof Error ? err.message : 'Failed to designate Primary.';
+    }
+  } finally {
+    primaryBusyId.value = null;
+  }
+}
+
+async function resolveBusyPrompt(whenBusy: PrimaryWhenBusy): Promise<void> {
+  if (!busyPrompt.value) return;
+  const { conversationId } = busyPrompt.value;
+  if (whenBusy === 'cancel') {
+    busyPrompt.value = null;
+  }
+  await makePrimary(conversationId, whenBusy);
+}
+
+async function clearPrimary(conversationId: string): Promise<void> {
+  primaryError.value = null;
+  try {
+    await store.clearPrimary(conversationId);
+  } catch (err) {
+    primaryError.value = err instanceof Error ? err.message : 'Failed to clear Primary.';
+  }
+}
+
+/** A row's Make/Clear Primary button `title`/`aria-label` — always rendered (never a bare
+ *  disabled control with no explanation), same convention `rowTitle` below uses for the row
+ *  itself. Clear Primary's own title still names the conversation explicitly (matching the old
+ *  global button's convention) since the button's accessible name is otherwise just "Clear
+ *  Primary" with no context of its own beyond its position in the row. */
+function primaryButtonTitle(conv: { id: string; name: string; isPrimary: boolean; status: string }): string {
+  if (conv.isPrimary) return `Clear Primary (${conv.name}) — ${PRIMARY_EXPLANATION}`;
+  if (conv.status === 'closed') return "Closed conversations can't be made Primary";
+  if (conv.status === 'errored') return 'An errored conversation cannot be designated Primary';
+  return `Make Primary — ${PRIMARY_EXPLANATION}`;
+}
+
+function primaryButtonDisabled(conv: { id: string; isPrimary: boolean; status: string }): boolean {
+  if (primaryBusyId.value === conv.id) return true;
+  if (conv.isPrimary) return false;
+  return conv.status === 'closed' || conv.status === 'errored';
+}
+
+function onPrimaryButtonClick(conv: { id: string; isPrimary: boolean }): void {
+  if (conv.isPrimary) {
+    void clearPrimary(conv.id);
+  } else {
+    void makePrimary(conv.id);
+  }
+}
 
 // Conversation-list filter: "active" hides closed conversations, which otherwise stay in
 // `store.conversations` forever with no way to get them out of the way. Now a controlled prop
@@ -104,23 +205,23 @@ function cycleByOffset(offset: number): void {
  *  Ctrl+Alt+K adds a second modifier that neither of those interceptor classes binds by default
  *  (they use a single modifier, or none), while keeping the vim-style J/K-for-down/up mnemonic
  *  and the existing Alt-based convention (Alt+Shift+C branch-from-selection, Alt+A above). */
+// Hotkey-consolidation refactor: modifiers+code+scope for these three now live once in
+// `a11y/keymap-registry.ts`'s `HOTKEY_BINDINGS` (`'Conversation list'` scope) — this table only
+// keeps the actual handlers, looked up by the matched binding's `id`.
+const CONVERSATION_LIST_BINDINGS = HOTKEY_BINDINGS.filter((b) => b.scope === 'Conversation list');
+const conversationListBindingHandlers: Record<string, () => void> = {
+  'toggle-filter': toggleFilter,
+  'cycle-next': () => cycleByOffset(1),
+  'cycle-prev': () => cycleByOffset(-1),
+};
+
 function onGlobalKeydown(event: KeyboardEvent): void {
-  if (event.metaKey || event.shiftKey) return;
+  if (event.metaKey) return;
+  const binding = CONVERSATION_LIST_BINDINGS.find((b) => matchesBinding(event, b));
+  if (!binding) return;
   if (isEditingContext(event)) return;
-  if (event.code === 'KeyA' && event.altKey && !event.ctrlKey) {
-    event.preventDefault();
-    toggleFilter();
-    return;
-  }
-  if (event.altKey && event.ctrlKey && event.code === 'KeyJ') {
-    event.preventDefault();
-    cycleByOffset(1);
-    return;
-  }
-  if (event.altKey && event.ctrlKey && event.code === 'KeyK') {
-    event.preventDefault();
-    cycleByOffset(-1);
-  }
+  event.preventDefault();
+  conversationListBindingHandlers[binding.id]?.();
 }
 
 /** 005-canvas-conversation-threads (multi-focus overlay): a row's `title` — Primary's existing
@@ -181,23 +282,25 @@ onBeforeUnmount(() => {
 
     <ul>
       <!-- UI convention: every conversation row is a 2-section layout — title | status (see
-           .specify/memory/constitution.md "UI Conventions"). The per-row "Make Primary" action
-           lives in the "Primary" box (`PrimaryPanel.vue`, in App.vue's toolbar right column), not
-           next to each row's title. `.conversation-row` is the flex/grid container (not a button,
-           so the title can still be a true nested control); its own @click reproduces click-
-           anywhere-in-the-row selection via ordinary event bubbling from its descendants. The
-           title itself is a real, natively keyboard-operable <button> (Tab to focus, Enter/Space
-           activates — its click bubbles up and is caught by the same handler, so keyboard
-           selection works); the status badge plus every other existing badge (stale/pending/queue)
-           are grouped on the right. The Primary conversation is indicated by
-           `.conversation-row.is-primary` below (a left accent + subtle background tint) rather
-           than a text badge here — never color alone: a `title` on the row plus a
-           `.visually-hidden` label on the title button keep it identifiable for screen-reader
-           users, and the small icon is a non-color-dependent visual cue too. There is no separate
-           "Read-only" badge next to the status badge: a closed conversation's `data-status` badge
-           already says "closed", so read-only is implied, not new information — see
-           ConversationView.vue's `.readonly-banner` for the one spot that still earns its keep,
-           since it explains *why* editing is disabled rather than just re-labelling the status. -->
+           .specify/memory/constitution.md "UI Conventions"), with a second line beneath it for the
+           per-row Make/Clear Primary button (006-toolbar-reorg: the old global "Primary" box —
+           `PrimaryPanel.vue` — is gone; each row now targets its own conversation directly).
+           `.conversation-row` is the flex/grid container (not a button, so the title can still be a
+           true nested control); its own @click reproduces click-anywhere-in-the-row selection via
+           ordinary event bubbling from its descendants. The title itself is a real, natively
+           keyboard-operable <button> (Tab to focus, Enter/Space activates — its click bubbles up
+           and is caught by the same handler, so keyboard selection works); the status badge plus
+           every other existing badge (stale/pending/queue) are grouped on the right. The Primary
+           conversation is indicated by `.conversation-row.is-primary` below (a left accent +
+           subtle background tint) rather than a text badge here — never color alone: a `title` on
+           the row plus a `.visually-hidden` label on the title button keep it identifiable for
+           screen-reader users, and the small icon is a non-color-dependent visual cue too. There is
+           no separate "Read-only" badge next to the status badge: a closed conversation's
+           `data-status` badge already says "closed", so read-only is implied, not new information —
+           see ConversationView.vue's `.readonly-banner` for the one spot that still earns its keep,
+           since it explains *why* editing is disabled rather than just re-labelling the status.
+           The Make/Clear Primary button is its own sibling row beneath, outside `.conversation-row`,
+           so clicking it never also bubbles into the row's own toggle-focus click handler. -->
       <li v-for="conv in orderedConversations" :key="conv.id" :style="{ paddingLeft: `${conv.branchDepth * 0.3}rem` }">
         <div
           class="conversation-row"
@@ -229,8 +332,43 @@ onBeforeUnmount(() => {
             <ConversationStatusBadges :conversation-id="conv.id" />
           </span>
         </div>
+        <div class="conversation-primary-row">
+          <button
+            type="button"
+            class="primary-button"
+            :class="conv.isPrimary ? 'clear-primary-button' : 'make-primary-button'"
+            :disabled="primaryButtonDisabled(conv)"
+            :title="primaryButtonTitle(conv)"
+            :aria-label="primaryButtonTitle(conv)"
+            @click="onPrimaryButtonClick(conv)"
+          >
+            {{ conv.isPrimary ? 'Clear Primary' : 'Make Primary' }}
+          </button>
+        </div>
       </li>
     </ul>
+
+    <Transition name="modal">
+      <div v-if="busyPrompt" class="modal-overlay primary-busy-dialog-overlay">
+        <div
+          ref="busyDialogEl"
+          class="primary-busy-dialog dialog-box"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Primary conversation is busy"
+        >
+          <p>
+            {{ conversationName(busyPrompt.busyConversationId) }} is still working. What should happen to the Primary
+            designation?
+          </p>
+          <div class="primary-busy-choices">
+            <button type="button" @click="resolveBusyPrompt('switch_now')">Switch now</button>
+            <button type="button" @click="resolveBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolveBusyPrompt('cancel')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </nav>
 </template>
 
@@ -238,8 +376,10 @@ onBeforeUnmount(() => {
 /* 005-canvas-conversation-threads/US4 (T031), reflowed again by 006-toolbar-reorg: this panel used
    to be a full-height vertical sidebar, then moved inline into `App.vue`'s toolbar row; it now
    lives in the toolbar's left column (title above it, both sharing the same left edge/width) as
-   its own "Conversations (HUD)" box, with Primary/error content pulled out entirely (see
-   `PrimaryPanel.vue`) — every class/element the existing e2e suite selects on (`.hud-panel`,
+   its own "Conversations (HUD)" box. The old global "Primary" box (`PrimaryPanel.vue`) is gone —
+   its Make/Clear Primary controls and busy-switch dialog moved here, onto each row (see
+   `.conversation-primary-row` below); its designation-error state still surfaces in App.vue via
+   `update:error`. Every class/element the existing e2e suite selects on (`.hud-panel`,
    `.conversation-row`, `.status-badge`, `.stale-badge`, `.hud-panel li`) is unchanged, only how
    they're arranged is. */
 .hud-panel {
@@ -296,6 +436,8 @@ onBeforeUnmount(() => {
 }
 .hud-panel li {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 /* UI convention: title | status, laid out as 2 side-by-side sections in one row (see
    .specify/memory/constitution.md "UI Conventions"). A <div>, not a <button>, so the title can
@@ -382,8 +524,32 @@ onBeforeUnmount(() => {
 /* Every conversation status/badge color (`.pending-badge`/`.queue-badge`/`.stale-badge` and the
    rest) lives in `ConversationStatusBadges.vue`, shared with `ConversationThreadBox.vue`/
    `ConversationView.vue` — see that component's own doc comment. */
-/* 006-toolbar-reorg: Primary's notice/summary and the busy-switch dialog moved to
-   `PrimaryPanel.vue` (its own visually-boxed section in App.vue's toolbar), and the primary-error
-   banner moved to App.vue as a full-width strip beneath both toolbar columns — none of it lives
-   in this panel any more. */
+/* 006-toolbar-reorg: the primary-error banner still moves up to App.vue as a full-width strip
+   beneath both toolbar columns (via `update:error`) — only the notice/summary chrome and the
+   busy-switch dialog itself moved back down here, onto the per-row button that now triggers them
+   (see the doc comment above `busyPrompt` in <script> for why). */
+.conversation-primary-row {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 0.45rem;
+}
+.primary-button {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+}
+.primary-busy-dialog-overlay {
+  z-index: var(--z-overlay-primary, 60);
+}
+/* Background/color/border-radius/box-shadow live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own width/padding stay here. */
+.primary-busy-dialog {
+  padding: 1rem;
+  max-width: 22rem;
+}
+.primary-busy-choices {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
 </style>

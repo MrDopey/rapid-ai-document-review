@@ -231,6 +231,14 @@ function rowFor(page: Page, conversationId: string) {
   return page.locator(`.hud-panel .conversation-row[data-conversation-id="${conversationId}"]`);
 }
 
+/** The HUD row's own Make/Clear Primary button for `conversationId` (006-toolbar-reorg: per-row,
+ *  not a single global button) — `.conversation-primary-row` is a sibling of `.conversation-row`
+ *  within the same `<li>`, so this scopes to the enclosing list item via `:has()` rather than
+ *  `rowFor`'s own `.conversation-row` element. */
+function primaryButtonFor(page: Page, conversationId: string) {
+  return page.locator(`.hud-panel li:has(.conversation-row[data-conversation-id="${conversationId}"]) .primary-button`);
+}
+
 async function sendToOpenMain(page: Page, text: string): Promise<void> {
   const composer = page.getByLabel('Message Main');
   await composer.fill(text);
@@ -260,15 +268,15 @@ async function waitConversationIdle(request: APIRequestContext, conversationId: 
     .not.toBe('working');
 }
 
-/** Makes whichever conversation's row is at `conversationId` Primary, if it isn't already —
- *  requires that conversation's panel to already be open/focused (sets `lastInteractedId`, which
- *  `PrimaryPanel.vue`'s "Make primary" button targets). Waits out any in-flight seed turn first
- *  (see `waitConversationIdle` above) so no busy dialog is expected here. */
+/** Makes whichever conversation's row is at `conversationId` Primary, if it isn't already — clicks
+ *  that row's own Make Primary button directly (006-toolbar-reorg: per-row, not a single global
+ *  button targeting whichever conversation is currently selected/focused). Waits out any in-flight
+ *  seed turn first (see `waitConversationIdle` above) so no busy dialog is expected here. */
 async function ensurePrimary(page: Page, conversationId: string): Promise<void> {
   const current = await findWhere(page.request, (c) => c.id === conversationId);
   if (current.isPrimary) return;
   await waitConversationIdle(page.request, conversationId);
-  await page.locator('.primary-summary').getByRole('button', { name: 'Make primary' }).click();
+  await primaryButtonFor(page, conversationId).click();
   await expect.poll(async () => (await findWhere(page.request, (c) => c.id === conversationId)).isPrimary).toBe(true);
 }
 

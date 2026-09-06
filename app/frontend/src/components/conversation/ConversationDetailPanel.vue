@@ -39,7 +39,27 @@ const dialogEl = ref<HTMLElement | null>(null);
 
 // `() => props.active` (a getter, not a wrapped computed) so `useFocusTrap`'s internal `watch`
 // always reads the current prop value directly — no separate ref to keep in sync.
-useFocusTrap(dialogEl, () => props.active, { onEscape: () => emit('close') });
+//
+// `getPreferredInitialFocus`: prefer this panel's own composer textarea over the default
+// first-focusable element ("Close full view", per DOM order — see the template below) — this both
+// fixes the pre-existing bug where activating a panel focused the close button instead of the
+// composer, and is what makes the cycle-focused-conversations hotkey (App.vue's
+// `cycleFocusedConversation`, fired from Ctrl+Alt+H/L or the Arrow variants) land the user back in
+// the newly-active panel's composer, ready to keep typing, rather than needing an extra Tab press.
+//
+// `restoreFocusOnExit: false` — this panel's `active` prop is a SELECTION signal among possibly
+// several simultaneously-mounted sibling panels (the multi-focus overlay), not an open/close
+// signal: going from `active: true` to `false` normally means "a different, still-open sibling
+// just became active," never "this dialog is closing." The default restore-on-exit behavior (give
+// focus back to whatever had it before this activated) is wrong here — see `restoreFocusOnExit`'s
+// own doc comment in focus-manager.ts for the full race this avoids (a stale `previouslyFocused`
+// pointing into a co-existing sibling panel, whose refocusing silently flips `lastInteractedId`
+// right back and undoes the very switch that just happened).
+useFocusTrap(dialogEl, () => props.active, {
+  onEscape: () => emit('close'),
+  getPreferredInitialFocus: () => dialogEl.value?.querySelector<HTMLElement>(`#composer-${props.conversationId}`) ?? null,
+  restoreFocusOnExit: false,
+});
 
 const name = computed(() => store.conversations.find((c) => c.id === props.conversationId)?.name ?? 'Conversation');
 </script>

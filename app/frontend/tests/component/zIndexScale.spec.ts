@@ -135,7 +135,7 @@ import HistoryPanel from '../../src/components/history/HistoryPanel.vue';
 import RevisionDiffViewer from '../../src/components/diff/RevisionDiffViewer.vue';
 import EditsList from '../../src/components/edits/EditsList.vue';
 import ConversationView from '../../src/components/conversation/ConversationView.vue';
-import PrimaryPanel from '../../src/components/hud/PrimaryPanel.vue';
+import HudPanel from '../../src/components/hud/HudPanel.vue';
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
 import App from '../../src/App.vue';
 
@@ -357,7 +357,7 @@ describe('z-index scale — ConversationView.vue .close-dialog-overlay uses --z-
   });
 });
 
-describe('z-index scale — PrimaryPanel.vue .primary-busy-dialog-overlay uses --z-overlay-primary', () => {
+describe('z-index scale — HudPanel.vue .primary-busy-dialog-overlay uses --z-overlay-primary', () => {
   let pinia: Pinia;
 
   beforeEach(() => {
@@ -368,6 +368,7 @@ describe('z-index scale — PrimaryPanel.vue .primary-busy-dialog-overlay uses -
 
   it('resolves --z-overlay-primary once the Primary-busy warning is open', async () => {
     const store = useConversationsStore();
+    store.loaded = true;
     store.conversations = [conversationFixture({ id: 'active-1', kind: 'branch', status: 'idle', isPrimary: false })];
     vi.mocked(httpClient.designatePrimary).mockRejectedValue(
       new (await import('../../src/transport/http-client.js')).ApiError(
@@ -378,8 +379,11 @@ describe('z-index scale — PrimaryPanel.vue .primary-busy-dialog-overlay uses -
       ),
     );
 
-    const wrapper = mount(PrimaryPanel, {
-      props: { activeId: 'active-1' },
+    // 006-toolbar-reorg: the busy-switch dialog moved from the old global "Primary" box
+    // (`PrimaryPanel.vue`, now removed) into `HudPanel.vue`, triggered from a conversation row's
+    // own "Make Primary" button rather than a single global one.
+    const wrapper = mount(HudPanel, {
+      props: { activeId: 'active-1', focusedIds: new Set(), filter: 'all', focusCap: 3 },
       global: { plugins: [pinia] },
     });
 
@@ -444,7 +448,6 @@ describe('z-index scale — App.vue overlays', () => {
     DocumentCanvas: true,
     PreviewComponent: true,
     HudPanel: true,
-    PrimaryPanel: true,
     HistoryPanel: true,
     ConversationDetailPanel: true,
     KeyboardShortcutsDialog: true,

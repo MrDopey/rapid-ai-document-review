@@ -35,7 +35,7 @@ export interface ConversationStatusBadges {
 /** The same three status pills render identically across `HudPanel.vue` (topnav),
  *  `ConversationThreadBox.vue` (sidebar/canvas box), and `ConversationView.vue` (focus/detail
  *  view): the primary `conversation.status` badge (always present), a `Stale` badge
- *  (`conversation.isStale`), and an `Orphaned anchor` badge (`conversation.anchorOrphaned`). One
+ *  (`conversation.isStale`), and an `Orphaned` badge (`conversation.anchorOrphaned`). One
  *  shared composable is the single source for all three surfaces, so they can never drift apart.
  *
  *  The pending-proposal-count and queue-position badges (`conv.pendingEditCount`,
@@ -75,12 +75,11 @@ export function useConversationStatusBadges(
     // disappearing or moving once its highlighted text has been edited or removed — this badge is
     // the visual flag for that state.
     if (conv.anchorOrphaned) {
-      const orphanedText =
-        'Orphaned anchor: the highlighted text this conversation was anchored to has since been edited or removed.';
+      const orphanedText = 'The anchored text has since been edited or removed from the document.';
       list.push({
         key: 'orphaned',
         className: 'orphaned-badge',
-        label: 'Orphaned anchor',
+        label: 'Orphaned',
         title: orphanedText,
         ariaLabel: orphanedText,
       });

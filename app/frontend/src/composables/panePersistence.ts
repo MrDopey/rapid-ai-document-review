@@ -110,7 +110,7 @@ export function persistSyncScrollEnabled(enabled: boolean): void {
 }
 
 /**
- * Preview/Editor visibility toggles (App.vue's `.actions-group`, Ctrl+Alt+1/Ctrl+Alt+2) — two
+ * Preview/Editor visibility toggles (App.vue's `.actions-group`, Ctrl+Alt+P/Ctrl+Alt+E) — two
  * independent booleans, same per-viewer/best-effort/non-throwing/"defaults to on" convention as
  * `SYNC_SCROLL_ENABLED_KEY` above, each under its own key for the same reason that one is: not an
  * `fr`/pixel split `loadPaneSizes` already shapes for. App.vue itself is responsible for never

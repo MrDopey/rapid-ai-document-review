@@ -217,10 +217,10 @@ describe('ConversationView — draft-aware discard-on-close', () => {
 // Bug fix (this task): `ConversationView.vue` (the focus/detail overlay content) used to read
 // `conversation.isStale` only to toggle an `.emphasized` CSS class on the "Refresh + Send" button —
 // unlike `HudPanel.vue` (topnav) and `ConversationThreadBox.vue` (sidebar/canvas box), it never
-// actually rendered a "Stale"/"Orphaned anchor" badge of its own. Now shares
+// actually rendered a "Stale"/"Orphaned" badge of its own. Now shares
 // `ConversationStatusBadges.vue` with both those surfaces (see `conversationStatusBadges.ts`), so
 // this is the regression test proving the badges now appear here too.
-describe('ConversationView — Stale/Orphaned-anchor badges (bug fix regression)', () => {
+describe('ConversationView — Stale/Orphaned badges (bug fix regression)', () => {
   let pinia: Pinia;
 
   beforeEach(() => {
@@ -248,12 +248,12 @@ describe('ConversationView — Stale/Orphaned-anchor badges (bug fix regression)
     expect(staleBadge.text()).toBe('Stale');
   });
 
-  it('renders the Orphaned anchor badge in the header when the conversation is anchor-orphaned', async () => {
+  it('renders the Orphaned badge in the header when the conversation is anchor-orphaned', async () => {
     const wrapper = mountView({ anchorOrphaned: true });
     await flushPromises();
     const orphanedBadge = wrapper.find('.header-top .orphaned-badge');
     expect(orphanedBadge.exists()).toBe(true);
-    expect(orphanedBadge.text()).toBe('Orphaned anchor');
+    expect(orphanedBadge.text()).toBe('Orphaned');
   });
 
   it('renders neither badge when the conversation is neither stale nor anchor-orphaned', async () => {

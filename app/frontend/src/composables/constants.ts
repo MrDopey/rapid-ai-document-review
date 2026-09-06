@@ -5,10 +5,10 @@
  */
 
 /**
- * Shared tooltip/notice text used by both `HudPanel.vue` (a row's `title`, via `rowTitle()`) and
- * `PrimaryPanel.vue` (the primary notice + Make/Clear-Primary button titles) — one canonical
- * wording explains what "Primary" means everywhere the word appears in either surface (FR-027/
- * FR-009: Main stays Primary by default), so the two surfaces can't diverge on it.
+ * Shared tooltip text used by `HudPanel.vue` for both a row's own `title` (via `rowTitle()`) and
+ * its Make/Clear Primary button `title`/`aria-label` (via `primaryButtonTitle()`) — one canonical
+ * wording explains what "Primary" means everywhere it appears (FR-027/FR-009: Main stays Primary
+ * by default), so the two can't diverge on it.
  */
 export const PRIMARY_EXPLANATION =
   'Edits from this conversation apply to the document automatically, with no review step.';
