@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs the same checks as the publish workflow's verify job, so they can be
-# reproduced locally. Assumes dependencies are already installed (npm ci).
+# Duplicates the checks in the publish workflow's verify job
+# (.github/workflows/publish.yml), for an agent to run locally.
+# Assumes dependencies are already installed (npm ci).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

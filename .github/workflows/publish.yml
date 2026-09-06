@@ -107,8 +107,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify
-        run: ./scripts/verify.sh
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format
+
+      - name: Build shared package
+        run: npm run build --workspace=app/shared
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
 
   docker:
     needs: [prepare, verify]
