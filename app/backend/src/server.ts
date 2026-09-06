@@ -12,10 +12,14 @@ import { RevisionService } from './document/revision-service.ts';
 import { DocumentService } from './document/document-service.ts';
 import { toConversationDto } from './conversation/conversation-mapper.ts';
 import { ConversationService } from './conversation/conversation-service.ts';
+import { ConversationFoldService } from './conversation/conversation-fold-service.ts';
+import { ConversationReviewService } from './conversation/conversation-review-service.ts';
 import { PrimaryService } from './conversation/primary-service.ts';
 import { ConcurrencyLimiter } from './conversation/concurrency-limiter.ts';
+import { EventPublisher } from './events/event-publisher.ts';
 import { PiService } from './pi/pi-service.ts';
 import { PrimaryMutex } from './pi/primary-mutex.ts';
+import { TurnRunner } from './pi/turn-runner.ts';
 import { RunBuffer } from './events/run-buffer.ts';
 import { ConflictService } from './edit/conflict-service.ts';
 import { EditService } from './edit/edit-service.ts';
@@ -91,13 +95,18 @@ export function buildApp() {
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automergeHolder, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
+  // Shared turn-starting wiring (EventBridge + ConcurrencyLimiter admission), depended on by both
+  // EditService (requestReplacement) and ConversationService (send) instead of each independently
+  // duplicating that construction — see turn-runner.ts's doc comment for why this is a plain
+  // collaborator rather than either service depending on the other.
+  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
 
   // ConflictService never depends on PiService/ConversationService — a conflict discovered
   // synchronously within an active turn (the Primary path) is reported as that same tool call's
   // own result, never a new send(); EditService requests a fresh turn itself for a conflict
-  // discovered later (edits.ts's async apply path), which needs PiService/ConcurrencyLimiter but
-  // not ConversationService. This ordering — and PiService.setEditService below — is what breaks
-  // what would otherwise be a PiService <-> EditService construction cycle (pi-service.ts).
+  // discovered later (edits.ts's async apply path), which needs TurnRunner but not
+  // ConversationService. This ordering — and PiService.setEditService below — is what breaks what
+  // would otherwise be a PiService <-> EditService construction cycle (pi-service.ts).
   const conflictService = new ConflictService(storage, eventService, eventHub, automergeHolder);
   const editService = new EditService(
     storage,
@@ -106,14 +115,24 @@ export function buildApp() {
     automergeHolder,
     revisionService,
     conflictService,
-    piService,
-    concurrencyLimiter,
-    runBuffer,
+    turnRunner,
     primaryMutex,
   );
   piService.setEditService(editService);
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
+
+  // ConversationService split (959-line/5-responsibility cleanup): fold-summary delivery and
+  // closed-conversation review are extracted into their own collaborators, sharing the same
+  // storage/piService/publisher primitives ConversationService itself gets injected below.
+  const conversationEventPublisher = new EventPublisher(eventService, eventHub);
+  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationReviewService = new ConversationReviewService(
+    storage,
+    piService,
+    conversationEventPublisher,
+    automergeHolder,
+  );
 
   const conversationService = new ConversationService(
     storage,
@@ -124,6 +143,9 @@ export function buildApp() {
     concurrencyLimiter,
     automergeHolder,
     primaryService,
+    turnRunner,
+    conversationFoldService,
+    conversationReviewService,
   );
 
   // Breaks the DocumentService <-> ConversationService construction cycle (see the comment on

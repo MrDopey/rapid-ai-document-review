@@ -10,10 +10,7 @@ import type { RevisionService } from '../document/revision-service.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
-import type { RunBuffer } from '../events/run-buffer.ts';
-import type { ConcurrencyLimiter } from '../conversation/concurrency-limiter.ts';
-import { EventBridge } from '../pi/event-bridge.ts';
-import type { PiService } from '../pi/pi-service.ts';
+import type { TurnRunner } from '../pi/turn-runner.ts';
 import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 import type { ConversationRow, StagedEditRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toStagedEditDto } from './edit-mapper.ts';
@@ -45,9 +42,7 @@ export class EditService {
   private readonly automerge: AutomergeStoreHolder;
   private readonly revisionService: RevisionService;
   private readonly conflictService: ConflictService;
-  private readonly piService: PiService;
-  private readonly concurrencyLimiter: ConcurrencyLimiter;
-  private readonly runBuffer: RunBuffer;
+  private readonly turnRunner: TurnRunner;
   private readonly primaryMutex: PrimaryMutex;
   private readonly publisher: EventPublisher;
 
@@ -58,9 +53,7 @@ export class EditService {
     automerge: AutomergeStoreHolder,
     revisionService: RevisionService,
     conflictService: ConflictService,
-    piService: PiService,
-    concurrencyLimiter: ConcurrencyLimiter,
-    runBuffer: RunBuffer,
+    turnRunner: TurnRunner,
     primaryMutex: PrimaryMutex,
   ) {
     this.storage = storage;
@@ -69,9 +62,7 @@ export class EditService {
     this.automerge = automerge;
     this.revisionService = revisionService;
     this.conflictService = conflictService;
-    this.piService = piService;
-    this.concurrencyLimiter = concurrencyLimiter;
-    this.runBuffer = runBuffer;
+    this.turnRunner = turnRunner;
     this.primaryMutex = primaryMutex;
     this.publisher = new EventPublisher(eventService, eventHub);
   }
@@ -388,12 +379,12 @@ export class EditService {
   }
 
   /** Starts a brand-new turn asking the originating agent for a replacement, for a conflict
-   *  discovered outside any active turn (edits.ts's async apply/accept-remaining routes). Mirrors
-   *  ConversationService.send's turn/bridge/concurrency-limiter wiring directly (rather than
-   *  depending on ConversationService) so EditService/ConflictService never need a value-level
-   *  reference back to ConversationService — PiService already depends on EditService to build the
-   *  `propose_document_edit` tool, and a further edge back through ConversationService would create
-   *  a real construction cycle, not just a type-only one. */
+   *  discovered outside any active turn (edits.ts's async apply/accept-remaining routes). Uses the
+   *  shared `TurnRunner` collaborator (rather than depending on ConversationService directly) so
+   *  EditService/ConflictService never need a value-level reference back to ConversationService —
+   *  PiService already depends on EditService to build the `propose_document_edit` tool, and a
+   *  further edge back through ConversationService would create a real construction cycle, not
+   *  just a type-only one. */
   private requestReplacement(conversation: ConversationRow, message: string): void {
     if (conversation.status === 'closed') {
       // No `event` field: skipping the request means no domain event fires at all for it
@@ -403,18 +394,7 @@ export class EditService {
     }
 
     this.publishSystemMessage(conversation.documentId, conversation.id, message);
-
-    const turnId = newId('turn');
-    const bridge = new EventBridge(
-      this.storage,
-      this.eventService,
-      this.eventHub,
-      this.runBuffer,
-      { documentId: conversation.documentId, conversationId: conversation.id, turnId },
-      () => this.concurrencyLimiter.release(conversation.documentId, conversation.id),
-    );
-    const run = () => this.piService.send(conversation, message, bridge);
-    this.concurrencyLimiter.acquire(conversation.documentId, conversation.id, turnId, conversation.contextRevision, run);
+    this.turnRunner.start(conversation, message);
   }
 
   private publishSystemMessage(documentId: string, conversationId: string, text: string): void {

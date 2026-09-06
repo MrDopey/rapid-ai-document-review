@@ -19,8 +19,8 @@ import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
-import { EventBridge } from '../pi/event-bridge.ts';
 import type { PiService } from '../pi/pi-service.ts';
+import type { TurnRunner } from '../pi/turn-runner.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
@@ -33,6 +33,8 @@ import {
 } from './seed-excerpt.ts';
 import type { ConcurrencyLimiter } from './concurrency-limiter.ts';
 import type { PrimaryService } from './primary-service.ts';
+import type { ConversationFoldService } from './conversation-fold-service.ts';
+import type { ConversationReviewService } from './conversation-review-service.ts';
 
 export class ConversationNotFoundError extends Error {}
 export class ConversationClosedError extends Error {}
@@ -117,6 +119,9 @@ export class ConversationService {
   private readonly automerge: AutomergeStoreHolder;
   private readonly primaryService: PrimaryService;
   private readonly publisher: EventPublisher;
+  private readonly turnRunner: TurnRunner;
+  private readonly foldService: ConversationFoldService;
+  private readonly reviewService: ConversationReviewService;
 
   constructor(
     storage: StorageAdapter,
@@ -127,6 +132,9 @@ export class ConversationService {
     concurrencyLimiter: ConcurrencyLimiter,
     automerge: AutomergeStoreHolder,
     primaryService: PrimaryService,
+    turnRunner: TurnRunner,
+    foldService: ConversationFoldService,
+    reviewService: ConversationReviewService,
   ) {
     this.storage = storage;
     this.eventService = eventService;
@@ -137,6 +145,9 @@ export class ConversationService {
     this.automerge = automerge;
     this.primaryService = primaryService;
     this.publisher = new EventPublisher(eventService, eventHub);
+    this.turnRunner = turnRunner;
+    this.foldService = foldService;
+    this.reviewService = reviewService;
   }
 
   /**
@@ -460,7 +471,7 @@ export class ConversationService {
       // once the summary has actually been generated *and* delivered into the parent's session,
       // never at close time (websocket-events.md), and the fold is dropped silently if the
       // parent has itself closed by the time delivery would occur (FR-034a).
-      void this.foldSummaryIntoParent(conversation, parent.id).catch((err) => {
+      void this.foldService.foldSummaryIntoParent(conversation, parent.id).catch((err) => {
         // `event: 'agent_error'` — the failure is in a Pi session call (deliverFoldSummary), the
         // only vocabulary term that fits a Pi-side failure with no other event of its own (FR-042).
         logger.warn(
@@ -538,106 +549,11 @@ export class ConversationService {
   }
 
   /**
-   * FR-034/FR-034a: assembles the compact fold summary — a deterministic facts block (name,
-   * seeded selection if any, and the proposal list with each one's final status and resulting
-   * revision — never the raw transcript) plus a short synopsis of what was discussed/decided,
-   * genuinely asked of the closed conversation's own Pi session (research R1) rather than
-   * fabricated — and delivers it into the parent conversation's session via
-   * `PiService.deliverFoldSummary` (`sendCustomMessage(..., { deliverAs: 'nextTurn' })`). Runs
-   * entirely after `close()` has already returned its HTTP response and is never awaited by that
-   * caller. If the synopsis call fails, this logs a warning and returns without touching the
-   * parent — the fold is best-effort, not a core review-blocking feature.
-   */
-  private async foldSummaryIntoParent(conversation: ConversationRow, parentId: string): Promise<void> {
-    const facts = this.buildFoldFacts(conversation);
-
-    let synopsis: string;
-    try {
-      synopsis = await this.piService.generateFoldSynopsis(conversation, this.buildFoldSynopsisPrompt());
-    } catch (err) {
-      // `event: 'agent_error'` — this Pi call failing is exactly what that vocabulary term means
-      // (FR-042); no `conversation_summary_folded` frame follows since the fold never completes.
-      logger.warn(
-        {
-          event: 'agent_error',
-          documentId: conversation.documentId,
-          conversationId: conversation.id,
-          parentConversationId: parentId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        'Pi failed to generate a fold summary synopsis; parent continues without a folded summary',
-      );
-      return;
-    } finally {
-      // FIX 5: `generateFoldSynopsis` above was this closed conversation's own last use of
-      // `getOrCreateSession` (`deliverFoldSummary` below only ever touches the *parent*'s
-      // session) — safe to evict now regardless of whether the synopsis call succeeded.
-      this.piService.evictSession(conversation.id);
-    }
-
-    const summary = `${synopsis.trim()}\n\n${facts}`;
-
-    // FR-034a: "rejected if the parent has itself since closed" — re-checked here since the
-    // synopsis call above may have taken a while, and the parent's status can have moved on.
-    const parentNow = this.storage.getConversation(parentId);
-    if (!parentNow || parentNow.status === 'closed') {
-      // No `event` field: dropping the fold means no `conversation_summary_folded` (or any other
-      // vocabulary) frame fires for it — there is nothing in the closed set to name here (FR-042).
-      logger.info(
-        {
-          documentId: conversation.documentId,
-          conversationId: conversation.id,
-          parentConversationId: parentId,
-        },
-        'parent conversation closed before the fold summary was ready; dropping silently',
-      );
-      return;
-    }
-
-    await this.piService.deliverFoldSummary(parentNow, conversation.name, summary);
-
-    this.publish(conversation.documentId, parentId, 'conversation_summary_folded', {
-      parentConversationId: parentId,
-      summary,
-    });
-  }
-
-  private buildFoldFacts(conversation: ConversationRow): string {
-    const lines: string[] = [`Conversation: "${conversation.name}"`];
-    if (conversation.seedSelection) {
-      lines.push(`Seeded from: "${conversation.seedSelection.text}"`);
-    }
-    const edits = this.storage.listStagedEditsByConversation(conversation.id);
-    if (edits.length === 0) {
-      lines.push('No proposals were made in this conversation.');
-    } else {
-      lines.push('Proposals:');
-      for (const edit of edits) {
-        const revisionNote = edit.appliedRevision ? ` (revision ${edit.appliedRevision})` : '';
-        lines.push(`- ${edit.summary} — ${edit.status}${revisionNote}`);
-      }
-    }
-    return lines.join('\n');
-  }
-
-  private buildFoldSynopsisPrompt(): string {
-    return (
-      'This conversation is closing. In 2-3 sentences, write a compact synopsis of what was ' +
-      'discussed and decided in it, for another conversation to read as context. Summarize only ' +
-      '— do not restate the full message transcript.'
-    );
-  }
-
-  /**
-   * FR-036: an independent review of a closed conversation and its branches, produced as a new
-   * `kind: 'review'` conversation and never injected into any existing conversation. Read-only
-   * with respect to the reviewed conversation(s): the transcript is read via
-   * `PiService.readClosedTranscript` (`SessionManager.open` + `getEntries()`, research R1)
-   * without ever prompting the closed session itself, so it is left byte-identical
-   * (quickstart.md US7 scenario 3). A review conversation counts against `maxConcurrentAgents`
-   * like any other agent run (the seed message below goes through the ordinary `send()` path) but
-   * is exempt from `maxConversationDepth`/`maxEditingDepth`: it has no `parentId` and
-   * `branchDepth: 0`, outside the branching/editing workflow entirely.
+   * FR-036: an independent review of a closed conversation and its branches. Validates the target
+   * conversation/document here (so thrown errors stay exactly where callers already expect them),
+   * delegating the rest — building the reviewed-conversation-id set, the transcript, the new
+   * `kind: 'review'` conversation row, and its seed message — to `ConversationReviewService`
+   * (extracted out of this class; see its doc comment).
    */
   review(conversationId: string): ReviewConversationResponse {
     const target = this.getConversationOrThrow(conversationId);
@@ -648,105 +564,10 @@ export class ConversationService {
     const document = this.storage.getDocument();
     if (!document) throw new DocumentNotFoundError('Document not found');
 
-    const reviewedConversationIds = this.collectWithDescendants(document.id, target.id);
-    const transcriptLines =
-      this.piService.readClosedTranscript(target.piSessionPath) ?? this.buildFallbackTranscript(reviewedConversationIds);
-
-    const now = new Date().toISOString();
-    const id = newId('conv');
-    const piSessionPath = join(dirname(target.piSessionPath), `${id}.jsonl`);
-
-    const row = this.storage.createConversation({
-      id,
-      documentId: document.id,
-      parentId: null,
-      name: `Review: ${target.name}`,
-      kind: 'review',
-      piSessionPath,
-      status: 'idle',
-      errorMessage: null,
-      isPrimary: false,
-      contextRevision: document.currentRevision,
-      branchDepth: 0,
-      seedSelection: null,
-      forkedFromMessageId: null,
-      createdAt: now,
-      updatedAt: now,
-      closedAt: null,
+    return this.reviewService.review(target, document, {
+      sendMessage: (id, message) => this.send(id, message),
+      buildMessages: (id) => this.buildMessages(id),
     });
-
-    this.publish(document.id, row.id, 'conversation_started', {
-      conversationId: row.id,
-      name: row.name,
-      kind: row.kind,
-      parentId: row.parentId,
-      branchDepth: row.branchDepth,
-      contextRevision: row.contextRevision,
-      seedSelection: row.seedSelection,
-      forkedFromMessageId: row.forkedFromMessageId,
-    });
-
-    const seedMessage = [
-      `You are independently reviewing the closed conversation "${target.name}" and its ` +
-        'branches, without altering them. You have no tool access to them — this is a read-only ' +
-        'review based on the transcript below.',
-      '',
-      transcriptLines.length > 0 ? transcriptLines.join('\n\n') : '(No messages were recorded in this conversation.)',
-    ].join('\n');
-
-    // Fire-and-forget, same convention as branch()'s seed message: POST /api/conversations/:id/review
-    // returns as soon as the review conversation exists; its own progress surfaces over the event
-    // stream (http-api.md, FR-037).
-    void this.send(row.id, seedMessage).catch((err) => {
-      // `event: 'agent_error'` — same reasoning as branch()'s seed-message catch above.
-      logger.warn(
-        { event: 'agent_error', conversationId: row.id, err: err instanceof Error ? err.message : String(err) },
-        'failed to deliver review seed message',
-      );
-    });
-
-    return {
-      conversation: toConversationDto(this.storage, row, document.currentRevision, this.automerge.get().getContent()),
-      reviewedConversationIds,
-    };
-  }
-
-  /** Every conversation descending from `rootId` (its branches, at any depth), plus `rootId`
-   *  itself — "a closed conversation and its branches" (FR-036). A descendant's own open/closed
-   *  status is irrelevant here: review reads it but never alters it (FR-035a stays intact). */
-  private collectWithDescendants(documentId: string, rootId: string): string[] {
-    const all = this.storage.listAllConversations(documentId);
-    const byParent = new Map<string, ConversationRow[]>();
-    for (const conv of all) {
-      if (!conv.parentId) continue;
-      const list = byParent.get(conv.parentId) ?? [];
-      list.push(conv);
-      byParent.set(conv.parentId, list);
-    }
-    const ids: string[] = [];
-    const stack = [rootId];
-    while (stack.length > 0) {
-      const id = stack.pop()!;
-      ids.push(id);
-      for (const child of byParent.get(id) ?? []) stack.push(child.id);
-    }
-    return ids;
-  }
-
-  /** Fallback transcript source when no real Pi session file exists on disk yet — always true
-   *  under `RADR_BE_PI_FAKE_SESSIONS=1` (`FakeAgentSession` never persists to disk), in which case the
-   *  application's own stored event log is the only record of what was said. */
-  private buildFallbackTranscript(conversationIds: string[]): string[] {
-    const lines: string[] = [];
-    for (const id of conversationIds) {
-      const conv = this.storage.getConversation(id);
-      if (!conv) continue;
-      lines.push(`--- ${conv.name} ---`);
-      for (const message of this.buildMessages(id)) {
-        lines.push(`${message.role}: ${message.text}`);
-      }
-    }
-    return lines;
   }
 
   async send(conversationId: string, message: string, options: { isSeed?: boolean } = {}): Promise<SendMessageResponse> {
@@ -783,25 +604,9 @@ export class ConversationService {
       return { accepted: true, queued: false, contextRevision: conversation.contextRevision };
     }
 
-    const turnId = newId('turn');
-    const bridge = new EventBridge(
-      this.storage,
-      this.eventService,
-      this.eventHub,
-      this.runBuffer,
-      { documentId: conversation.documentId, conversationId, turnId },
-      () => this.concurrencyLimiter.release(conversation.documentId, conversationId),
-    );
-
-    const run = () => this.piService.send(conversation, message, bridge);
-
-    const { queued, immediateRun } = this.concurrencyLimiter.acquire(
-      conversation.documentId,
-      conversationId,
-      turnId,
-      conversation.contextRevision,
-      run,
-    );
+    // Shared turn-starting wiring (EventBridge + ConcurrencyLimiter admission) — see
+    // TurnRunner's doc comment for why this is a shared collaborator rather than duplicated here.
+    const { queued, immediateRun } = this.turnRunner.start(conversation, message);
 
     if (!queued && immediateRun) {
       try {
