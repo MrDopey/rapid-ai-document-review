@@ -595,7 +595,9 @@ const actions = computed<ActionDescriptor[]>(() => {
               @blur="saveName"
             />
             <template v-else>
-              <h2 class="text-wrap-safe">{{ conversation?.name ?? 'Conversation' }}</h2>
+              <h2 class="text-wrap-safe">
+                {{ conversation?.name ?? 'Conversation' }}
+              </h2>
               <button
                 v-if="conversation"
                 type="button"
@@ -628,10 +630,18 @@ const actions = computed<ActionDescriptor[]>(() => {
       branched from, or made Primary.
     </div>
 
-    <div v-if="closeError" class="error-banner" role="alert">{{ closeError }}</div>
-    <div v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</div>
-    <div v-if="branchError" class="error-banner" role="alert">{{ branchError }}</div>
-    <div v-if="primaryError" class="error-banner" role="alert">{{ primaryError }}</div>
+    <div v-if="closeError" class="error-banner" role="alert">
+      {{ closeError }}
+    </div>
+    <div v-if="reviewError" class="error-banner" role="alert">
+      {{ reviewError }}
+    </div>
+    <div v-if="branchError" class="error-banner" role="alert">
+      {{ branchError }}
+    </div>
+    <div v-if="primaryError" class="error-banner" role="alert">
+      {{ primaryError }}
+    </div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
       <strong>Folded summary received:</strong>
@@ -676,7 +686,7 @@ const actions = computed<ActionDescriptor[]>(() => {
              rather than detached down in the composer/footer area. Clears itself once streaming
              text arrives or the turn leaves `working` — see `awaitingResponse`. -->
         <div v-if="awaitingResponse" class="awaiting-response" role="status">
-          <span class="awaiting-response-spinner" aria-hidden="true"></span>
+          <span class="awaiting-response-spinner" aria-hidden="true" />
           Request sent — waiting for response…
         </div>
       </div>
@@ -692,7 +702,7 @@ const actions = computed<ActionDescriptor[]>(() => {
         tabindex="0"
         @pointerdown="editsResize.startDrag($event)"
         @keydown="editsResize.onKeydown($event)"
-      ></div>
+      />
       <EditsList v-if="showEditsSection" :conversation-id="conversationId" />
     </div>
 
@@ -739,7 +749,7 @@ const actions = computed<ActionDescriptor[]>(() => {
           v-model="draft"
           placeholder="Ask about the document…"
           @keydown="onComposerKeydown"
-        ></textarea>
+        />
         <button
           type="submit"
           class="send-button"
