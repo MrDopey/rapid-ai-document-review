@@ -42,4 +42,13 @@ const { badges } = useConversationStatusBadges(() => props.conversationId);
 .status-badge[data-status='closed'] {
   color: var(--danger-color, #b91c1c);
 }
+/* Parity fix: pending-proposal-count/queue-position badge colors, moved verbatim here from
+   `HudPanel.vue` — see `conversationStatusBadges.ts`'s own doc comment for why these two are now
+   part of this shared composable's output instead of `HudPanel.vue`-only markup. */
+.pending-badge {
+  color: var(--status-active-color, #1d4ed8);
+}
+.queue-badge {
+  color: var(--queue-color, #6b21a8);
+}
 </style>

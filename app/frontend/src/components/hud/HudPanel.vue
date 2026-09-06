@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { orderConversationsByAnchor } from '../canvas/conversationLayout.js';
+import { PRIMARY_EXPLANATION } from '../../composables/constants.js';
 import ConversationStatusBadges from '../conversation/ConversationStatusBadges.vue';
 
 // 005-canvas-conversation-threads: the "active"/"all" filter used to be purely local to this
@@ -127,11 +128,6 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   }
 }
 
-/** Explains what "Primary" means everywhere the word appears in this panel (FR-027/FR-009: Main
- *  stays Primary by default — this is purely explanatory, it changes no behaviour). */
-const PRIMARY_EXPLANATION =
-  'Edits from this conversation apply to the document automatically, with no review step.';
-
 /** 005-canvas-conversation-threads (multi-focus overlay): a row's `title` — Primary's existing
  *  explanation stays first-class; a row that would exceed the live focus cap (not already
  *  focused, and the set is already at `focusCap`) also names *why* clicking it won't do anything
@@ -235,11 +231,11 @@ onBeforeUnmount(() => {
             <span class="name">{{ conv.name }}</span>
           </button>
           <span class="conversation-status-cell">
+            <!-- Parity fix: pending-proposal-count/queue-position badges now come from
+                 `ConversationStatusBadges.vue` itself (via the shared `conversationStatusBadges.ts`
+                 composable) rather than being hand-rendered here — see that composable's own doc
+                 comment for why `ConversationThreadBox.vue` needed the exact same parity. -->
             <ConversationStatusBadges :conversation-id="conv.id" />
-            <span v-if="conv.pendingEditCount > 0" class="badge pending-badge">{{ conv.pendingEditCount }}</span>
-            <span v-if="store.queueInfo[conv.id]" class="badge queue-badge">
-              Queued #{{ store.queueInfo[conv.id]!.queuePosition }}
-            </span>
           </span>
         </div>
       </li>
@@ -337,9 +333,7 @@ onBeforeUnmount(() => {
    `.visually-hidden` "Primary conversation" label plus a small `★` icon, so screen-reader and
    colorblind users can still tell which conversation is Primary. */
 .conversation-row.is-primary {
-  box-shadow:
-    inset 3px 0 0 0 var(--accent-color, #2563eb),
-    inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
+  box-shadow: var(--primary-indicator-shadow);
 }
 /* 005-canvas-conversation-threads (multi-focus overlay): a small, non-color-alone cue (a bottom
    border, distinct from `.selected`'s full border and `.is-primary`'s box-shadow) marking every
@@ -395,13 +389,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   gap: 0.35rem;
 }
-.pending-badge {
-  color: var(--status-active-color, #1d4ed8);
-}
-.queue-badge {
-  color: var(--queue-color, #6b21a8);
-}
-/* Fix 4 (color-code conversation status) and the `.stale-badge` warning color that used to live
+/* `.pending-badge`/`.queue-badge` colors now live in `ConversationStatusBadges.vue` (shared with
+   `ConversationThreadBox.vue`/`ConversationView.vue` — see that composable's own doc comment).
+   Fix 4 (color-code conversation status) and the `.stale-badge` warning color that used to live
    here are both now in `ConversationStatusBadges.vue` — shared verbatim (see that component's own
    doc comment for the one spot, the closed-status color, where this panel's own copy actually
    differed from `ConversationThreadBox.vue`'s/`ConversationView.vue`'s and which value won). */

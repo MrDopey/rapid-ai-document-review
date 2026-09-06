@@ -17,8 +17,19 @@ export interface StatusBadge {
   ariaLabel?: string;
 }
 
+/** 'compact' omits the pending-proposal-count/queue-position badges below (currently unused —
+ *  every existing call site wants the full set, see each badge's own doc comment — but kept as an
+ *  explicit opt-out rather than baking "always show everything" in, in case a future, denser
+ *  surface needs the reduced set without duplicating this composable). Defaults to 'full'. */
+export type StatusBadgeVariant = 'full' | 'compact';
+
 export interface ConversationStatusBadges {
   badges: ComputedRef<StatusBadge[]>;
+  /** Parity fix: `conversation.isPrimary` computed once here rather than each of
+   *  `ConversationView.vue`/`ConversationThreadBox.vue`/`HudPanel.vue` re-deriving it locally for
+   *  their own `.is-primary` class binding — see each consumer's own `--primary-indicator-shadow`
+   *  usage in its `<style scoped>` block. */
+  isPrimary: ComputedRef<boolean>;
 }
 
 /** Bug fix (ConversationView.vue never rendered a Stale/Orphaned-anchor badge — see the badge list
@@ -27,8 +38,15 @@ export interface ConversationStatusBadges {
  *  (always present), a `Stale` badge (`conversation.isStale`), and an `Orphaned anchor` badge
  *  (`conversation.anchorOrphaned`, previously only on `ConversationThreadBox.vue`) — consolidated
  *  into one shared composable so all three surfaces render identically and can never drift apart
- *  again. Deliberately excludes `pendingEditCount`/`queueInfo` — those stay `HudPanel.vue`-only
- *  counters, out of scope here (see that component's own template).
+ *  again.
+ *
+ *  Parity fix: the pending-proposal-count and queue-position badges (`conv.pendingEditCount`,
+ *  `store.queueInfo`) used to be `HudPanel.vue`-only, hand-rendered outside this composable
+ *  entirely (deliberately "out of scope" per this doc comment's own previous wording) — so a canvas
+ *  box for a conversation with pending proposals or a queued turn (`ConversationThreadBox.vue`)
+ *  gave no visual cue at all unless its detail panel was opened. Folded in here (gated by
+ *  `variant`, see `StatusBadgeVariant` above) so every consumer of this composable gets the same
+ *  parity `HudPanel.vue` already had, with no separate copy of this logic to keep in sync.
  *
  *  Deviation from the two pre-existing copies of this logic: the "Stale" tooltip differed between
  *  `HudPanel.vue` (the fuller text, naming the "Refresh + Send" remedy) and
@@ -41,9 +59,13 @@ export interface ConversationStatusBadges {
  *  own (`--danger-color`, per a documented "color-consistency fix" in `ConversationView.vue`) — the
  *  more recently, deliberately fixed `--danger-color` value is kept as canonical here too. See
  *  `ConversationStatusBadges.vue`'s own doc comment for the color rule itself. */
-export function useConversationStatusBadges(conversationId: () => string): ConversationStatusBadges {
+export function useConversationStatusBadges(
+  conversationId: () => string,
+  variant: StatusBadgeVariant = 'full',
+): ConversationStatusBadges {
   const store = useConversationsStore();
   const conversation = computed(() => store.conversations.find((c) => c.id === conversationId()) ?? null);
+  const isPrimary = computed(() => conversation.value?.isPrimary ?? false);
 
   const badges = computed<StatusBadge[]>(() => {
     const conv = conversation.value;
@@ -74,8 +96,15 @@ export function useConversationStatusBadges(conversationId: () => string): Conve
         ariaLabel: orphanedText,
       });
     }
+    if (variant === 'full' && conv.pendingEditCount > 0) {
+      list.push({ key: 'pending', className: 'pending-badge', label: String(conv.pendingEditCount) });
+    }
+    const queue = variant === 'full' ? store.queueInfo[conv.id] : undefined;
+    if (queue) {
+      list.push({ key: 'queue', className: 'queue-badge', label: `Queued #${queue.queuePosition}` });
+    }
     return list;
   });
 
-  return { badges };
+  return { badges, isPrimary };
 }

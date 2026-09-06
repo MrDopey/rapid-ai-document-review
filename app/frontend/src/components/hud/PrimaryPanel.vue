@@ -4,6 +4,7 @@ import { useConversationsStore } from '../../stores/conversations.js';
 import { ApiError } from '../../transport/http-client.js';
 import type { PrimaryWhenBusy } from '@rapid-ai-document-review/shared/contracts/http';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
+import { PRIMARY_EXPLANATION } from '../../composables/constants.js';
 
 // 006-toolbar-reorg (confirmed layout): split out of HudPanel.vue, which used to render the
 // Primary notice/summary (plus this busy-switch dialog) inline above its own filter/conversation
@@ -36,11 +37,6 @@ const busyDialogEl = ref<HTMLElement | null>(null);
 const primaryConversation = computed(() => store.conversations.find((c) => c.isPrimary) ?? null);
 const hasPrimary = computed(() => primaryConversation.value !== null);
 const busyDialogOpen = computed(() => busyPrompt.value !== null);
-
-/** Explains what "Primary" means everywhere the word appears in this panel (FR-027/FR-009: Main
- *  stays Primary by default — this is purely explanatory, it changes no behaviour). */
-const PRIMARY_EXPLANATION =
-  'Edits from this conversation apply to the document automatically, with no review step.';
 
 // FR-007g: a one-time, dismissible inline notice the first time a user sees a Primary badge —
 // after that it stays out of the way; the tooltip above remains available on demand.
@@ -221,11 +217,8 @@ async function clearPrimary(): Promise<void> {
   border-radius: 4px;
   font-size: 0.75rem;
 }
-.dismiss-notice-button {
-  flex: 0 0 auto;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-}
+/* `.dismiss-notice-button` shared shape now lives in style.css (shared with ConversationView.vue's
+   composer hint dismiss button). */
 .no-primary-badge {
   /* Fix: #6b7280 was a razor-thin 4.52:1 against the plain panel background and an outright
      failing 4.06:1 against the darkened `.selected` row tint (same fix as HudPanel.vue's
