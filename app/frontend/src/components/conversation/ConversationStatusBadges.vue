@@ -42,7 +42,12 @@ const { badges } = useConversationStatusBadges(() => props.conversationId);
   color: var(--danger-color, #b91c1c);
 }
 .pending-badge {
-  color: var(--status-active-color, #1d4ed8);
+  /* Same semantic "warning amber" token used for the per-edit `pending` status in EditsList.vue
+     and for the close-dialog's `.pending-warning` banner in ConversationView.vue — this badge and
+     those both mean "a proposed edit is awaiting your review", so they must share one color rather
+     than this one drifting onto the unrelated `--status-active-color` ("conversation is currently
+     working") token. */
+  color: var(--warning-color, #92400e);
 }
 .queue-badge {
   color: var(--queue-color, #6b21a8);
