@@ -167,25 +167,27 @@ async function clearPrimary(): Promise<void> {
       </button>
     </p>
 
-    <div v-if="busyPrompt" class="modal-overlay primary-busy-dialog-overlay">
-      <div
-        ref="busyDialogEl"
-        class="primary-busy-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Primary conversation is busy"
-      >
-        <p>
-          {{ conversationName(busyPrompt.busyConversationId) }} is still working. What should happen to the Primary
-          designation?
-        </p>
-        <div class="primary-busy-choices">
-          <button type="button" @click="resolveBusyPrompt('switch_now')">Switch now</button>
-          <button type="button" @click="resolveBusyPrompt('switch_when_idle')">Switch when idle</button>
-          <button type="button" @click="resolveBusyPrompt('cancel')">Cancel</button>
+    <Transition name="modal">
+      <div v-if="busyPrompt" class="modal-overlay primary-busy-dialog-overlay">
+        <div
+          ref="busyDialogEl"
+          class="primary-busy-dialog dialog-box"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Primary conversation is busy"
+        >
+          <p>
+            {{ conversationName(busyPrompt.busyConversationId) }} is still working. What should happen to the Primary
+            designation?
+          </p>
+          <div class="primary-busy-choices">
+            <button type="button" @click="resolveBusyPrompt('switch_now')">Switch now</button>
+            <button type="button" @click="resolveBusyPrompt('switch_when_idle')">Switch when idle</button>
+            <button type="button" @click="resolveBusyPrompt('cancel')">Cancel</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -233,13 +235,11 @@ async function clearPrimary(): Promise<void> {
 .primary-busy-dialog-overlay {
   z-index: var(--z-overlay-primary, 60);
 }
+/* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own width/padding stay here. */
 .primary-busy-dialog {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1rem;
   max-width: 22rem;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 .primary-busy-choices {
   display: flex;

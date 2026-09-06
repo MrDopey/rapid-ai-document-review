@@ -47,44 +47,44 @@ const name = computed(() => store.conversations.find((c) => c.id === props.conve
 </script>
 
 <template>
-  <div
-    ref="dialogEl"
-    class="conversation-detail-dialog"
-    role="dialog"
-    aria-modal="true"
-    :aria-label="`${name} — full view`"
-    @focusin="emit('interact')"
-    @mousedown.capture="emit('interact')"
-  >
-    <button type="button" class="close-detail-button" aria-label="Close full view" @click="emit('close')">×</button>
-    <!-- `ConversationView.vue`'s own `select` emit must still reach App.vue — see the `select`
-         emit's doc comment above. -->
-    <ConversationView
-      :conversation-id="conversationId"
-      :at-focus-cap="atFocusCap"
-      :max-focused="maxFocused"
-      @select="emit('select', $event)"
-      @branch-created="emit('branch-created', $event)"
-    />
-  </div>
+  <Transition name="modal" appear>
+    <div
+      ref="dialogEl"
+      class="conversation-detail-dialog dialog-box"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="`${name} — full view`"
+      @focusin="emit('interact')"
+      @mousedown.capture="emit('interact')"
+    >
+      <button type="button" class="close-detail-button" aria-label="Close full view" @click="emit('close')">×</button>
+      <!-- `ConversationView.vue`'s own `select` emit must still reach App.vue — see the `select`
+           emit's doc comment above. -->
+      <ConversationView
+        :conversation-id="conversationId"
+        :at-focus-cap="atFocusCap"
+        :max-focused="maxFocused"
+        @select="emit('select', $event)"
+        @branch-created="emit('branch-created', $event)"
+      />
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
 /* US4/T031 fix, extended for multi-focus: this panel is one flex item among possibly several
    inside App.vue's `.conversation-detail-overlay` row — sized to a comfortable reading width
    rather than centered/full-width, since more than one may be visible side by side. */
+/* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own layout/sizing stays here. */
 .conversation-detail-dialog {
   position: relative;
   flex: 0 0 auto;
   width: min(480px, 92vw);
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1.25rem 1rem 1rem;
   max-height: 100%;
   overflow: auto;
   text-align: left;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 .close-detail-button {
   position: absolute;

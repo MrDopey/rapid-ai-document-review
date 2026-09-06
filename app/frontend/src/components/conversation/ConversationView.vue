@@ -712,30 +712,32 @@ const actions = computed<ActionDescriptor[]>(() => {
       </form>
     </div>
 
-    <div v-if="closeDialogOpen" class="modal-overlay close-dialog-overlay">
-      <div ref="closeDialogEl" class="close-dialog" role="alertdialog" aria-modal="true" aria-label="Close conversation">
-        <p>Close "{{ conversation?.name }}"? This cannot be undone.</p>
-        <p v-if="conversation && conversation.pendingEditCount > 0" class="pending-warning" role="alert">
-          This conversation has {{ pendingProposalPhrase(conversation.pendingEditCount) }}; resolve
-          {{ conversation.pendingEditCount === 1 ? 'it' : 'them' }} before closing.
-        </p>
-        <label class="fold-summary-option">
-          <input v-model="foldSummaryIntoParent" type="checkbox" />
-          Fold a compact summary into the parent conversation
-        </label>
-        <!-- Bug fix (dark-pattern ordering): "Close conversation" is irreversible (see the "This
-             cannot be undone" text above) — it used to be the first, auto-focused button (this
-             dialog's `useFocusTrap` focuses whichever focusable element is first in DOM order),
-             visually identical to Cancel. Cancel now comes first (so it's the one that gets
-             auto-focused) and "Close conversation" carries explicit danger styling, consistent with
-             how the "Archive" action that opens this dialog is already styled (`danger: true` in
-             `archiveOrReviewAction` above). -->
-        <div class="close-dialog-actions">
-          <button type="button" :disabled="closing" @click="cancelCloseDialog">Cancel</button>
-          <button type="button" class="danger" :disabled="closing" @click="confirmClose">Close conversation</button>
+    <Transition name="modal">
+      <div v-if="closeDialogOpen" class="modal-overlay close-dialog-overlay">
+        <div ref="closeDialogEl" class="close-dialog dialog-box" role="alertdialog" aria-modal="true" aria-label="Close conversation">
+          <p>Close "{{ conversation?.name }}"? This cannot be undone.</p>
+          <p v-if="conversation && conversation.pendingEditCount > 0" class="pending-warning" role="alert">
+            This conversation has {{ pendingProposalPhrase(conversation.pendingEditCount) }}; resolve
+            {{ conversation.pendingEditCount === 1 ? 'it' : 'them' }} before closing.
+          </p>
+          <label class="fold-summary-option">
+            <input v-model="foldSummaryIntoParent" type="checkbox" />
+            Fold a compact summary into the parent conversation
+          </label>
+          <!-- Bug fix (dark-pattern ordering): "Close conversation" is irreversible (see the "This
+               cannot be undone" text above) — it used to be the first, auto-focused button (this
+               dialog's `useFocusTrap` focuses whichever focusable element is first in DOM order),
+               visually identical to Cancel. Cancel now comes first (so it's the one that gets
+               auto-focused) and "Close conversation" carries explicit danger styling, consistent with
+               how the "Archive" action that opens this dialog is already styled (`danger: true` in
+               `archiveOrReviewAction` above). -->
+          <div class="close-dialog-actions">
+            <button type="button" :disabled="closing" @click="cancelCloseDialog">Cancel</button>
+            <button type="button" class="danger" :disabled="closing" @click="confirmClose">Close conversation</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </section>
 </template>
 
@@ -1042,13 +1044,11 @@ const actions = computed<ActionDescriptor[]>(() => {
 .close-dialog-overlay {
   z-index: var(--z-overlay-primary, 60);
 }
+/* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only this dialog's own width/padding stay here. */
 .close-dialog {
-  background: var(--bg-color, #fff);
-  color: var(--text-color, #111);
-  border-radius: 8px;
   padding: 1rem;
   max-width: 22rem;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 .fold-summary-option {
   display: flex;
