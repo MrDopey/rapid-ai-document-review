@@ -6,6 +6,7 @@ import { AutomergeStoreHolder } from '../../src/document/automerge-store-holder.
 import { RevisionService } from '../../src/document/revision-service.js';
 import { DocumentService } from '../../src/document/document-service.js';
 import { RunBuffer } from '../../src/events/run-buffer.js';
+import { TurnRunner } from '../../src/pi/turn-runner.js';
 import { PrimaryMutex } from '../../src/pi/primary-mutex.js';
 import { PiService } from '../../src/pi/pi-service.js';
 import { PrimaryService } from '../../src/conversation/primary-service.js';
@@ -13,6 +14,9 @@ import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.j
 import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
 import { ConversationService } from '../../src/conversation/conversation-service.js';
+import { ConversationFoldService } from '../../src/conversation/conversation-fold-service.js';
+import { ConversationReviewService } from '../../src/conversation/conversation-review-service.js';
+import { EventPublisher } from '../../src/events/event-publisher.js';
 import { newId } from '../../src/ids.js';
 import type { ConversationRow, StorageAdapter } from '../../src/storage/storage-adapter.js';
 import type { AgentSessionLike } from '../../src/pi/agent-session-port.js';
@@ -46,14 +50,15 @@ function buildHarness(): Harness {
   };
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge);
   const primaryMutex = new PrimaryMutex();
+  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
   const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
+  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -62,14 +67,20 @@ function buildHarness(): Harness {
     automerge,
     revisionService,
     conflictService,
-    piService,
-    concurrencyLimiter,
-    runBuffer,
+    turnRunner,
     primaryMutex,
   );
   piService.setEditService(editService);
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
+  const conversationEventPublisher = new EventPublisher(eventService, eventHub);
+  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationReviewService = new ConversationReviewService(
+    storage,
+    piService,
+    conversationEventPublisher,
+    automerge,
+  );
   const conversationService = new ConversationService(
     storage,
     eventService,
@@ -79,6 +90,9 @@ function buildHarness(): Harness {
     concurrencyLimiter,
     automerge,
     primaryService,
+    turnRunner,
+    conversationFoldService,
+    conversationReviewService,
   );
 
   documentService.create('# Doc\n\nHello.\n', 'Doc');

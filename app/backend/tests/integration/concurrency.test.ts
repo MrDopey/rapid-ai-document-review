@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SqliteStorageAdapter } from '../../src/storage/sqlite/index.js';
 import { EventService } from '../../src/events/event-service.js';
-import { EventHub, type DocumentSnapshot } from '../../src/events/event-hub.js';
+import { EventHub, type DocumentSnapshot, type SocketLike } from '../../src/events/event-hub.js';
+import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import { AutomergeStoreHolder } from '../../src/document/automerge-store-holder.js';
 import { RevisionService } from '../../src/document/revision-service.js';
 import { DocumentService } from '../../src/document/document-service.js';
 import { RunBuffer } from '../../src/events/run-buffer.js';
+import { TurnRunner } from '../../src/pi/turn-runner.js';
 import { PrimaryMutex } from '../../src/pi/primary-mutex.js';
 import { PiService } from '../../src/pi/pi-service.js';
 import { PrimaryService } from '../../src/conversation/primary-service.js';
@@ -13,6 +15,9 @@ import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.j
 import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
 import { ConversationService } from '../../src/conversation/conversation-service.js';
+import { ConversationFoldService } from '../../src/conversation/conversation-fold-service.js';
+import { ConversationReviewService } from '../../src/conversation/conversation-review-service.js';
+import { EventPublisher } from '../../src/events/event-publisher.js';
 import { newId } from '../../src/ids.js';
 import type { ConversationRow, StorageAdapter } from '../../src/storage/storage-adapter.js';
 import type { AgentSessionLike } from '../../src/pi/agent-session-port.js';
@@ -49,14 +54,15 @@ function buildHarness(): Harness {
   };
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge);
   const primaryMutex = new PrimaryMutex();
+  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
   const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
+  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -65,14 +71,20 @@ function buildHarness(): Harness {
     automerge,
     revisionService,
     conflictService,
-    piService,
-    concurrencyLimiter,
-    runBuffer,
+    turnRunner,
     primaryMutex,
   );
   piService.setEditService(editService);
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
+  const conversationEventPublisher = new EventPublisher(eventService, eventHub);
+  const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
+  const conversationReviewService = new ConversationReviewService(
+    storage,
+    piService,
+    conversationEventPublisher,
+    automerge,
+  );
   const conversationService = new ConversationService(
     storage,
     eventService,
@@ -82,6 +94,9 @@ function buildHarness(): Harness {
     concurrencyLimiter,
     automerge,
     primaryService,
+    turnRunner,
+    conversationFoldService,
+    conversationReviewService,
   );
 
   return { storage, eventService, eventHub, automerge, documentService, piService, concurrencyLimiter, conversationService };
@@ -130,11 +145,28 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
   let documentId: string;
   let conversations: ConversationRow[];
   let sessions: FakePiSession[];
+  let broadcastFrames: ApplicationEvent[];
 
   beforeEach(() => {
     h = buildHarness();
     const created = h.documentService.create(DOC_CONTENT, 'Concurrency Fixture');
     documentId = created.document.id;
+
+    // FIX (2a6a4f1): a queue-position reshuffle on `release()` is now broadcast live-only, never
+    // persisted (only the entry's initial enqueue on `acquire()` still writes a row) — see
+    // ConcurrencyLimiter.reemitQueuePositions's doc comment. Subscribe a fake socket so tests that
+    // need to observe a reshuffled position (not just the initial enqueue) can read it here
+    // instead of `storage.listEventsSince`, which no longer carries it.
+    broadcastFrames = [];
+    const fakeSocket: SocketLike = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send(data: string) {
+        const frame = JSON.parse(data) as { type: string };
+        if (frame.type !== 'subscribed') broadcastFrames.push(frame as unknown as ApplicationEvent);
+      },
+    };
+    h.eventHub.subscribe(fakeSocket, documentId, null);
 
     // 5 conversations: enough to prove 3 run concurrently, more than one queues, and a running
     // conversation's error doesn't disturb a queue with more than one entry left in it.
@@ -221,10 +253,12 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
     expect(dequeuedEvents).toHaveLength(1);
     expect(dequeuedEvents[0]!.conversationId).toBe(conversations[3]!.id);
 
-    // Conv 5's queue position is re-emitted as 1 now that Conv 4 left the queue.
-    const requeuedEvents = h.storage
-      .listEventsSince(documentId, null)
-      .filter((e) => e.eventType === 'agent_queued' && e.conversationId === conversations[4]!.id);
+    // Conv 5's queue position is re-emitted as 1 now that Conv 4 left the queue. Reshuffled
+    // positions are broadcast live-only (2a6a4f1), never persisted, so this reads the fake
+    // socket's captured broadcast frames rather than `storage.listEventsSince`.
+    const requeuedEvents = broadcastFrames.filter(
+      (e) => e.type === 'agent_queued' && e.conversationId === conversations[4]!.id,
+    );
     expect(requeuedEvents.at(-1)).toMatchObject({ data: { queuePosition: 1 } });
 
     // Conv 2 finishes next: releases a slot, dequeues Conv 5 (now the only queued entry) — FIFO.
@@ -271,10 +305,12 @@ describe('concurrency admission and FIFO queueing (US1/US2, FR-015/FR-015a)', ()
     expect(dequeuedEvents[0]!.conversationId).toBe(conversations[3]!.id);
 
     // Conv 5 is still queued at position 1 and can still be driven to completion normally
-    // afterwards — the error did not stall or corrupt the queue.
-    const requeuedEvents = h.storage
-      .listEventsSince(documentId, null)
-      .filter((e) => e.eventType === 'agent_queued' && e.conversationId === conversations[4]!.id);
+    // afterwards — the error did not stall or corrupt the queue. Reshuffled positions are
+    // broadcast live-only (2a6a4f1), never persisted, so this reads the fake socket's captured
+    // broadcast frames rather than `storage.listEventsSince`.
+    const requeuedEvents = broadcastFrames.filter(
+      (e) => e.type === 'agent_queued' && e.conversationId === conversations[4]!.id,
+    );
     expect(requeuedEvents.at(-1)).toMatchObject({ data: { queuePosition: 1 } });
 
     sessions[0]!.completeRun();

@@ -6,6 +6,7 @@ import { AutomergeStoreHolder } from '../../src/document/automerge-store-holder.
 import { RevisionService } from '../../src/document/revision-service.js';
 import { DocumentService } from '../../src/document/document-service.js';
 import { RunBuffer } from '../../src/events/run-buffer.js';
+import { TurnRunner } from '../../src/pi/turn-runner.js';
 import { PrimaryMutex } from '../../src/pi/primary-mutex.js';
 import { PiService } from '../../src/pi/pi-service.js';
 import { ConcurrencyLimiter } from '../../src/conversation/concurrency-limiter.js';
@@ -39,14 +40,15 @@ function buildHarness(): Harness {
   };
   const eventHub = new EventHub(eventService, () => emptySnapshot);
   const automerge = new AutomergeStoreHolder();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automerge);
   const primaryMutex = new PrimaryMutex();
+  const revisionService = new RevisionService(storage, eventService, eventHub, automerge, primaryMutex);
   const documentService = new DocumentService(storage, eventService, eventHub, automerge, revisionService, primaryMutex);
   revisionService.setDocumentService(documentService);
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automerge, primaryMutex);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
+  const turnRunner = new TurnRunner(storage, eventService, eventHub, runBuffer, piService, concurrencyLimiter);
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(
     storage,
@@ -55,9 +57,7 @@ function buildHarness(): Harness {
     automerge,
     revisionService,
     conflictService,
-    piService,
-    concurrencyLimiter,
-    runBuffer,
+    turnRunner,
     primaryMutex,
   );
   piService.setEditService(editService);
