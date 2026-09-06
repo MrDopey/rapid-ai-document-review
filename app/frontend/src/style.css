@@ -92,13 +92,34 @@
                             `.close-detail-button` and ConversationThreadBox.vue's sticky
                             `.thread-header`.
        --z-sticky          sticky pane headers, e.g. EditorComponent.vue's `.editor-toolbar`.
-       --z-overlay         simple, non-nesting modal overlays: App.vue's `.shortcuts-overlay`/
-                            `.help-overlay`, EditsList.vue's `.preview-overlay`, HistoryPanel.
-                            vue's `.diff-overlay`.
-       --z-overlay-detail  App.vue's `.conversation-detail-overlay`, which must sit above
-                            `--z-overlay`.
-       --z-overlay-primary PrimaryPanel.vue's `.primary-busy-dialog-overlay` and ConversationView.
-                            vue's `.close-dialog-overlay`, above `--z-overlay-detail`.
+       --z-overlay         (currently unused) reserved for a future simple overlay that is known to
+                            NEVER coexist with `--z-overlay-detail`/`--z-overlay-primary` while it's
+                            open. Do NOT put anything here just because it "looks like a simple
+                            modal" — see the bug this caused, below.
+       --z-overlay-detail  App.vue's `.conversation-detail-overlay` (the focused-conversation
+                            panel), above `--z-overlay`.
+       --z-overlay-primary Alert-style confirmation dialogs that are meant to nest ABOVE a focused
+                            conversation panel while still being conceptually "part of" it or a
+                            sibling panel: PrimaryPanel.vue's `.primary-busy-dialog-overlay`,
+                            ConversationView.vue's `.close-dialog-overlay`, and HistoryPanel.vue's
+                            `.restore-dialog-overlay` — above `--z-overlay-detail`.
+       --z-overlay-blocking Independent, page-level "simple" modals that have NO nesting
+                            relationship to any other overlay and must therefore render above
+                            EVERY other tier below `--z-indicator`, no exceptions: App.vue's
+                            `.shortcuts-overlay`/`.help-overlay`, HistoryPanel.vue's
+                            `.diff-overlay`, EditsList.vue's `.preview-overlay`. Bug this tier
+                            fixes: these previously used the same `--z-overlay` token as the rest
+                            of this list on the (false) assumption that a "simple, non-nesting"
+                            overlay never has to coexist with `--z-overlay-detail` — but any of
+                            them can be opened from inside an already-focused conversation panel
+                            (History → Diff, or Preview from that panel's own Edits list), and
+                            `--z-overlay` (50) sits BELOW `--z-overlay-detail` (55). That rendered
+                            the dialog sliced in half underneath the focused panel with its Close
+                            button genuinely unclickable. The fix is the invariant this tier name
+                            encodes: a "blocking", independent, page-level modal must never share a
+                            token with anything that has its own idea of a stacking order relative
+                            to `--z-overlay-detail` — always reach for `--z-overlay-blocking`
+                            instead of `--z-overlay` for this class of overlay.
        --z-indicator       always-on-top status badges (ReconnectingIndicator.vue), above every
                             other layer in the app. */
   --z-raised: 1;
@@ -106,6 +127,7 @@
   --z-overlay: 50;
   --z-overlay-detail: 55;
   --z-overlay-primary: 60;
+  --z-overlay-blocking: 70;
   --z-indicator: 1000;
 }
 
@@ -225,6 +247,63 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Shared dialog chrome — the `border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);` (plus
+   background/color) was previously hand-duplicated verbatim across HelpDialog.vue,
+   KeyboardShortcutsDialog.vue, RevisionDiffViewer.vue, ConversationDetailPanel.vue,
+   ConversationView.vue's `.close-dialog`, and PrimaryPanel.vue's `.primary-busy-dialog`. Hoisted
+   here (same pattern as `.pane-eyebrow`/`.diff-header` above); each of those keeps only what's
+   actually unique to it (width/max-width/max-height/padding/overflow/position, etc.) in its own
+   `<style scoped>` block. EditsList.vue's `.preview-overlay` is the one exception: its dialog is
+   DiffViewer.vue's own root element, reached only via a `:deep()` override from outside (see that
+   file), so it isn't a candidate for this class the same way the others are. */
+.dialog-box {
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #111);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Shared open/close animation for every overlay/dialog in the app — a `<Transition name="modal">`
+   (or, for a component with no separate backdrop of its own, e.g. ConversationDetailPanel.vue,
+   `<Transition name="modal" appear>` wrapping its own root) gets these Vue-generated phase classes
+   for free instead of each caller redefining its own copy. Backdrop (whichever element the
+   `<Transition>` actually wraps — either a `.modal-overlay` div or, when there's no separate
+   backdrop, the `.dialog-box` panel itself) fades; the nested `.dialog-box` panel additionally
+   scales/translates a little, whether it's a descendant (overlay + nested dialog case) or the
+   transitioning element itself (bare-panel case) — the selectors below cover both. Same
+   `prefers-reduced-motion: reduce` handling as App.vue's `.editor-slide-*`/DocumentCanvas.vue's
+   pane-resize transitions: skip the animation entirely rather than just shortening it. */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 180ms ease;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-active.dialog-box,
+.modal-leave-active.dialog-box,
+.modal-enter-active .dialog-box,
+.modal-leave-active .dialog-box {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.modal-enter-from.dialog-box,
+.modal-leave-to.dialog-box,
+.modal-enter-from .dialog-box,
+.modal-leave-to .dialog-box {
+  transform: scale(0.96) translateY(8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-enter-active,
+  .modal-leave-active,
+  .modal-enter-active.dialog-box,
+  .modal-leave-active.dialog-box,
+  .modal-enter-active .dialog-box,
+  .modal-leave-active .dialog-box {
+    transition: none !important;
+  }
 }
 
 /* Shared "is Primary" visual indicator — the plain drop-in class for a consumer with no other
