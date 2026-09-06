@@ -6,7 +6,7 @@ import {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import { DocumentAlreadyExistsError, DocumentNotFoundError, type DocumentService } from '../../document/document-service.ts';
 import type { RevisionService } from '../../document/revision-service.ts';
-import { sendError } from './errors.ts';
+import { parseOrFail, sendError } from './errors.ts';
 
 export function registerDocumentRoutes(
   app: FastifyInstance,
@@ -15,12 +15,10 @@ export function registerDocumentRoutes(
   const { documentService, revisionService } = deps;
 
   app.post('/api/document', async (request, reply) => {
-    const parsed = CreateDocumentRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, CreateDocumentRequest, request.body);
+    if (!data) return;
     try {
-      const result = documentService.create(parsed.data.content, parsed.data.title);
+      const result = documentService.create(data.content, data.title);
       return reply.status(201).send(result);
     } catch (err) {
       if (err instanceof DocumentAlreadyExistsError) {
@@ -39,16 +37,10 @@ export function registerDocumentRoutes(
   });
 
   app.patch('/api/document', async (request, reply) => {
-    const parsed = PatchDocumentRequest.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, PatchDocumentRequest, request.body);
+    if (!data) return;
     try {
-      const result = await documentService.applyChanges(
-        parsed.data.baseRevision,
-        parsed.data.changes,
-        parsed.data.title,
-      );
+      const result = await documentService.applyChanges(data.baseRevision, data.changes, data.title);
       return reply.send(result);
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
@@ -59,20 +51,18 @@ export function registerDocumentRoutes(
   });
 
   app.get('/api/document/export', async (request, reply) => {
-    const parsed = ExportDocumentQuery.safeParse(request.query);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
+    const data = parseOrFail(reply, ExportDocumentQuery, request.query);
+    if (!data) return;
     const doc = documentService.get();
     if (!doc) {
       return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
     }
-    const content = revisionService.export(doc.document.id, parsed.data.revision);
+    const content = revisionService.export(doc.document.id, data.revision);
     if (content === null) {
-      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', `Revision not found: ${parsed.data.revision}`);
+      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', `Revision not found: ${data.revision}`);
     }
     reply.header('Content-Type', 'text/markdown; charset=utf-8');
-    if (parsed.data.download) {
+    if (data.download) {
       reply.header('Content-Disposition', `attachment; filename="${doc.document.title}.md"`);
     }
     return reply.send(content);

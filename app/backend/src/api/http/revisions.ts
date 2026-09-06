@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { PaginationQuery } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RevisionService } from '../../document/revision-service.ts';
 import type { RevisionRow, StorageAdapter } from '../../storage/storage-adapter.ts';
-import { sendError } from './errors.ts';
+import { parseOrFail, sendError } from './errors.ts';
 
 function toRevisionDto(row: RevisionRow, conversationNamesById: Map<string, string>) {
   const conversationName = row.conversationId
@@ -33,11 +33,9 @@ export function registerRevisionRoutes(
     if (!doc) {
       return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
     }
-    const parsed = PaginationQuery.safeParse(request.query);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
-    const page = storage.listRevisions(doc.id, parsed.data);
+    const data = parseOrFail(reply, PaginationQuery, request.query);
+    if (!data) return;
+    const page = storage.listRevisions(doc.id, data);
     // Batch-resolve conversation names in one query instead of one lookup per revision row
     // (up to `limit` extra synchronous SQLite calls per page otherwise).
     const conversationIds = [

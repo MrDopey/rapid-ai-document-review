@@ -4,7 +4,7 @@ import type { EventHub } from '../../events/event-hub.ts';
 import type { EventService } from '../../events/event-service.ts';
 import { EventPublisher } from '../../events/event-publisher.ts';
 import type { StorageAdapter, UserSettingsRow } from '../../storage/storage-adapter.ts';
-import { sendError } from './errors.ts';
+import { parseOrFail } from './errors.ts';
 
 function toDto(row: UserSettingsRow): UserSettingsDto {
   return {
@@ -35,11 +35,9 @@ export function registerSettingsRoutes(
   });
 
   app.patch('/api/settings', async (request, reply) => {
-    const parsed = UserSettingsPatch.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 400, 'VALIDATION_FAILED', parsed.error.message);
-    }
-    const updated = storage.updateSettings(parsed.data, new Date().toISOString());
+    const data = parseOrFail(reply, UserSettingsPatch, request.body);
+    if (!data) return;
+    const updated = storage.updateSettings(data, new Date().toISOString());
     const dto = toDto(updated);
 
     const doc = storage.getDocument();
