@@ -41,7 +41,11 @@ export interface RestoreResult {
  * revision creation, restore, and export.
  */
 export class RevisionService {
-  private debounceTimer: NodeJS.Timeout | null = null;
+  // FIX 2: keyed by documentId (Map), not a bare scalar — one process-wide `NodeJS.Timeout` would
+  // let debounce timers from different documents clobber each other if multi-document support is
+  // ever added. No behavior change for today's single-document case. Follows the same pattern as
+  // `ConcurrencyLimiter`'s `running`/`queues` maps (concurrency-limiter.ts).
+  private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   /** Late-bound (server.ts, right after `DocumentService` is constructed): `DocumentService`
    *  already depends on `RevisionService` to create revisions, so `RevisionService` depending on
    *  `DocumentService` too would be a genuine construction cycle — broken the same way
@@ -78,20 +82,23 @@ export class RevisionService {
   /** Resets the per-document debounce timer; fires a manual_debounce revision after inactivity. */
   scheduleDebounce(documentId: string): void {
     const debounceMs = this.storage.getSettings().revisionDebounceMs;
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
+    const existing = this.debounceTimers.get(documentId);
+    if (existing) {
+      clearTimeout(existing);
     }
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(documentId);
       this.createRevision(documentId, { source: 'user', origin: 'manual_debounce' });
     }, debounceMs);
-    this.debounceTimer.unref?.();
+    timer.unref?.();
+    this.debounceTimers.set(documentId, timer);
   }
 
-  cancelDebounce(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
+  cancelDebounce(documentId: string): void {
+    const existing = this.debounceTimers.get(documentId);
+    if (existing) {
+      clearTimeout(existing);
+      this.debounceTimers.delete(documentId);
     }
   }
 
