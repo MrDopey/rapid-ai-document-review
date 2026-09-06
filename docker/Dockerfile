@@ -1,4 +1,4 @@
-syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1
 
 FROM node:26.1.0-trixie AS build
 WORKDIR /app
