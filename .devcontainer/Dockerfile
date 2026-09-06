@@ -39,3 +39,5 @@ USER $USERNAME
 RUN curl -fsSL https://claude.ai/install.sh | bash \
 	&& curl -LsSf https://astral.sh/uv/install.sh | sh \
 	&& curl -fsSL https://pi.dev/install.sh | sh
+
+RUN npx playwright install chromium
