@@ -59,12 +59,12 @@ let view: EditorView | null = null;
 let applyingRemote = false;
 
 const CLIENT_BATCH_DEBOUNCE_MS = 250;
-// Coordinator follow-up (stress-test perf pass, rapid-edit bursts): pure debounce alone lets a
-// sustained typing/paste burst (each edit arriving under CLIENT_BATCH_DEBOUNCE_MS after the last)
-// push the flush out indefinitely, so the batch — and the cost of composing each new change onto
-// it in ChangeBatcher's `compose` below — keeps growing for as long as the burst lasts. This caps
-// that: a flush is forced at least this often regardless, bounding both the outbound payload size
-// and the compose chain length, while still collapsing any burst shorter than this into one flush.
+// Pure debounce alone lets a sustained typing/paste burst (each edit arriving under
+// CLIENT_BATCH_DEBOUNCE_MS after the last) push the flush out indefinitely, so the batch — and the
+// cost of composing each new change onto it in ChangeBatcher's `compose` below — keeps growing for
+// as long as the burst lasts. This caps that: a flush is forced at least this often regardless,
+// bounding both the outbound payload size and the compose chain length, while still collapsing any
+// burst shorter than this into one flush.
 const CLIENT_BATCH_MAX_WAIT_MS = 1000;
 
 // ChangeBatcher (./ChangeBatcher.ts) owns the accumulation buffer and debounce/max-wait timers as

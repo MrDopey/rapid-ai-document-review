@@ -24,9 +24,8 @@ function onClick(): void {
 </template>
 
 <style scoped>
-/* Fix: "Accept remaining" and "Drop remaining" used to be visually identical adjacent buttons for
-   opposite-consequence actions. Give Drop a lower-emphasis, danger-toned treatment so it doesn't
-   read as an equally-weighted peer of Accept. */
+/* Danger-toned, lower-emphasis treatment so this doesn't read as an equally-weighted peer of
+   "Accept remaining" — the two are adjacent buttons for opposite-consequence actions. */
 .drop-all-button {
   background: transparent;
   border-color: var(--danger-color, #b91c1c);

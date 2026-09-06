@@ -39,8 +39,8 @@ async function onAccept(editId: string): Promise<void> {
 }
 
 async function onDrop(editId: string): Promise<void> {
-  // Same fix as DropAllButton.vue: dropping is destructive with no undo, unlike Accept, so this
-  // per-row drop is gated behind an explicit confirmation before it fires.
+  // Dropping is destructive with no undo, unlike Accept, so this per-row drop is gated behind an
+  // explicit confirmation before it fires (same as DropAllButton.vue).
   if (!window.confirm('Drop this proposed edit? This cannot be undone.')) return;
   await runBusy(editId, () => store.drop(editId, props.conversationId));
 }
@@ -197,8 +197,8 @@ function closePreview(): void {
   gap: 0.4rem;
   margin-top: 0.25rem;
 }
-/* Fix: same danger/lower-emphasis treatment as DropAllButton.vue's ".drop-all-button", so the
-   per-row Drop button doesn't look identical to the adjacent (non-destructive) Accept button. */
+/* Same danger/lower-emphasis treatment as DropAllButton.vue's ".drop-all-button", so the per-row
+   Drop button doesn't look identical to the adjacent (non-destructive) Accept button. */
 .drop-button {
   background: transparent;
   border-color: var(--danger-color, #b3261e);
@@ -207,11 +207,11 @@ function closePreview(): void {
 .drop-button:hover:not(:disabled) {
   background: var(--danger-bg, #fee2e2);
 }
-/* Fix 4: color-code proposal status, layered on top of the (unchanged) text label — never
-   relying on color alone (FR-043c). */
+/* Color-codes proposal status, layered on top of the (unchanged) text label — never relying on
+   color alone (FR-043c). */
 .status-badge[data-status='pending'] {
-  /* Fix: unify with the same semantic "warning amber" token used for the stale/refresh-send
-     warnings elsewhere — see style.css's --warning-color for why the previous #b45309 changed. */
+  /* Same semantic "warning amber" token used for the stale/refresh-send warnings elsewhere — see
+     style.css's --warning-color. */
   color: var(--warning-color, #92400e);
 }
 .status-badge[data-status='applied'] {
@@ -221,11 +221,11 @@ function closePreview(): void {
 .status-badge[data-status='superseded'] {
   color: var(--neutral-muted-color, #4b5563);
 }
-/* Fix (unclickable-Close-button bug): this is an independent, page-level "simple" modal that can
-   be opened from inside a focused conversation panel (`--z-overlay-detail`) — it previously used
-   `--z-overlay`, which sits BELOW that tier, so it rendered sliced in half underneath the focused
-   panel with its Close button genuinely unclickable. `--z-overlay-blocking` (style.css `:root`) is
-   the tier reserved for exactly this "must always render above everything else" case. */
+/* This is an independent, page-level "simple" modal that can be opened from inside a focused
+   conversation panel (`--z-overlay-detail`), so it must always render above that tier —
+   `--z-overlay` sits BELOW it and would render this sliced in half underneath the focused panel,
+   with its Close button unclickable. `--z-overlay-blocking` (style.css `:root`) is the tier
+   reserved for exactly this "must always render above everything else" case. */
 .preview-overlay {
   z-index: var(--z-overlay-blocking, 70);
 }

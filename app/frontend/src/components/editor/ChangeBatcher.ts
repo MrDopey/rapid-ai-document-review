@@ -1,7 +1,6 @@
 /**
- * Pure, host-agnostic change-batching logic extracted from EditorComponent.vue's inline
- * `accumulated`/`flush`/`scheduleFlush` (no CodeMirror or Vue import here) so the debounce/flush
- * behavior itself can be unit-tested without mounting a full CodeMirror view.
+ * Pure, host-agnostic change-batching logic (no CodeMirror or Vue import here) so the
+ * debounce/flush behavior itself can be unit-tested without mounting a full CodeMirror view.
  *
  * `T` is left generic (rather than importing `ChangeSet` from `@codemirror/state`) so this file has
  * zero dependency on the editor library — EditorComponent.vue instantiates `ChangeBatcher<ChangeSet>`
@@ -11,8 +10,7 @@ export interface ChangeBatcherOptions<T> {
   /**
    * Combine a newly observed change into the running accumulated batch. Called with
    * `accumulated === null` for the first change since the last flush (nothing to compose onto
-   * yet) — mirrors the `accumulated ? accumulated.compose(update.changes) : update.changes`
-   * pattern this class replaces in EditorComponent.vue.
+   * yet).
    */
   compose: (accumulated: T | null, change: T) => T;
   /**
@@ -28,7 +26,7 @@ export interface ChangeBatcherOptions<T> {
    * keep pushing out indefinitely. Without this, a sustained typing/paste burst never pauses long
    * enough to hit the debounce window, so the batch — and the cost of composing each new change
    * onto it — keeps growing for as long as the burst lasts. Omit to keep pure debounce semantics
-   * (no cap), i.e. the original inline behavior.
+   * (no cap).
    */
   maxWaitMs?: number;
   /** Injectable scheduler, mainly so tests can use a fake timer source without needing to touch
@@ -70,8 +68,7 @@ export class ChangeBatcher<T> {
   }
 
   /** Flush the accumulated batch (if any) to `onFlush` now, cancelling any pending timers. Safe to
-   *  call when nothing is accumulated (a no-op) — mirrors the original `flush()`'s `if
-   *  (!accumulated) return;` guard. */
+   *  call when nothing is accumulated (a no-op). */
   flush(): void {
     this.clearTimers();
     if (this.accumulated === null) return;
