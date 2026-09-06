@@ -135,7 +135,7 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // control collapses all of them instead. Individual messages stay independently toggleable
 // afterward (setMessageExpanded above is unchanged by this bulk path).
 // Shared with `ConversationView.vue` via `useBulkToggleAction`.
-const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
+const { action: bulkToggleAction } = useBulkToggleAction(() => props.conversationId);
 
 // Root element exposed so `DocumentCanvas.vue` can attach a `ResizeObserver` to it (Phase 4/US2's
 // sibling-collision stacking needs each box's *actual* rendered height, not a fixed assumption).
@@ -223,7 +223,7 @@ const closeAction = computed<ActionDescriptor>(() => ({
 const actions = computed<ActionDescriptor[]>(() => {
   const list: ActionDescriptor[] = [focusAction.value];
   if (props.isFocused) list.push(closeAction.value);
-  if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
+  list.push(bulkToggleAction.value);
   list.push(branchAction.value);
   list.push(primaryAction.value);
   return list;

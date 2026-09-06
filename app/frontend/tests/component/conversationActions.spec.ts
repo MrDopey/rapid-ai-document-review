@@ -140,21 +140,21 @@ describe('useBulkToggleAction', () => {
     };
   }
 
-  it('is not visible for a conversation with 0 or 1 messages', () => {
+  it('is always rendered and enabled (never gated) for a conversation with 0 or 1 messages', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' })];
-    const { visible } = useBulkToggleAction(() => 'c1');
-    expect(visible.value).toBe(false);
+    const { action } = useBulkToggleAction(() => 'c1');
+    expect(action.value.disabled).toBeFalsy();
   });
 
-  it('is visible once there is more than one message, labeled "Expand all" while any is collapsed', () => {
+  it('is always enabled once there is more than one message, labeled "Expand all" while any is collapsed', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' }), makeMessage({ id: 'm2' })];
     store.expandedByMessage['c1'] = { m1: false, m2: false };
-    const { action, visible } = useBulkToggleAction(() => 'c1');
-    expect(visible.value).toBe(true);
+    const { action } = useBulkToggleAction(() => 'c1');
+    expect(action.value.disabled).toBeFalsy();
     expect(action.value.label).toBe('Expand all');
     expect(action.value.ariaLabel).toBe('Expand all messages in this conversation');
   });

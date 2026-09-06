@@ -165,9 +165,10 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     return wrapper;
   }
 
-  it('renders no bulk toggle for a conversation with only one message', () => {
+  it('renders the bulk toggle enabled (not hidden, not disabled) for a conversation with only one message', () => {
     const wrapper = mountBox([makeMessage({ id: 'm1' })]);
-    expect(wrapper.find('[data-action="bulk-toggle"]').exists()).toBe(false);
+    const button = wrapper.get('[data-action="bulk-toggle"]');
+    expect(button.attributes('disabled')).toBeUndefined();
   });
 
   it('bulk-expands every message at once, then an individual toggle overrides just that one message', async () => {
@@ -538,9 +539,10 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     }) };
   }
 
-  it('renders no bulk toggle for a conversation with only one message', () => {
+  it('renders the bulk toggle enabled (not hidden, not disabled) for a conversation with only one message', () => {
     const { wrapper } = mountFocusedPanel([makeMessage({ id: 'm1' })]);
-    expect(wrapper.find('[data-action="bulk-toggle"]').exists()).toBe(false);
+    const button = wrapper.get('[data-action="bulk-toggle"]');
+    expect(button.attributes('disabled')).toBeUndefined();
   });
 
   it('bulk-expands every message at once via the focused view\'s own "Expand all" button, same as the sidebar box', async () => {

@@ -114,10 +114,6 @@ export function useConversationBranchAction(
 
 export interface ConversationBulkToggleAction {
   action: ComputedRef<ActionDescriptor>;
-  /** US3/research.md §5: only worth showing once there's more than one message to bulk-act on —
-   *  same "messages.length > 1" gate both pre-existing call sites already used, now computed once
-   *  here instead of duplicated at each host. */
-  visible: ComputedRef<boolean>;
 }
 
 /**
@@ -127,6 +123,14 @@ export interface ConversationBulkToggleAction {
  * alone rather than a host-owned local ref — both components can be mounted at once for the same
  * conversation, so a local ref per host would let the two silently diverge; this way both hosts'
  * bulk toggle acts on the exact one state both of them render from.
+ *
+ * Bug fix: this control used to be hidden outright (via a `visible` flag gated on
+ * `messages.length > 1`) whenever a conversation had 0 or 1 messages, which made the control
+ * appear/disappear as messages streamed in — surprising, and against the constitution's "always
+ * shown" convention for the other per-conversation actions in this same row. It's now always
+ * rendered and always enabled, regardless of message count — clicking it with 0 or 1 messages is
+ * simply a harmless no-op/single-message toggle (`toggleAllMessages` below already handles any
+ * message count correctly).
  */
 export function useBulkToggleAction(conversationId: () => string): ConversationBulkToggleAction {
   const store = useConversationsStore();
@@ -134,7 +138,6 @@ export function useBulkToggleAction(conversationId: () => string): ConversationB
   const expandedByMessage = computed(() => store.expandedByMessage[conversationId()] ?? {});
   const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
   const label = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
-  const visible = computed(() => messages.value.length > 1);
 
   function toggleAllMessages(): void {
     const nextExpanded = anyCollapsed.value;
@@ -152,5 +155,5 @@ export function useBulkToggleAction(conversationId: () => string): ConversationB
     onClick: toggleAllMessages,
   }));
 
-  return { action, visible };
+  return { action };
 }

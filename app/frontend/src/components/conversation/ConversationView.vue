@@ -138,7 +138,7 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
 // Bulk "Expand all"/"Collapse all" toggle (FR-009) over the same per-message `expandedByMessage`
 // state this view already owns above. Shared with `ConversationThreadBox.vue` via
 // `useBulkToggleAction`.
-const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
+const { action: bulkToggleAction } = useBulkToggleAction(() => props.conversationId);
 
 // "Branch" action (branching *this* conversation with no selection, US2/FR-006/FR-007 — see
 // `conversationActions.ts`'s own doc comment for why a whole-conversation branch is the only kind
@@ -517,7 +517,7 @@ const archiveOrReviewAction = computed<ActionDescriptor | null>(() => {
 
 const actions = computed<ActionDescriptor[]>(() => {
   const list: ActionDescriptor[] = [];
-  if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
+  list.push(bulkToggleAction.value);
   if (conversation.value) list.push(branchAction.value);
   if (conversation.value) list.push(primaryAction.value);
   const archiveOrReview = archiveOrReviewAction.value;
