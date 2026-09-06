@@ -1,5 +1,5 @@
 import type { ConversationDto, ConversationSeedSelectionDto } from '@rapid-ai-document-review/shared/contracts/http';
-import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
+import type { ConversationRow, StorageAdapter, UserSettingsRow } from '../storage/storage-adapter.ts';
 
 /**
  * Resolves a stored anchor against the CURRENT document (review finding #1). A naive
@@ -56,17 +56,20 @@ function findClosestOccurrence(haystack: string, needle: string, originalFrom: n
   return best;
 }
 
-/** Server-computed fields (Principle V: enforcement lives here, never inferred by the UI). */
-export function toConversationDto(
-  storage: StorageAdapter,
+interface DtoContext {
+  settings: UserSettingsRow;
+  /** Pending staged-edit counts, pre-grouped by conversation id — see `toConversationDtos`. */
+  pendingEditCountByConversationId: Map<string, number>;
+}
+
+function buildConversationDto(
   row: ConversationRow,
   currentRevision: number,
   documentContent: string,
+  ctx: DtoContext,
 ): ConversationDto {
-  const settings = storage.getSettings();
-  const pendingEditCount = storage
-    .listStagedEditsByConversation(row.id)
-    .filter((e) => e.status === 'pending').length;
+  const { settings } = ctx;
+  const pendingEditCount = ctx.pendingEditCountByConversationId.get(row.id) ?? 0;
   const { seedSelection, anchorOrphaned } = resolveSeedSelection(documentContent, row.seedSelection);
 
   return {
@@ -90,4 +93,65 @@ export function toConversationDto(
     forkedFromMessageId: row.forkedFromMessageId,
     anchorOrphaned,
   };
+}
+
+/** Server-computed fields (Principle V: enforcement lives here, never inferred by the UI). */
+export function toConversationDto(
+  storage: StorageAdapter,
+  row: ConversationRow,
+  currentRevision: number,
+  documentContent: string,
+): ConversationDto {
+  const settings = storage.getSettings();
+  const pendingEditCount = storage
+    .listStagedEditsByConversation(row.id)
+    .filter((e) => e.status === 'pending').length;
+
+  return buildConversationDto(row, currentRevision, documentContent, {
+    settings,
+    pendingEditCountByConversationId: new Map([[row.id, pendingEditCount]]),
+  });
+}
+
+/**
+ * Batch counterpart of `toConversationDto` (review finding #2 — measured WS-subscribe snapshot
+ * latency going from 2.7ms at 0 conversations to 54ms at 1,200, unpaginated). `toConversationDto`
+ * costs one `getSettings()` call plus one `listStagedEditsByConversation()` call EVERY time it's
+ * invoked, so any `rows.map(row => toConversationDto(...))` loop turns into 2N storage round trips
+ * for N rows in one request.
+ *
+ * This fetches `getSettings()` once and pending staged edits once per distinct `documentId` among
+ * `rows` (normally exactly one query, since a request's rows are almost always all for the same
+ * document) via the already-batch-shaped `listPendingStagedEdits(documentId)`, groups them by
+ * conversation id in memory, and reuses both across every row — collapsing the per-row loop to a
+ * constant number of storage calls regardless of row count.
+ *
+ * Existing call sites that currently do `rows.map((row) => toConversationDto(storage, row, ...))`
+ * (`server.ts`'s WS-subscribe snapshot builder, `ConversationService.getAll`) need to switch to
+ * calling this once over the whole array to actually realize the fix — `toConversationDto` itself
+ * is kept as-is, unchanged, for single-row call sites (branch/rename/review/etc.) where there's no
+ * N+1 to begin with.
+ */
+export function toConversationDtos(
+  storage: StorageAdapter,
+  rows: ConversationRow[],
+  currentRevision: number,
+  documentContent: string,
+): ConversationDto[] {
+  if (rows.length === 0) return [];
+
+  const settings = storage.getSettings();
+  const pendingEditCountByConversationId = new Map<string, number>();
+  const documentIds = new Set(rows.map((row) => row.documentId));
+  for (const documentId of documentIds) {
+    for (const edit of storage.listPendingStagedEdits(documentId)) {
+      pendingEditCountByConversationId.set(
+        edit.conversationId,
+        (pendingEditCountByConversationId.get(edit.conversationId) ?? 0) + 1,
+      );
+    }
+  }
+
+  const ctx: DtoContext = { settings, pendingEditCountByConversationId };
+  return rows.map((row) => buildConversationDto(row, currentRevision, documentContent, ctx));
 }
