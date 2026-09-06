@@ -42,6 +42,31 @@ const shortcutsOpen = ref(false);
 const helpOpen = ref(false);
 const wsClient = ref<WsClient | null>(null);
 
+// Fix (first-time-user review): the initial document load used to hang on a bare, unstyled
+// "Loading…" forever if the backend was unreachable — `store.load()` never resolved or rejected in
+// a way the template could react to, so there was no retry/error affordance at all. `loadError`
+// holds a message once the initial load fails or times out; the template (see `!store.loaded`
+// below) swaps the plain "Loading…" for this message plus a Retry button that just re-runs
+// `loadInitialDocument`.
+const LOAD_TIMEOUT_MS = 15_000;
+const loadError = ref<string | null>(null);
+
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 // 006-toolbar-reorg (confirmed layout): the "Primary" box's own error state (`PrimaryPanel.vue`'s
 // `primaryError`) is now rendered here instead, as a full-width strip beneath both toolbar
 // columns — `PrimaryPanel.vue` still owns the read/write logic and mirrors it up via `update:error`
@@ -422,17 +447,31 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   }
 }
 
+/** The initial document load, wrapped so it can be re-run verbatim by the Retry button below —
+ *  times out after `LOAD_TIMEOUT_MS` (an unreachable backend would otherwise leave `store.loaded`
+ *  false forever, with nothing in the template ever able to distinguish "still loading" from
+ *  "never going to finish") and catches any rejection (network error, non-2xx, etc.) instead of
+ *  letting it become an unhandled rejection with no visible effect. */
+async function loadInitialDocument(): Promise<void> {
+  loadError.value = null;
+  try {
+    await withTimeout(store.load(), LOAD_TIMEOUT_MS, "Couldn't reach the server. Please check your connection.");
+    if (store.document) {
+      connectWs();
+      await Promise.all([conversationsStore.load(), settingsStore.load()]);
+    }
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : "Couldn't load the document.";
+  }
+}
+
 onMounted(async () => {
   // FR-043b: one pair of visually-hidden ARIA live regions for the whole app — see
   // a11y/live-regions.ts for why this is a plain DOM module rather than a composable.
   mountLiveRegions();
   desktopMedia.addEventListener('change', handleDesktopMediaChange);
   document.addEventListener('keydown', onGlobalKeydown);
-  await store.load();
-  if (store.document) {
-    connectWs();
-    await Promise.all([conversationsStore.load(), settingsStore.load()]);
-  }
+  await loadInitialDocument();
 });
 
 onBeforeUnmount(() => {
@@ -548,7 +587,14 @@ async function onToggleReasoning(event: Event): Promise<void> {
 <template>
   <ReconnectingIndicator :reconnecting="wsClient?.reconnecting ?? false" />
 
-  <main v-if="!store.loaded" class="loading">Loading…</main>
+  <!-- Fix (first-time-user review): a failed/timed-out initial load now shows a retry affordance
+       instead of hanging on a bare "Loading…" forever — see `loadInitialDocument` in <script>. -->
+  <main v-if="loadError" class="loading load-error" role="alert">
+    <p>{{ loadError }}</p>
+    <button type="button" @click="loadInitialDocument">Retry</button>
+  </main>
+
+  <main v-else-if="!store.loaded" class="loading">Loading…</main>
 
   <section v-else-if="!hasDocument" class="paste-screen">
     <h1>Paste your document</h1>
@@ -803,6 +849,22 @@ async function onToggleReasoning(event: Event): Promise<void> {
 </template>
 
 <style scoped>
+/* Fix (first-time-user review): the initial-load state (plain "Loading…" before, now also the
+   timed-out/failed retry state) gets a minimal centered layout instead of bare unstyled text. */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  height: 100vh;
+  padding: 2rem;
+  text-align: center;
+}
+.load-error p {
+  margin: 0;
+  color: var(--danger-color, #991b1b);
+}
 .paste-screen {
   display: flex;
   flex-direction: column;
