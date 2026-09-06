@@ -10,6 +10,7 @@ import {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
   AgentUnavailableError,
+  CannotCloseMainConversationError,
   ConversationClosedError,
   ConversationNotClosedError,
   ConversationNotEmptyError,
@@ -48,6 +49,9 @@ function handleConversationError(
   }
   if (err instanceof ConversationNotClosedError) {
     return { status: 409, code: 'CONVERSATION_NOT_CLOSED' };
+  }
+  if (err instanceof CannotCloseMainConversationError) {
+    return { status: 409, code: 'CANNOT_CLOSE_MAIN_CONVERSATION' };
   }
   if (err instanceof ConversationNotEmptyError) {
     return { status: 409, code: 'CONVERSATION_NOT_EMPTY' };
