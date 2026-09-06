@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { focusExclusively } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directives (see us3/us5.spec.ts for the

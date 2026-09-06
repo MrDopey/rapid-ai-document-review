@@ -132,7 +132,6 @@ import EditorComponent from '../../src/components/editor/EditorComponent.vue';
 import ConversationDetailPanel from '../../src/components/conversation/ConversationDetailPanel.vue';
 import ConversationThreadBox from '../../src/components/conversation/ConversationThreadBox.vue';
 import HistoryPanel from '../../src/components/history/HistoryPanel.vue';
-import RevisionDiffViewer from '../../src/components/diff/RevisionDiffViewer.vue';
 import EditsList from '../../src/components/edits/EditsList.vue';
 import ConversationView from '../../src/components/conversation/ConversationView.vue';
 import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';

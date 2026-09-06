@@ -62,7 +62,7 @@ function closePreview(): void {
       <button type="button" @click="store.dismissExhausted(conversationId)">Dismiss</button>
     </div>
 
-    <div class="bulk-actions" v-if="pendingCount > 1">
+    <div v-if="pendingCount > 1" class="bulk-actions">
       <AcceptAllButton :conversation-id="conversationId" />
       <DropAllButton :conversation-id="conversationId" />
     </div>

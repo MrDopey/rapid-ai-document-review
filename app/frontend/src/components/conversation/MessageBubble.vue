@@ -110,19 +110,16 @@ const safeReasoning = computed(() =>
 
     <details v-if="message.reasoning" class="reasoning" :open="settings.thinkingVisible">
       <summary>Reasoning</summary>
-      <div class="reasoning-content" v-html="safeReasoning"></div>
+      <!-- eslint-disable-next-line vue/no-v-html -- safeReasoning is DOMPurify-sanitized, see render/sanitizer.ts -->
+      <div class="reasoning-content" v-html="safeReasoning" />
     </details>
 
     <p v-if="message.isToolCallCarrier" class="tool-call-carrier-note">
       Tool call — no reply text (visible because "Show reasoning" is on).
     </p>
 
-    <div
-      ref="textEl"
-      class="message-text text-wrap-safe"
-      :style="clampStyle"
-      v-html="safeText"
-    ></div>
+    <!-- eslint-disable-next-line vue/no-v-html -- safeText is DOMPurify-sanitized, see render/sanitizer.ts -->
+    <div ref="textEl" class="message-text text-wrap-safe" :style="clampStyle" v-html="safeText" />
   </article>
 </template>
 

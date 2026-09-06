@@ -164,7 +164,9 @@ async function onCopy(revision: number): Promise<void> {
         <div v-if="rev.conversationName" class="conversation-name text-wrap-safe">
           {{ rev.conversationName }}
         </div>
-        <div v-if="rev.note" class="note text-wrap-safe">{{ rev.note }}</div>
+        <div v-if="rev.note" class="note text-wrap-safe">
+          {{ rev.note }}
+        </div>
         <time :datetime="rev.createdAt">{{ formatLocal(rev.createdAt) }}</time>
         <div class="actions">
           <button type="button" class="restore-button" @click="openRestoreDialog(rev.revision)">

@@ -240,7 +240,7 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
   // for several focused panels side by side.
   class WideResizeObserverStub {
     constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(target: Element): void {
+    observe(_target: Element): void {
       this.callback(
         [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
         this as unknown as ResizeObserver,

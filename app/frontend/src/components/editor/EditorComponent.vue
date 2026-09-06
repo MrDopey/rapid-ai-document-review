@@ -266,7 +266,7 @@ defineExpose({
         </button>
       </div>
     </div>
-    <div ref="hostRef" class="editor-host"></div>
+    <div ref="hostRef" class="editor-host" />
   </div>
 </template>
 

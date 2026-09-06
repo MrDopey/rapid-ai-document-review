@@ -445,7 +445,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="document-canvas" tabindex="0" :ref="onCanvasRootRef" @scroll="onCanvasScroll">
+  <div :ref="onCanvasRootRef" class="document-canvas" tabindex="0" @scroll="onCanvasScroll">
     <div class="canvas-content">
       <!-- Slide transition (hide/show toggle only — see the `:deep(.editor-slide-*)` rules in
            <style> below): wrapping the `v-show`-toggled `EditorComponent` in a Vue `<Transition>`
@@ -483,7 +483,7 @@ defineExpose({
         tabindex="0"
         @pointerdown="onEditorHandlePointerDown($event)"
         @keydown="editorThreadResize.onKeydown($event)"
-      ></div>
+      />
       <div
         class="thread-columns"
         :style="{

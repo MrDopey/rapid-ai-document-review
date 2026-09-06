@@ -53,13 +53,15 @@ defineExpose({
     </div>
     <!-- A plain <div>'s implicit "generic" role does not support an author-supplied name — role="region"
          makes this a genuine labelled landmark so `aria-label` is actually exposed to assistive tech. -->
+    <!-- eslint-disable vue/no-v-html -- safeHtml is DOMPurify-sanitized, see render/sanitizer.ts -->
     <div
       ref="hostRef"
       class="preview-pane text-wrap-safe"
       role="region"
       aria-label="Rendered document preview"
       v-html="safeHtml"
-    ></div>
+    />
+    <!-- eslint-enable vue/no-v-html -->
   </div>
 </template>
 
