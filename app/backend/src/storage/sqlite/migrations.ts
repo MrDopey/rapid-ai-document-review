@@ -145,12 +145,76 @@ const STATEMENTS: string[] = [
   )`,
 ];
 
+// ---- Versioned incremental migrations (existing-database upgrade path) ----
+//
+// Every statement above is `CREATE TABLE/INDEX IF NOT EXISTS`, which is a no-op against a table
+// that already exists — so a column added to one of those `CREATE TABLE` bodies after a
+// self-hosted install first ran (e.g. `conversation.forked_from_message_id`,
+// `user_settings.soft_word_count_threshold`) would never actually reach that install's on-disk
+// schema, and the first query touching it fails with "no such column" at runtime. `STATEMENTS`
+// above stays the complete, current schema for a fresh install (a brand-new file already gets
+// every column via `CREATE TABLE`); the list below is the additive, backward-compatible path for
+// a database that predates one of these columns. Each entry only ever *adds* — no data loss risk.
+//
+// `PRAGMA user_version` gates re-checking a database that's already current (an `ALTER TABLE ADD
+// COLUMN` is fine to run twice in the sense that `addColumnIfMissing` guards it either way, but
+// there's no reason to run the `PRAGMA table_info` probe on every single startup once we know
+// we're caught up). To add a future schema change: append a new entry with the next version
+// number and an `apply` that does whatever `ALTER TABLE`s are needed — do not fold it back into
+// the `CREATE TABLE IF NOT EXISTS` bodies above as the only place it lives.
+interface Migration {
+  version: number;
+  apply: (db: DatabaseSync) => void;
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    apply: (db) => {
+      addColumnIfMissing(db, 'conversation', 'forked_from_message_id', 'TEXT');
+      addColumnIfMissing(
+        db,
+        'user_settings',
+        'soft_word_count_threshold',
+        `INTEGER NOT NULL DEFAULT ${DEFAULT_USER_SETTINGS.softWordCountThreshold}`,
+      );
+    },
+  },
+];
+
+/** Adds `table.column` with `definition` only if it isn't already there — safe to call whether
+ *  the column arrived via the fresh-install `CREATE TABLE` body or a prior run of this same
+ *  migration, so a migration's `apply` never has to know which case it's in. */
+function addColumnIfMissing(db: DatabaseSync, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function applyMigrations(db: DatabaseSync): void {
+  const { user_version: currentVersion } = db.prepare('PRAGMA user_version').get() as {
+    user_version: number;
+  };
+  let latestApplied = currentVersion;
+  for (const migration of MIGRATIONS) {
+    if (migration.version <= currentVersion) continue;
+    migration.apply(db);
+    latestApplied = Math.max(latestApplied, migration.version);
+  }
+  if (latestApplied !== currentVersion) {
+    // No parameter binding for PRAGMA in node:sqlite — `latestApplied` is our own integer, never
+    // user input.
+    db.exec(`PRAGMA user_version = ${latestApplied}`);
+  }
+}
+
 export function migrate(db: DatabaseSync): void {
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   for (const statement of STATEMENTS) {
     db.exec(statement);
   }
+  applyMigrations(db);
   const now = new Date().toISOString();
   db.prepare(
     `INSERT OR IGNORE INTO user_settings (id, updated_at) VALUES (1, ?)`,
