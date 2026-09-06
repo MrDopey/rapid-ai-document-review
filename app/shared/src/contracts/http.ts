@@ -50,6 +50,7 @@ export const ErrorCode = z.enum([
   'CONVERSATION_NOT_CLOSED',
   'CONVERSATION_NOT_EMPTY',
   'CANNOT_CLOSE_MAIN_CONVERSATION',
+  'DOCUMENT_OUT_OF_SYNC',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

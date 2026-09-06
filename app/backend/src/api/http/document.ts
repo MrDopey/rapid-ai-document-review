@@ -4,7 +4,12 @@ import {
   ExportDocumentQuery,
   PatchDocumentRequest,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import { DocumentAlreadyExistsError, DocumentNotFoundError, type DocumentService } from '../../document/document-service.ts';
+import {
+  DocumentAlreadyExistsError,
+  DocumentNotFoundError,
+  DocumentOutOfSyncError,
+  type DocumentService,
+} from '../../document/document-service.ts';
 import type { RevisionService } from '../../document/revision-service.ts';
 import { parseOrFail, sendError } from './errors.ts';
 
@@ -45,6 +50,9 @@ export function registerDocumentRoutes(
     } catch (err) {
       if (err instanceof DocumentNotFoundError) {
         return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', err.message);
+      }
+      if (err instanceof DocumentOutOfSyncError) {
+        return sendError(reply, 409, 'DOCUMENT_OUT_OF_SYNC', err.message, { currentRevision: err.currentRevision });
       }
       throw err;
     }
