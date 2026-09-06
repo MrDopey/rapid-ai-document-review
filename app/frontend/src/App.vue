@@ -29,6 +29,7 @@ import {
 import { attachScrollSync } from './composables/scrollSync.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { useFocusPanelState } from './composables/focusPanelState.js';
+import { isEditingContext } from './a11y/keymap-registry.js';
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
@@ -377,15 +378,9 @@ function onPreviewHandlePointerDown(event: PointerEvent): void {
 // live in the toolbar's "Global Actions" box (History, Show reasoning) or the "Primary" box
 // (dismiss notice). Same per-component `document`-level listener pattern as HudPanel.vue's own
 // `onGlobalKeydown` (mounted/removed alongside this component, since it's alive for the document's
-// whole lifetime), including the same `isEditingContext` guard against hijacking normal typing or
-// an open dialog's own keys.
-function isEditingContext(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement | null;
-  if (!target || typeof target.closest !== 'function') return false;
-  if (target.closest('[aria-modal="true"]')) return true;
-  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
-  return target.isContentEditable;
-}
+// whole lifetime), including the same shared `isEditingContext` guard (a11y/keymap-registry.ts,
+// imported above) against hijacking normal typing or an open dialog's own keys — both listeners
+// used to reimplement this same check independently; now both import the one definition.
 
 /** Ctrl+Alt+P/R/H/Y/1/2 — see the doc comment above for why these (and only these) live here
  *  rather than in HudPanel.vue or PrimaryPanel.vue. Y ("sync") was added alongside R/H's "Global

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useConversationsStore } from '../../stores/conversations.js';
 import { orderConversationsByAnchor } from '../canvas/conversationLayout.js';
 import { PRIMARY_EXPLANATION } from '../../composables/constants.js';
+import { isEditingContext } from '../../a11y/keymap-registry.js';
 import ConversationStatusBadges from '../conversation/ConversationStatusBadges.vue';
 
 // 005-canvas-conversation-threads: the "active"/"all" filter used to be purely local to this
@@ -69,14 +70,8 @@ const orderedConversations = computed(() => {
 // target is inside an open dialog (every dialog in this app — KeyboardShortcutsDialog,
 // DiffViewer, the close-confirmation and busy-switch dialogs below — is marked `aria-modal="true"`)
 // or is itself an editable control (an <input>/<textarea>/<select>, or CodeMirror's
-// `contenteditable` document-editor surface) — see `isEditingContext`.
-function isEditingContext(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement | null;
-  if (!target || typeof target.closest !== 'function') return false;
-  if (target.closest('[aria-modal="true"]')) return true;
-  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
-  return target.isContentEditable;
-}
+// `contenteditable` document-editor surface) — see the shared `isEditingContext` (a11y/
+// keymap-registry.ts), also used by App.vue's own `onGlobalKeydown` for the identical guard.
 
 /** Moves `activeId` to the conversation `offset` positions away from the current one within
  *  `orderedConversations` (wrapping around). Emits the distinct `cycle-focus` event (not

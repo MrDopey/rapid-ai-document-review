@@ -143,3 +143,22 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
     scope: 'Global',
   },
 ] as const;
+
+/**
+ * Shared "is the keyboard event's target an editable/interactive context that a global shortcut
+ * listener must not hijack" guard. Every global `document`-level `keydown` listener in the app
+ * (App.vue's `onGlobalKeydown`, HudPanel.vue's own conversation-list Alt+A/Ctrl+Alt+J/K hotkeys)
+ * used to reimplement this exact same check independently; both now import it from here instead.
+ * This module otherwise stays documentation-only (see the doc comment above) — this predicate is
+ * the one piece of actual shared runtime logic every such listener needs, not a shortcut-dispatch
+ * registry: bail out whenever focus is inside an open dialog (every dialog in this app is marked
+ * `aria-modal="true"`), a plain form control (`<input>`/`<textarea>`/`<select>`), or a
+ * `contenteditable` surface (CodeMirror's document-editor).
+ */
+export function isEditingContext(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (!target || typeof target.closest !== 'function') return false;
+  if (target.closest('[aria-modal="true"]')) return true;
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
+  return target.isContentEditable;
+}
