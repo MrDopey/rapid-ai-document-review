@@ -318,13 +318,15 @@ export const useConversationsStore = defineStore('conversations', {
       // Bug fix (event-sequence gap detection): every persisted event carries a non-null,
       // per-document, monotonically increasing `sequence` (ephemeral `text_delta`/`thinking_delta`/
       // `tool_output_delta` frames carry `sequence: null` and are exempt — they're broadcast live
-      // only, never persisted/replayed, so there's no ordering guarantee to check). A jump of more
-      // than 1 past the last one seen here means at least one persisted event was never received
-      // (a dropped/lost message, or a WS ordering bug) — rather than silently keep applying this
-      // (and any subsequent) event against context this store may now be missing, discard it and
-      // pull a fully consistent resync instead.
+      // only, never persisted/replayed, so there's no ordering guarantee to check). Any mismatch
+      // from exactly one past the last one seen here — a forward jump (at least one persisted event
+      // was never received: a dropped/lost message, or a WS ordering bug) or a duplicate/backward
+      // sequence — means this store's context may now be inconsistent, so rather than silently keep
+      // applying this (and any subsequent) event, discard it and pull a fully consistent resync
+      // instead. Matches `document.ts`'s stricter `!==` check on the same shared per-document
+      // sequence counter.
       if (event.sequence !== null) {
-        if (this.lastEventSequence !== null && event.sequence > this.lastEventSequence + 1) {
+        if (this.lastEventSequence !== null && event.sequence !== this.lastEventSequence + 1) {
           this.lastEventSequence = event.sequence;
           void this.resyncAfterGap();
           return;
