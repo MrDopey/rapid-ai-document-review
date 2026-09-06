@@ -64,26 +64,19 @@
      getting lighter in dark mode. Reusing one token for both would break one of the two. */
   --reconnect-bg: #92400e;
   --reconnect-text: #ffffff;
-  /* De-dup fix: the "is Primary" visual indicator (left accent bar + subtle background tint) was
-     hand-duplicated as an identical `box-shadow` value in `ConversationView.vue`,
-     `ConversationThreadBox.vue`, and `HudPanel.vue`'s own `<style scoped>` blocks. Centralized here
-     as a single custom property so all three (plus any future consumer) reference the one
-     definition — `.primary-indicator` below is the plain drop-in for a consumer with no other
-     `box-shadow` of its own; `ConversationThreadBox.vue` composes this value alongside its own
-     drop-shadow directly, since `box-shadow` values don't merge across separate rules. */
+  /* The "is Primary" visual indicator (left accent bar + subtle background tint), shared by
+     `ConversationView.vue`, `ConversationThreadBox.vue`, and `HudPanel.vue`. `.primary-indicator`
+     below is the plain drop-in for a consumer with no other `box-shadow` of its own;
+     `ConversationThreadBox.vue` composes this value alongside its own drop-shadow directly, since
+     `box-shadow` values don't merge across separate rules. */
   --primary-indicator-shadow: inset 3px 0 0 0 var(--accent-color, #2563eb),
     inset 0 0 0 999px var(--user-bubble-bg, rgba(37, 99, 235, 0.08));
   /* This app now has a real dark palette (see the `prefers-color-scheme: dark` block below), so
      both schemes are genuinely supported — the browser should render native form
      controls/scrollbars to match whichever one is active. */
   color-scheme: light dark;
-  /* Cross-component z-index scale. Previously this was an unenforced, prose-only convention (see
-     the `.modal-overlay` comment below) — which is exactly how HistoryPanel.vue's `.diff-overlay`
-     shipped with NO z-index at all: left at the resulting `auto`, it lost to
-     EditorComponent.vue's sticky `.editor-toolbar` (which explicitly sets a z-index and so
-     establishes a stacking context), painting the sticky editor header on top of the modal
-     instead of behind it. Every component-level z-index in this app should reference one of
-     these tokens instead of a bare number, lowest to highest:
+  /* Cross-component z-index scale — every component-level z-index in this app must reference one
+     of these tokens instead of a bare number, lowest to highest:
        --z-raised          generic "just above this element's own unstyled (auto) siblings" bump
                             for content that already lives in its own isolated stacking context
                             (e.g. inside a `position: absolute`/`fixed` ancestor), so it can never
@@ -92,10 +85,11 @@
                             `.close-detail-button` and ConversationThreadBox.vue's sticky
                             `.thread-header`.
        --z-sticky          sticky pane headers, e.g. EditorComponent.vue's `.editor-toolbar`.
-       --z-overlay         (currently unused) reserved for a future simple overlay that is known to
-                            NEVER coexist with `--z-overlay-detail`/`--z-overlay-primary` while it's
-                            open. Do NOT put anything here just because it "looks like a simple
-                            modal" — see the bug this caused, below.
+       --z-overlay         For an overlay guaranteed to NEVER coexist with `--z-overlay-detail`/
+                            `--z-overlay-primary` while it's open (currently unused). Do NOT put
+                            anything here just because it "looks like a simple modal" — if it can
+                            ever be opened from inside an already-focused conversation panel, it
+                            needs `--z-overlay-blocking` instead (see below).
        --z-overlay-detail  App.vue's `.conversation-detail-overlay` (the focused-conversation
                             panel), above `--z-overlay`.
        --z-overlay-primary Alert-style confirmation dialogs that are meant to nest ABOVE a focused
@@ -107,19 +101,15 @@
                             relationship to any other overlay and must therefore render above
                             EVERY other tier below `--z-indicator`, no exceptions: App.vue's
                             `.shortcuts-overlay`/`.help-overlay`, HistoryPanel.vue's
-                            `.diff-overlay`, EditsList.vue's `.preview-overlay`. Bug this tier
-                            fixes: these previously used the same `--z-overlay` token as the rest
-                            of this list on the (false) assumption that a "simple, non-nesting"
-                            overlay never has to coexist with `--z-overlay-detail` — but any of
-                            them can be opened from inside an already-focused conversation panel
-                            (History → Diff, or Preview from that panel's own Edits list), and
-                            `--z-overlay` (50) sits BELOW `--z-overlay-detail` (55). That rendered
-                            the dialog sliced in half underneath the focused panel with its Close
-                            button genuinely unclickable. The fix is the invariant this tier name
-                            encodes: a "blocking", independent, page-level modal must never share a
-                            token with anything that has its own idea of a stacking order relative
-                            to `--z-overlay-detail` — always reach for `--z-overlay-blocking`
-                            instead of `--z-overlay` for this class of overlay.
+                            `.diff-overlay`, EditsList.vue's `.preview-overlay`. This tier exists
+                            because any of these can be opened from inside an already-focused
+                            conversation panel (History → Diff, or Preview from that panel's own
+                            Edits list), so a "simple, non-nesting" overlay must NOT assume it never
+                            has to coexist with `--z-overlay-detail` — a "blocking", independent,
+                            page-level modal must never share a token with anything that has its
+                            own idea of a stacking order relative to `--z-overlay-detail`; always
+                            reach for `--z-overlay-blocking` instead of `--z-overlay` for this class
+                            of overlay.
        --z-indicator       always-on-top status badges (ReconnectingIndicator.vue), above every
                             other layer in the app. */
   --z-raised: 1;
@@ -249,15 +239,13 @@ body {
   justify-content: center;
 }
 
-/* Shared dialog chrome — the `border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);` (plus
-   background/color) was previously hand-duplicated verbatim across HelpDialog.vue,
+/* Shared dialog chrome — `background`/`color`/`border-radius`/`box-shadow`, used by HelpDialog.vue,
    KeyboardShortcutsDialog.vue, RevisionDiffViewer.vue, ConversationDetailPanel.vue,
-   ConversationView.vue's `.close-dialog`, and PrimaryPanel.vue's `.primary-busy-dialog`. Hoisted
-   here (same pattern as `.pane-eyebrow`/`.diff-header` above); each of those keeps only what's
-   actually unique to it (width/max-width/max-height/padding/overflow/position, etc.) in its own
-   `<style scoped>` block. EditsList.vue's `.preview-overlay` is the one exception: its dialog is
-   DiffViewer.vue's own root element, reached only via a `:deep()` override from outside (see that
-   file), so it isn't a candidate for this class the same way the others are. */
+   ConversationView.vue's `.close-dialog`, and PrimaryPanel.vue's `.primary-busy-dialog`; each of
+   those keeps only what's actually unique to it (width/max-width/max-height/padding/overflow/
+   position, etc.) in its own `<style scoped>` block. EditsList.vue's `.preview-overlay` is the one
+   exception: its dialog is DiffViewer.vue's own root element, reached only via a `:deep()` override
+   from outside (see that file), so it isn't a candidate for this class the same way the others are. */
 .dialog-box {
   background: var(--bg-color, #fff);
   color: var(--text-color, #111);
@@ -318,7 +306,7 @@ body {
 
 /* Shared dismiss button for a small, one-time inline notice/tip banner — used by
    `ConversationView.vue`'s "Tip: highlight text..." composer hint and `PrimaryPanel.vue`'s Primary
-   notice, both previously duplicating this identical 3-property rule in their own scoped styles. */
+   notice. */
 .dismiss-notice-button {
   flex: 0 0 auto;
   font-size: 0.7rem;
@@ -327,9 +315,8 @@ body {
 
 /* Shared read-only "borrowed from parent" branch-continuity card (see `useConversationContinuity`)
    — used by `ConversationView.vue`'s focus/detail view and `ConversationThreadBox.vue`'s sidebar
-   box, both previously duplicating this identical card verbatim. `margin-bottom` is the one place
-   the two differed (0.4rem vs 0.5rem) — `ConversationView.vue` layers its own small override for
-   that; see its own `<style scoped>`. */
+   box. `margin-bottom` differs between the two (0.4rem vs 0.5rem) — `ConversationView.vue` layers
+   its own small override for that; see its own `<style scoped>`. */
 .continuity-context {
   display: flex;
   flex-direction: column;
@@ -351,9 +338,8 @@ body {
 
 /* Shared click-to-edit conversation-title rename affordance (see
    `composables/conversationRename.ts`) — used by `ConversationView.vue` and
-   `ConversationThreadBox.vue`, both previously duplicating this markup/CSS verbatim.
-   `.thread-rename-button`/`.rename-error` are byte-for-byte identical between the two hosts, so
-   they move here wholesale; `.thread-title-input` only shares its shape (flex/border/padding) — its
+   `ConversationThreadBox.vue`. `.thread-rename-button`/`.rename-error` are identical between the
+   two hosts; `.thread-title-input` only shares its shape (flex/border/padding) — its
    font-size/weight/background differ per host (matching each one's own title styling: an `h2` vs a
    compact card title), so each host layers a small override with just those three properties in its
    own `<style scoped>` block. */
@@ -437,10 +423,9 @@ body {
 
 /* Shared diff-viewer chrome — DiffViewer.vue and RevisionDiffViewer.vue both render a sticky
    header (view tabs + a "Focus on changes" toggle + Close), collapsed-unchanged-hunk marker
-   buttons, and a two-column side-by-side layout, and previously duplicated all of this verbatim
-   in their own `<style scoped>` blocks. Hoisted here (same pattern as `.pane-eyebrow`/
-   `.text-wrap-safe-pre` above) to de-duplicate; each component keeps only what's actually unique
-   to it (e.g. `.revision-diff-viewer`'s modal chrome, `.hunk`/`.hunk-context`). */
+   buttons, and a two-column side-by-side layout. Each component keeps only what's actually unique
+   to it (e.g. `.revision-diff-viewer`'s modal chrome, `.hunk`/`.hunk-context`) in its own
+   `<style scoped>` block. */
 .diff-header {
   display: flex;
   justify-content: space-between;
