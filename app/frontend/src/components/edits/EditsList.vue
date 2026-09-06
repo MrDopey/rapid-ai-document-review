@@ -112,9 +112,11 @@ function closePreview(): void {
          App.vue uses for `.conversation-detail-overlay`) only fires when the click originates on
          this exact element, so a click on the DiffViewer content never triggers it. The explicit
          "Close" button and Escape (via `useFocusTrap`'s `onEscape`) stay untouched alongside this. -->
-    <div v-if="previewingEditId" class="modal-overlay preview-overlay" @click.self="closePreview">
-      <DiffViewer :edit-id="previewingEditId" @close="closePreview" />
-    </div>
+    <Transition name="modal">
+      <div v-if="previewingEditId" class="modal-overlay preview-overlay" @click.self="closePreview">
+        <DiffViewer :edit-id="previewingEditId" @close="closePreview" />
+      </div>
+    </Transition>
   </section>
 </template>
 
@@ -219,8 +221,13 @@ function closePreview(): void {
 .status-badge[data-status='superseded'] {
   color: var(--neutral-muted-color, #4b5563);
 }
+/* Fix (unclickable-Close-button bug): this is an independent, page-level "simple" modal that can
+   be opened from inside a focused conversation panel (`--z-overlay-detail`) — it previously used
+   `--z-overlay`, which sits BELOW that tier, so it rendered sliced in half underneath the focused
+   panel with its Close button genuinely unclickable. `--z-overlay-blocking` (style.css `:root`) is
+   the tier reserved for exactly this "must always render above everything else" case. */
 .preview-overlay {
-  z-index: var(--z-overlay, 50);
+  z-index: var(--z-overlay-blocking, 70);
 }
 .preview-overlay :deep(.diff-viewer) {
   background: var(--bg-color, #fff);
@@ -228,5 +235,26 @@ function closePreview(): void {
   max-width: 90vw;
   max-height: 85vh;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+/* Companion to style.css's shared `.modal-enter-active`/`.modal-enter-from` etc: those already
+   fade this whole overlay (backdrop + the DiffViewer dialog nested inside it, since CSS opacity on
+   an ancestor visually fades its entire subtree). This adds the same slight scale/translate the
+   shared `.dialog-box` class gets elsewhere, targeting DiffViewer.vue's own root via `:deep()`
+   since — unlike RevisionDiffViewer.vue/HelpDialog.vue/etc — that root isn't given the shared
+   `.dialog-box` class itself (its chrome is applied from outside, above, since DiffViewer.vue is a
+   separate component boundary). */
+.modal-enter-active :deep(.diff-viewer),
+.modal-leave-active :deep(.diff-viewer) {
+  transition: transform 180ms ease;
+}
+.modal-enter-from :deep(.diff-viewer),
+.modal-leave-to :deep(.diff-viewer) {
+  transform: scale(0.96) translateY(8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-enter-active :deep(.diff-viewer),
+  .modal-leave-active :deep(.diff-viewer) {
+    transition: none !important;
+  }
 }
 </style>

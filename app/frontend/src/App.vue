@@ -766,12 +766,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
       </div>
     </header>
 
-    <div v-if="shortcutsOpen" class="modal-overlay shortcuts-overlay">
-      <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
-    </div>
-    <div v-if="helpOpen" class="modal-overlay help-overlay">
-      <HelpDialog @close="helpOpen = false" />
-    </div>
+    <Transition name="modal">
+      <div v-if="shortcutsOpen" class="modal-overlay shortcuts-overlay">
+        <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
+      </div>
+    </Transition>
+    <Transition name="modal">
+      <div v-if="helpOpen" class="modal-overlay help-overlay">
+        <HelpDialog @close="helpOpen = false" />
+      </div>
+    </Transition>
     <div ref="panesEl" class="panes" :style="panesStyle">
       <PreviewComponent
         v-show="previewVisible"
@@ -1058,11 +1062,17 @@ async function onToggleReasoning(event: Event): Promise<void> {
   border-radius: 4px;
   font-size: 0.8rem;
 }
+/* Fix (unclickable-Close-button bug): these are independent, page-level "simple" modals with no
+   nesting relationship to `.conversation-detail-overlay` below — but a user can open either one
+   while a conversation is focused (`--z-overlay-detail`), and `--z-overlay` sits BELOW that tier.
+   That rendered this dialog sliced in half underneath the focused panel, Close button included.
+   `--z-overlay-blocking` (style.css `:root`) is the tier reserved for exactly this "must always
+   render above everything else" case. */
 .shortcuts-overlay {
-  z-index: var(--z-overlay, 50);
+  z-index: var(--z-overlay-blocking, 70);
 }
 .help-overlay {
-  z-index: var(--z-overlay, 50);
+  z-index: var(--z-overlay-blocking, 70);
 }
 .panes {
   position: relative;

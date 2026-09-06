@@ -154,13 +154,15 @@ async function onCopy(revision: number): Promise<void> {
     <button v-if="store.revisionsNextCursor" type="button" @click="store.loadRevisions()">
       Load more
     </button>
-    <div v-if="diffingRevision !== null" class="modal-overlay diff-overlay">
-      <RevisionDiffViewer
-        :revision="diffingRevision"
-        :previous-revision="diffingRevision - 1"
-        @close="diffingRevision = null"
-      />
-    </div>
+    <Transition name="modal">
+      <div v-if="diffingRevision !== null" class="modal-overlay diff-overlay">
+        <RevisionDiffViewer
+          :revision="diffingRevision"
+          :previous-revision="diffingRevision - 1"
+          @close="diffingRevision = null"
+        />
+      </div>
+    </Transition>
     <div v-if="restoreDialogOpen" class="modal-overlay restore-dialog-overlay">
       <div ref="restoreDialogEl" class="restore-dialog" role="alertdialog" aria-modal="true" aria-label="Restore revision">
         <p>Restore to revision {{ restoreTarget }}? This will overwrite the current document content.</p>
@@ -279,12 +281,16 @@ async function onCopy(revision: number): Promise<void> {
    stacking context — where EditorComponent.vue's `position: sticky` `.editor-toolbar`
    (`--z-sticky`) DOES establish one and paints above any unstyled (auto) content in that same
    root context, regardless of DOM order. That let the sticky editor header render on top of this
-   modal instead of behind it. Using `--z-overlay` — the same token as the other simple,
-   non-nesting modal overlays (App.vue's `.shortcuts-overlay`/`.help-overlay`, EditsList.vue's
-   `.preview-overlay`) — puts it well above `--z-sticky`, and below `--z-overlay-detail`/
-   `--z-overlay-primary`/`--z-indicator` per the scale defined on style.css's `:root`. */
+   modal instead of behind it.
+   Second fix (unclickable-Close-button bug): this is an independent, page-level "simple" modal
+   that can be opened while a conversation is focused (`--z-overlay-detail`) — it previously used
+   `--z-overlay` (the same token as App.vue's `.shortcuts-overlay`/`.help-overlay`/EditsList.vue's
+   `.preview-overlay`), which sits BELOW `--z-overlay-detail`, so it rendered sliced in half
+   underneath the focused panel with its Close button genuinely unclickable. `--z-overlay-blocking`
+   (style.css `:root`) is the tier reserved for exactly this "must always render above everything
+   else" case. */
 .diff-overlay {
-  z-index: var(--z-overlay, 50);
+  z-index: var(--z-overlay-blocking, 70);
 }
 /* Same alertdialog/focus-trap pattern and z-index tier as ConversationView.vue's
    .close-dialog-overlay/.close-dialog/.close-dialog-actions — above the simple, non-nesting
