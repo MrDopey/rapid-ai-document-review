@@ -8,7 +8,7 @@ import type {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
-import type { ServerFrame } from '../transport/ws-client.js';
+import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 import {
   announceAgentError,
   announceAgentStarted,
@@ -564,6 +564,14 @@ export const useConversationsStore = defineStore('conversations', {
       const index = this.conversations.findIndex((c) => c.id === dto.id);
       if (index === -1) this.conversations.push(dto);
       else this.conversations[index] = dto;
+    },
+
+    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
+    // this method rather than hand-listing `conversationsStore.handleServerFrame` alongside every
+    // other store's own call — see the sibling `subscribeToFrames` methods on the other stores
+    // App.vue fans frames out to.
+    subscribeToFrames(wsClient: WsClient): () => void {
+      return wsClient.onFrame((frame) => this.handleServerFrame(frame));
     },
   },
 });

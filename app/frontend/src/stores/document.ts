@@ -3,7 +3,7 @@ import type { DocumentDto } from '@rapid-ai-document-review/shared/contracts/htt
 import type { RevisionDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RestoreRevisionResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient, ApiError } from '../transport/http-client.js';
-import type { ServerFrame } from '../transport/ws-client.js';
+import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 
 async function sha256Hex(text: string): Promise<string> {
   const bytes = new TextEncoder().encode(text);
@@ -211,6 +211,17 @@ export const useDocumentStore = defineStore('document', {
         default:
           break;
       }
+    },
+
+    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
+    // this method rather than hand-listing `store.handleServerFrame` alongside every other store's
+    // own call — see `WsClient.onFrame`'s doc comment and the sibling `subscribeToFrames` methods
+    // on the other stores App.vue fans frames out to. `handleServerFrame` above is async; this
+    // fires it off without awaiting, matching the pre-fix call site's own `void store.handleServerFrame(frame)`.
+    subscribeToFrames(wsClient: WsClient): () => void {
+      return wsClient.onFrame((frame) => {
+        void this.handleServerFrame(frame);
+      });
     },
   },
 });

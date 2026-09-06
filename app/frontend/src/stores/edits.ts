@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import type { StagedEditDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../transport/http-client.js';
-import type { ServerFrame } from '../transport/ws-client.js';
+import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 import { announceStagedEditCreated } from '../a11y/live-regions.js';
 import { useConversationsStore } from './conversations.js';
 import { ensureArray } from './util.js';
@@ -98,6 +98,14 @@ export const useEditsStore = defineStore('edits', {
         default:
           break;
       }
+    },
+
+    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
+    // this method rather than hand-listing `editsStore.handleServerFrame` alongside every other
+    // store's own call — see the sibling `subscribeToFrames` methods on the other stores App.vue
+    // fans frames out to.
+    subscribeToFrames(wsClient: WsClient): () => void {
+      return wsClient.onFrame((frame) => this.handleServerFrame(frame));
     },
   },
 });

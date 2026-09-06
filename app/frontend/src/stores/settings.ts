@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import type { UserSettingsDto, UserSettingsPatch } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../transport/http-client.js';
-import type { ServerFrame } from '../transport/ws-client.js';
+import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 
 export interface SettingsState {
   settings: UserSettingsDto | null;
@@ -48,6 +48,14 @@ export const useSettingsStore = defineStore('settings', {
           softWordCountThreshold: this.settings?.softWordCountThreshold ?? DEFAULTS.softWordCountThreshold,
         };
       }
+    },
+
+    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
+    // this method rather than hand-listing `settingsStore.handleServerFrame` alongside every other
+    // store's own call — see the sibling `subscribeToFrames` methods on the other stores App.vue
+    // fans frames out to.
+    subscribeToFrames(wsClient: WsClient): () => void {
+      return wsClient.onFrame((frame) => this.handleServerFrame(frame));
     },
   },
 });

@@ -533,12 +533,14 @@ onBeforeUnmount(() => {
 function connectWs(): void {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const client = new WsClient(`${protocol}//${location.host}/events`, () => store.eventSequence);
-  client.onFrame((frame) => {
-    void store.handleServerFrame(frame);
-    conversationsStore.handleServerFrame(frame);
-    settingsStore.handleServerFrame(frame);
-    editsStore.handleServerFrame(frame);
-  });
+  // Fix (WS-fanout): each store owns its own `subscribeToFrames` wiring (see the `subscribeToFrames`
+  // method on stores/document.ts, conversations.ts, settings.ts and edits.ts) — this loop is the
+  // single place a 5th store's frame handling would need to be registered, rather than a
+  // hand-listed `someStore.handleServerFrame(frame)` call per store inside `client.onFrame`, where
+  // nothing enforced that adding a new store here meant remembering to add its own line too.
+  for (const frameSubscriber of [store, conversationsStore, settingsStore, editsStore]) {
+    frameSubscriber.subscribeToFrames(client);
+  }
   client.connect();
   wsClient.value = client;
 }
