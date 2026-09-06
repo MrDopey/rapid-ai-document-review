@@ -308,7 +308,7 @@ defineExpose({
      already prevents content from showing through underneath. --z-sticky only needs to beat this
      same stacking context's own unstyled (z-index: auto) content scrolling beneath it — it's far
      below every app-level overlay's z-index (style.css's --z-overlay/--z-overlay-detail/
-     --z-overlay-primary/--z-indicator scale, used by App.vue's .shortcuts-overlay/.help-overlay/
+     --z-overlay-primary/--z-indicator scale, used by App.vue's .blocking-overlay/
      .conversation-detail-overlay, HistoryPanel.vue's .diff-overlay, EditsList.vue's
      .preview-overlay, PrimaryPanel.vue's/ConversationView.vue's confirmation dialogs, and
      ReconnectingIndicator.vue), so it can never sit on top of any of those. */

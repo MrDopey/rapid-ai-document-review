@@ -61,6 +61,24 @@ function expectZIndexToken(raw: string, expectedToken: string, expectedValue: nu
   }
 }
 
+/** Parses a computed `zIndex` string (see `expectZIndexToken`'s own doc comment on jsdom's
+ *  unresolved-`var()` quirk) and asserts its resolved value is strictly greater than every tier
+ *  name in `tiersToBeat` — the invariant that actually matters for a "must render above X" overlay
+ *  (must outrank --z-overlay-detail/--z-overlay-primary), without pinning the test to one specific
+ *  token name/value the way `expectZIndexToken` does. */
+function expectZIndexAbove(raw: string, tokens: Record<string, number>, tiersToBeat: string[]): void {
+  expect(raw).not.toBe('auto');
+  expect(raw).not.toBe('');
+  expect(raw).not.toBe('0');
+  const varMatch = raw.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*(-?\d+)\s*)?\)$/);
+  const resolved = varMatch
+    ? (varMatch[2] !== undefined ? Number(varMatch[2]) : tokens[varMatch[1]])
+    : Number(raw);
+  for (const tier of tiersToBeat) {
+    expect(resolved).toBeGreaterThan(tokens[tier]);
+  }
+}
+
 describe('z-index scale — style.css :root tokens', () => {
   const tokens = readZTokens();
 
@@ -87,6 +105,7 @@ vi.mock('../../src/transport/http-client.js', () => ({
     listConversations: vi.fn(),
     getSettings: vi.fn(),
     patchSettings: vi.fn(),
+    getSystemPrompt: vi.fn(),
     getConversation: vi.fn(),
     listEdits: vi.fn(),
     previewEdit: vi.fn(),
@@ -458,6 +477,7 @@ describe('z-index scale — App.vue overlays', () => {
     ConversationDetailPanel: true,
     KeyboardShortcutsDialog: true,
     HelpDialog: true,
+    SystemPromptDialog: true,
   };
 
   async function mountApp(): Promise<VueWrapper> {
@@ -484,22 +504,40 @@ describe('z-index scale — App.vue overlays', () => {
     vi.unstubAllGlobals();
   });
 
-  it('.shortcuts-overlay uses --z-overlay-blocking once open', async () => {
+  it('.blocking-overlay outranks --z-overlay-detail/--z-overlay-primary once the shortcuts dialog is open', async () => {
     const wrapper = await mountApp();
     await wrapper.get('[aria-label="Keyboard shortcuts"]').trigger('click');
     await flushPromises();
-    const overlay = wrapper.find('.shortcuts-overlay');
+    const overlay = wrapper.find('.blocking-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+    ]);
   });
 
-  it('.help-overlay uses --z-overlay-blocking once open', async () => {
+  it('.blocking-overlay outranks --z-overlay-detail/--z-overlay-primary once the help dialog is open', async () => {
     const wrapper = await mountApp();
     await wrapper.get('[aria-label="Help"]').trigger('click');
     await flushPromises();
-    const overlay = wrapper.find('.help-overlay');
+    const overlay = wrapper.find('.blocking-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+    ]);
+  });
+
+  it('.blocking-overlay outranks --z-overlay-detail/--z-overlay-primary once the system prompt dialog is open', async () => {
+    const wrapper = await mountApp();
+    await wrapper.get('[aria-label="System prompt"]').trigger('click');
+    await flushPromises();
+    const overlay = wrapper.find('.blocking-overlay');
+    expect(overlay.exists()).toBe(true);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+    ]);
   });
 
   it('.conversation-detail-overlay uses --z-overlay-detail once a conversation is focused', async () => {

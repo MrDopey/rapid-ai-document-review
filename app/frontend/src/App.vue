@@ -896,17 +896,17 @@ async function onToggleReasoning(event: Event): Promise<void> {
     </header>
 
     <Transition name="modal">
-      <div v-if="shortcutsOpen" class="modal-overlay shortcuts-overlay">
+      <div v-if="shortcutsOpen" class="modal-overlay blocking-overlay">
         <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
       </div>
     </Transition>
     <Transition name="modal">
-      <div v-if="helpOpen" class="modal-overlay help-overlay">
+      <div v-if="helpOpen" class="modal-overlay blocking-overlay">
         <HelpDialog @close="helpOpen = false" />
       </div>
     </Transition>
     <Transition name="modal">
-      <div v-if="systemPromptOpen" class="modal-overlay system-prompt-overlay">
+      <div v-if="systemPromptOpen" class="modal-overlay blocking-overlay">
         <SystemPromptDialog @close="systemPromptOpen = false" />
       </div>
     </Transition>
@@ -1157,10 +1157,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
    focused (`--z-overlay-detail`), so they must render above that tier — hence
    `--z-overlay-blocking` (style.css `:root`), the tier reserved for exactly this "must always
    render above everything else" case. */
-.shortcuts-overlay {
-  z-index: var(--z-overlay-blocking, 70);
-}
-.help-overlay {
+.blocking-overlay {
   z-index: var(--z-overlay-blocking, 70);
 }
 .panes {
