@@ -20,37 +20,36 @@ import ConversationActionButtons from './ConversationActionButtons.vue';
 import MessageBubble from './MessageBubble.vue';
 import EditsList from '../edits/EditsList.vue';
 
-// `atFocusCap`/`maxFocused` (005-canvas-conversation-threads, branch-cap parity): App.vue's own
-// live cap state, threaded down through `ConversationDetailPanel.vue` — same precomputed-boolean +
-// max-number shape as `ConversationThreadBox.vue`'s own `focusDisabled`/`maxFocused` props, since
-// this view (unlike `ConversationThreadBox.vue`, which sits directly under `DocumentCanvas.vue`)
-// has no direct access to the raw `focusedConversationIds` set itself. Defaults keep a bare
+// `atFocusCap`/`maxFocused`: App.vue's own live cap state, threaded down through
+// `ConversationDetailPanel.vue` — same precomputed-boolean + max-number shape as
+// `ConversationThreadBox.vue`'s own `focusDisabled`/`maxFocused` props, since this view (unlike
+// `ConversationThreadBox.vue`, which sits directly under `DocumentCanvas.vue`) has no direct
+// access to the raw `focusedConversationIds` set itself. Defaults keep a bare
 // `mount(ConversationView, { props: { conversationId } })` (existing tests) behaving as "never at
-// cap", exactly as before this change.
+// cap".
 const props = withDefaults(
   defineProps<{ conversationId: string; atFocusCap?: boolean; maxFocused?: number }>(),
   { atFocusCap: false, maxFocused: 3 },
 );
 const emit = defineEmits<{
   (e: 'select', id: string): void;
-  // Parity fix (auto-focus on branch): fired (via `useConversationBranchAction`'s `onBranchCreated`
-  // callback) once a new branch is successfully created, carrying its id up to App.vue (via
-  // `ConversationDetailPanel.vue`), which decides whether to auto-focus it (only if there's a free
-  // slot under the live focus cap). Deliberately a distinct event from `select`
-  // above: `select` drives `replaceFocus` (swap *this* panel's own content for the new
-  // conversation, e.g. FR-036's "Request review" navigation), whereas branching should *add* a
-  // second panel alongside this one still open, never replace it.
+  // Fired (via `useConversationBranchAction`'s `onBranchCreated` callback) once a new branch is
+  // successfully created, carrying its id up to App.vue (via `ConversationDetailPanel.vue`), which
+  // decides whether to auto-focus it (only if there's a free slot under the live focus cap).
+  // Deliberately a distinct event from `select` above: `select` drives `replaceFocus` (swap *this*
+  // panel's own content for the new conversation, e.g. FR-036's "Request review" navigation),
+  // whereas branching should *add* a second panel alongside this one still open, never replace it.
   (e: 'branch-created', id: string): void;
 }>();
 const store = useConversationsStore();
 const editsStore = useEditsStore();
 
-// 005-canvas-conversation-threads follow-up: mirrored into `store.drafts` on every change (rather
-// than kept purely local) so `store.discardIfEmpty` can still see unsent draft text at the moment
-// this conversation's focus panel closes and this component is about to unmount — the draft always
-// wins over that cleanup. Initialized from any draft the store already has for this conversation
-// (e.g. left over from a previous time this same conversation's panel was open and closed without
-// being discarded), so unsent text survives a close/reopen instead of silently vanishing.
+// Mirrored into `store.drafts` on every change (rather than kept purely local) so
+// `store.discardIfEmpty` can still see unsent draft text at the moment this conversation's focus
+// panel closes and this component is about to unmount — the draft always wins over that cleanup.
+// Initialized from any draft the store already has for this conversation (e.g. left over from a
+// previous time this same conversation's panel was open and closed without being discarded), so
+// unsent text survives a close/reopen instead of silently vanishing.
 const draft = ref(store.drafts[props.conversationId] ?? '');
 watch(draft, (value) => store.setDraft(props.conversationId, value));
 watch(
@@ -89,58 +88,43 @@ function dismissDirectEditHint(): void {
 
 const messages = computed(() => store.messagesFor(props.conversationId));
 const conversation = computed(() => store.conversations.find((c) => c.id === props.conversationId) ?? null);
-// De-dup fix: `isPrimary` now computed once by `conversationStatusBadges.ts`, shared with
-// `ConversationThreadBox.vue`/`HudPanel.vue` — see that composable's own doc comment.
 const { isPrimary } = useConversationStatusBadges(() => props.conversationId);
 
-// Rename affordance (parity fix): the sidebar's `ConversationThreadBox.vue` offers a click-to-edit
-// title (an inline `<input>` replacing the plain-text title, save on Enter/blur, cancel on
-// Escape — see that component's own doc comment for the "one action per slot"/no-confirmation-
-// dialog rationale) that this focused/detail view had no equivalent of. Shared with that component
-// via `useConversationRename` (same store action, `store.rename`, so renaming from either view
-// updates both — they share the same Pinia store).
+// Rename affordance: click-to-edit title (an inline `<input>` replacing the plain-text title, save
+// on Enter/blur, cancel on Escape — see `ConversationThreadBox.vue`'s own doc comment for the "one
+// action per slot"/no-confirmation-dialog rationale). Shared with that component via
+// `useConversationRename` (same store action, `store.rename`, so renaming from either view updates
+// both — they share the same Pinia store).
 const nameInputEl = ref<HTMLInputElement | null>(null);
 const { isEditingName, nameDraft, renameError, renameSaving, startEditingName, cancelEditingName, saveName } =
   useConversationRename(() => props.conversationId, nameInputEl);
 
-// Bug fix (005-canvas-conversation-threads follow-up): the sidebar's compact
-// `ConversationThreadBox.vue` renders the parent's last user+assistant message as read-only
-// "continuity context" for a freshly-created, zero-message branch (see
-// `useConversationContinuity`'s doc comment for the full rationale) — this focused/detail view had
-// no equivalent, so that same continuity context silently vanished once a branch's detail panel
-// was opened, even though it kept showing correctly in the sidebar box for the exact same
-// conversation. Shares the exact same computed logic via the composable rather than duplicating it.
+// Shares the exact same computed logic as `ConversationThreadBox.vue`'s continuity-context
+// rendering, via the composable, rather than duplicating it — see `useConversationContinuity`'s
+// doc comment for the full rationale.
 const { parentConversation, continuityMessages } = useConversationContinuity(() => props.conversationId);
 
-// Bug fix (005-canvas-conversation-threads follow-up): this full/"focused" transcript view used to
-// render `MessageBubble` with neither `:expanded` nor an `@update:expanded` listener, relying on
-// `MessageBubble.vue`'s `expanded` prop default of `true`. That default only meant "never clamped",
-// it did not mean "the toggle is inert here" — `MessageBubble`'s toggle button is shown whenever the
-// message's real content overflows the clamp height, regardless of `expanded`'s value, so a long
-// message here still grew a "Show less" button. Clicking it emitted `update:expanded` straight into
-// the void (nothing listened), so the button looked broken. This view now owns its own per-message
-// expand state, the same way `ConversationThreadBox.vue` already does (data-model.md's
-// `MessageDisplayState` is keyed by `messageId` alone, so both call sites share one persisted
-// default via `messageDisplayState.ts` without colliding, even with several focused panels for
-// different conversations open at once).
-// Bug fix (assistant messages expanded by default): same role-aware default as
+// This view owns its own per-message expand state, the same way `ConversationThreadBox.vue` does
+// (data-model.md's `MessageDisplayState` is keyed by `messageId` alone, so both call sites share
+// one persisted default via `messageDisplayState.ts` without colliding, even with several focused
+// panels for different conversations open at once). Same role-aware default as
 // `ConversationThreadBox.vue`'s own seeding (see `ensureMessageExpandedSeeded`'s doc comment in
-// `stores/conversations.ts` for the full reasoning) — an assistant reply starts fully shown, a
-// user message keeps the pre-existing collapsed-by-default behaviour, and any message the user has
-// explicitly toggled by hand (of either role) keeps exactly that choice regardless of this default.
+// `stores/conversations.ts` for the full reasoning): an assistant reply starts fully shown, a user
+// message stays collapsed-by-default, and any message the user has explicitly toggled by hand (of
+// either role) keeps exactly that choice regardless of this default.
 //
-// Bug fix (state divergence): this used to be a local `ref<Record<string, boolean>>` — since
-// `ConversationThreadBox.vue`'s canvas box and this focused/detail view can both be mounted at once
-// for the same conversation, two independent local refs could silently show different
-// expanded/collapsed state for the same message. Now backed by `conversationsStore.expandedByMessage`
-// (keyed by conversationId then messageId) so both components read/write the exact same reactive
-// source — `localStorage` stays purely the persistence layer underneath it.
+// Backed by `conversationsStore.expandedByMessage` (keyed by conversationId then messageId), not a
+// local `ref<Record<string, boolean>>` — `ConversationThreadBox.vue`'s canvas box and this
+// focused/detail view can both be mounted at once for the same conversation, so a local ref per
+// component would let the two silently show different expanded/collapsed state for the same
+// message. Both components read/write the exact same reactive source; `localStorage` stays purely
+// the persistence layer underneath it.
 const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
 watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
-// Bug fix (scroll-to-top-of-message): expanding a single message scrolls so its own top edge
-// becomes visible — see `ConversationThreadBox.vue`'s identical `setMessageExpanded` doc comment
-// for why only the collapsed -> expanded direction triggers this, and why the bulk toggle below
-// deliberately doesn't. No sticky header sits inside `.message-list` here (unlike the sidebar box's
+// Expanding a single message scrolls so its own top edge becomes visible — see
+// `ConversationThreadBox.vue`'s identical `setMessageExpanded` doc comment for why only the
+// collapsed -> expanded direction triggers this, and why the bulk toggle below deliberately
+// doesn't. No sticky header sits inside `.message-list` here (unlike the sidebar box's
 // `.thread-header`), so `scrollMessageTopIntoView` is called with no offset element.
 function setMessageExpanded(messageId: string, expanded: boolean): void {
   const wasExpanded = expandedByMessage.value[messageId];
@@ -150,40 +134,37 @@ function setMessageExpanded(messageId: string, expanded: boolean): void {
   }
 }
 
-// Parity fix (005-canvas-conversation-threads follow-up): the sidebar's compact
-// `ConversationThreadBox.vue` offers a bulk "Expand all"/"Collapse all" toggle (FR-009) over the
-// exact same per-message `expandedByMessage` state this view already owns above — this focused/
-// detail view had no equivalent, even though it owns the richer (unclamped-by-default) copy of that
-// same state. Now shared with `ConversationThreadBox.vue` via `useBulkToggleAction`.
+// Bulk "Expand all"/"Collapse all" toggle (FR-009) over the same per-message `expandedByMessage`
+// state this view already owns above. Shared with `ConversationThreadBox.vue` via
+// `useBulkToggleAction`.
 const { action: bulkToggleAction, visible: bulkToggleVisible } = useBulkToggleAction(() => props.conversationId);
 
-// Parity fix: the sidebar's `ConversationThreadBox.vue` also offers a "Branch" action (branching
-// *this* conversation with no selection, US2/FR-006/FR-007 — see `conversationActions.ts`'s own doc
-// comment for why a whole-conversation branch is the only kind this data model supports) that this
-// focused/detail view had no equivalent of. Now shared via `useConversationBranchAction`. Same
-// store call, same server-computed `canBranch` gating (mirrors `maxConversationDepth`, already
-// covers "closed conversations can't be branched from" per the read-only banner above).
+// "Branch" action (branching *this* conversation with no selection, US2/FR-006/FR-007 — see
+// `conversationActions.ts`'s own doc comment for why a whole-conversation branch is the only kind
+// this data model supports). Shared with `ConversationThreadBox.vue` via
+// `useConversationBranchAction`. Same store call, same server-computed `canBranch` gating (mirrors
+// `maxConversationDepth`, already covers "closed conversations can't be branched from" per the
+// read-only banner above).
 //
-// Auto-focus follow-up, superseded by the branch-cap parity fix: branching from the focus view
-// emits `branch-created` (via the composable's `onBranchCreated` callback) on success so App.vue
-// can auto-focus the new branch — creation itself is blocked at the cap, so a free slot is always
-// guaranteed by the time this fires, and App.vue's own no-op guard is only ever defense in depth
-// against a same-tick race.
+// Branching from the focus view emits `branch-created` (via the composable's `onBranchCreated`
+// callback) on success so App.vue can auto-focus the new branch — creation itself is blocked at
+// the cap, so a free slot is always guaranteed by the time this fires, and App.vue's own no-op
+// guard is only ever defense in depth against a same-tick race.
 const { action: branchAction, error: branchError } = useConversationBranchAction(() => props.conversationId, {
   atFocusCap: () => props.atFocusCap,
   maxFocused: () => props.maxFocused,
   onBranchCreated: (id) => emit('branch-created', id),
 });
 
-// Fix: a visible, low-noise "sent — awaiting response" indicator for the gap between the turn
-// being queued (`conversation.status === 'working'`, server-driven via the
-// `conversation_status_changed` WS event) and the first assistant token actually streaming in —
-// today that gap is silent (the composer's own `sending` only covers the HTTP round trip to queue
-// the turn, not the LLM's response time). Derived entirely from state already in the store: once
-// the newest message is an assistant message that has started streaming *text*, or the turn has
-// left `working`, this clears on its own — no new store state needed. Declared up here (rather
-// than near the other action handlers further down) so it's available to the scroll-stickiness
-// watchers below, which need to react to it alongside `messages`.
+// A visible, low-noise "sent — awaiting response" indicator for the gap between the turn being
+// queued (`conversation.status === 'working'`, server-driven via the `conversation_status_changed`
+// WS event) and the first assistant token actually streaming in — the composer's own `sending`
+// only covers the HTTP round trip to queue the turn, not the LLM's response time. Derived entirely
+// from state already in the store: once the newest message is an assistant message that has
+// started streaming *text*, or the turn has left `working`, this clears on its own — no new store
+// state needed. Declared up here (rather than near the other action handlers further down) so it's
+// available to the scroll-stickiness watchers below, which need to react to it alongside
+// `messages`.
 const awaitingResponse = computed(() => {
   if (conversation.value?.status !== 'working') return false;
   const last = messages.value[messages.value.length - 1];
@@ -232,12 +213,11 @@ const transcriptEditsStyle = computed(() => {
   return { gridTemplateRows: `${transcriptFr.value}fr ${EDITS_HANDLE_SPACE_PX}px ${editsFr.value}fr` };
 });
 
-/** Accessibility fix (WCAG "Required ARIA attribute not present: aria-valuenow", confirmed via a
- *  live axe-core scan on every screen): this `role="separator"` handle carried no
- *  `aria-valuenow`/`aria-valuemin`/`aria-valuemax` at all. Expressed as a 0-100 percentage of the
- *  transcript/edits split (same live fraction `transcriptEditsStyle` above already renders), so an
- *  assistive-tech user gets the same "how is this split right now" information sighted users read
- *  off the handle's own position. */
+/** This `role="separator"` handle needs `aria-valuenow`/`aria-valuemin`/`aria-valuemax` (WCAG
+ *  "Required ARIA attribute not present"). Expressed as a 0-100 percentage of the transcript/edits
+ *  split (same live fraction `transcriptEditsStyle` above already renders), so an assistive-tech
+ *  user gets the same "how is this split right now" information sighted users read off the
+ *  handle's own position. */
 const editsSplitPercent = computed(() => Math.round((transcriptFr.value / (transcriptFr.value + editsFr.value)) * 100));
 
 const editsResize = useResizeHandle({
@@ -302,10 +282,10 @@ function load(): void {
   void store.loadDetail(props.conversationId);
 }
 
-// Fix: while a message streams in, the transcript auto-scrolls to the bottom on every token — see
-// the `messages` watcher below. That's the desired behaviour while the user is following along at
-// the bottom, but if they've deliberately scrolled up (e.g. to re-read earlier history), the very
-// next token delta yanks them straight back down. `stickToBottom` tracks whether the user is
+// While a message streams in, the transcript auto-scrolls to the bottom on every token — see the
+// `messages` watcher below. That's the desired behaviour while the user is following along at the
+// bottom, but if they've deliberately scrolled up (e.g. to re-read earlier history), the very next
+// token delta must not yank them straight back down. `stickToBottom` tracks whether the user is
 // currently at (or near) the bottom of `.message-list`; the auto-scroll only fires while it's
 // true. It's kept in sync by a plain `scroll` listener (near-bottom => true, else => false) rather
 // than by distinguishing user- vs. programmatic scrolls: a programmatic scroll-to-bottom always
@@ -319,12 +299,12 @@ function onListScroll(): void {
   stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX;
 }
 
-// Bug fix (scroll-to-top-of-message): tracks whether the *next* `lastMessageId` change (below) is
-// this conversation's very first population of messages since it was opened/switched to (still
-// land at the bottom, showing the tail of existing history — the same "most recent first" landing
-// spot as before this fix) versus a genuinely new message arriving while already viewing an
-// already-loaded conversation (scroll to that new message's own top instead — see `lastMessageId`'s
-// watcher below). Reset alongside `stickToBottom` whenever the conversation being viewed changes.
+// Tracks whether the *next* `lastMessageId` change (below) is this conversation's very first
+// population of messages since it was opened/switched to (lands at the bottom, showing the tail
+// of existing history — "most recent first") versus a genuinely new message arriving while
+// already viewing an already-loaded conversation (scrolls to that new message's own top instead —
+// see `lastMessageId`'s watcher below). Reset alongside `stickToBottom` whenever the conversation
+// being viewed changes.
 const isInitialMessagesLoad = ref(true);
 
 onMounted(load);
@@ -369,15 +349,14 @@ async function scrollToBottomIfSticky(): Promise<void> {
  *  via `message_started`). */
 const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.id ?? null);
 
-// Bug fix (scroll-to-top-of-message): a new message arriving used to always scroll the whole
-// transcript to its bottom (`scrollToBottomIfSticky`, previously wired to a `deep` watch over
-// `messages`) — for a long assistant reply, that shows only whatever the tail currently looks like
-// as it streams in, never the beginning of the reply. This still lands at the bottom the first time
-// a conversation's messages are loaded (`isInitialMessagesLoad`, reset per-conversation above) —
-// so opening/switching to a conversation shows its most recent history first, same as before — but
-// once it's already open, a newly-appended message instead scrolls just far enough for THAT
-// message's own top edge to become visible, leaving the user free to keep reading down at their own
-// pace as it streams in rather than being repeatedly yanked to match wherever the tail currently is.
+// Scrolling the whole transcript to its bottom on every new message (as `scrollToBottomIfSticky`
+// does) would, for a long assistant reply, show only whatever the tail currently looks like as it
+// streams in, never the beginning of the reply. This lands at the bottom the first time a
+// conversation's messages are loaded (`isInitialMessagesLoad`, reset per-conversation above) — so
+// opening/switching to a conversation shows its most recent history first — but once it's already
+// open, a newly-appended message instead scrolls just far enough for THAT message's own top edge
+// to become visible, leaving the user free to keep reading down at their own pace as it streams in
+// rather than being repeatedly yanked to match wherever the tail currently is.
 watch(
   lastMessageId,
   async (id) => {
@@ -392,14 +371,14 @@ watch(
   },
   { immediate: true },
 );
-// Fix: the awaiting-response indicator (rendered in `.message-list`, right after the last message
-// — see the template) is derived state, not itself a mutation of `messages`. It normally appears
-// in the same tick as a new user message is pushed (so the `lastMessageId` watch above already
-// covers revealing that message), but the indicator itself can still be scrolled out of view below
-// it (this conversation deliberately no longer force-scrolls all the way to the bottom on every new
+// The awaiting-response indicator (rendered in `.message-list`, right after the last message — see
+// the template) is derived state, not itself a mutation of `messages`. It normally appears in the
+// same tick as a new user message is pushed (so the `lastMessageId` watch above already covers
+// revealing that message), but the indicator itself can still be scrolled out of view below it
+// (this conversation deliberately doesn't force-scroll all the way to the bottom on every new
 // message — see above), and it can also flip on its own — e.g. `conversation.status` turning
 // `working` slightly before or after that message lands via the WS event vs. the HTTP response — so
-// this reveals it explicitly, via the older scroll-to-bottom behaviour (appropriate here: the
+// this reveals it explicitly, via the plain scroll-to-bottom behaviour (appropriate here: the
 // indicator has no "top" of its own worth preserving, it's just a short status line to surface).
 watch(awaitingResponse, scrollToBottomIfSticky);
 
@@ -518,9 +497,6 @@ const archiveOrReviewAction = computed<ActionDescriptor | null>(() => {
   return null;
 });
 
-// Every per-conversation action this view offers (parity fix + bug fix: this used to be scattered
-// per-button markup — see `ConversationActionButtons.vue`), in the same order as before: bulk
-// expand/collapse, Branch, then whichever single close-state action currently applies.
 const actions = computed<ActionDescriptor[]>(() => {
   const list: ActionDescriptor[] = [];
   if (bulkToggleVisible.value) list.push(bulkToggleAction.value);
@@ -582,13 +558,6 @@ const actions = computed<ActionDescriptor[]>(() => {
         <ConversationStatusBadges :conversation-id="conversationId" />
       </div>
       <div class="header-actions">
-        <!-- Bug fix: this used to render only a single status badge span, never the Stale/
-             Orphaned-anchor badges `HudPanel.vue`/`ConversationThreadBox.vue` already had — see
-             `ConversationStatusBadges.vue`. Parity fix: same bulk expand/collapse and Branch
-             actions the sidebar's `ConversationThreadBox.vue` offers, now also available from this
-             focused/detail view (see `conversationActions.ts`). Shown alongside Archive/Request
-             review rather than replacing either — this slot now holds every per-conversation action
-             this view offers, not just one. -->
         <ConversationActionButtons :actions="actions" />
       </div>
     </header>
@@ -632,13 +601,11 @@ const actions = computed<ActionDescriptor[]>(() => {
           :expanded="expandedByMessage[msg.id] ?? false"
           @update:expanded="(value) => setMessageExpanded(msg.id, value)"
         />
-        <!-- Fix: visible "sent — awaiting response" indicator for the gap between the turn being
-             queued and the first assistant token actually streaming in (previously silent — only
-             the header's status badge and the Send button's own "Sending…" label reflected
-             `working`, neither of which is very noticeable). Rendered here, after the last message,
-             so it reads as "here's what's happening in response to what I just sent" rather than
-             detached down in the composer/footer area. Clears itself once streaming text arrives or
-             the turn leaves `working` — see `awaitingResponse`. -->
+        <!-- Visible "sent — awaiting response" indicator for the gap between the turn being queued
+             and the first assistant token actually streaming in. Rendered here, after the last
+             message, so it reads as "here's what's happening in response to what I just sent"
+             rather than detached down in the composer/footer area. Clears itself once streaming
+             text arrives or the turn leaves `working` — see `awaitingResponse`. -->
         <div v-if="awaitingResponse" class="awaiting-response" role="status">
           <span class="awaiting-response-spinner" aria-hidden="true"></span>
           Request sent — waiting for response…
@@ -724,13 +691,12 @@ const actions = computed<ActionDescriptor[]>(() => {
             <input v-model="foldSummaryIntoParent" type="checkbox" />
             Fold a compact summary into the parent conversation
           </label>
-          <!-- Bug fix (dark-pattern ordering): "Close conversation" is irreversible (see the "This
-               cannot be undone" text above) — it used to be the first, auto-focused button (this
-               dialog's `useFocusTrap` focuses whichever focusable element is first in DOM order),
-               visually identical to Cancel. Cancel now comes first (so it's the one that gets
-               auto-focused) and "Close conversation" carries explicit danger styling, consistent with
-               how the "Archive" action that opens this dialog is already styled (`danger: true` in
-               `archiveOrReviewAction` above). -->
+          <!-- "Close conversation" is irreversible (see the "This cannot be undone" text above).
+               Cancel must come first in DOM order, since this dialog's `useFocusTrap` auto-focuses
+               whichever focusable element is first — an irreversible action must never be the
+               auto-focused default. "Close conversation" carries explicit danger styling,
+               consistent with how the "Archive" action that opens this dialog is already styled
+               (`danger: true` in `archiveOrReviewAction` above). -->
           <div class="close-dialog-actions">
             <button type="button" :disabled="closing" @click="cancelCloseDialog">Cancel</button>
             <button type="button" class="danger" :disabled="closing" @click="confirmClose">Close conversation</button>
@@ -748,30 +714,27 @@ const actions = computed<ActionDescriptor[]>(() => {
   height: 100%;
   min-height: 0;
 }
-/* Parity fix: `HudPanel.vue`'s `.conversation-row.is-primary` indicator (left accent bar + subtle
-   background tint) had no equivalent here — this focused/detail view showed no visual cue at all
-   for the Primary conversation. De-dup fix: the actual box-shadow value now lives once in
-   style.css's shared `.primary-indicator` class (applied alongside `.is-primary` in the template)
-   rather than being redefined here — reused for visual consistency across all three surfaces that
-   display a conversation (HudPanel, this view, `ConversationThreadBox.vue`). Never color alone: the
-   closed-conversation `.readonly-banner` above already spells out "no Primary" in words, and
-   `PrimaryPanel.vue`'s Make/Clear-Primary controls name this conversation by its title, not by this
-   styling alone. */
-/* Layout fix: an explicit two-row column (rather than a single-row 3-column grid with
-   `.header-actions` wrapping onto a second line when it overflows) — the row-wrap fallback still
-   worked, but let the action row's wrap point drift with however wide the title/status happened to
-   be, and could still crowd `.status-badge` at narrow widths before wrapping kicked in. Splitting
-   into two explicit rows (same convention as `ConversationThreadBox.vue`'s `.thread-header`:
-   `.thread-header-top` holds title+status, `.thread-actions` sits in its own row below) makes each
-   row's own width the full header instead, and reads as two clearly separate concerns — "what/how
-   is this conversation" on top, "what can I do to it" below — rather than one crowded row. */
+/* The actual box-shadow value lives once in style.css's shared `.primary-indicator` class (applied
+   alongside `.is-primary` in the template), reused for visual consistency across all three
+   surfaces that display a conversation (HudPanel, this view, `ConversationThreadBox.vue`). Never
+   color alone: the closed-conversation `.readonly-banner` above already spells out "no Primary" in
+   words, and `PrimaryPanel.vue`'s Make/Clear-Primary controls name this conversation by its title,
+   not by this styling alone. */
+/* An explicit two-row column, rather than a single-row 3-column grid with `.header-actions`
+   wrapping onto a second line when it overflows — a row-wrap fallback lets the action row's wrap
+   point drift with however wide the title/status happens to be, and can still crowd
+   `.status-badge` at narrow widths before wrapping kicks in. Splitting into two explicit rows
+   (same convention as `ConversationThreadBox.vue`'s `.thread-header`: `.thread-header-top` holds
+   title+status, `.thread-actions` sits in its own row below) makes each row's own width the full
+   header instead, and reads as two clearly separate concerns — "what/how is this conversation" on
+   top, "what can I do to it" below — rather than one crowded row. */
 .conversation-header {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 2px solid var(--border-color, #ddd);
-  /* Fix 2: a surface distinct from the HUD above it and the transcript below it. */
+  /* A surface distinct from the HUD above it and the transcript below it. */
   background: var(--panel-bg-alt, #eef0f3);
 }
 /* Row 1: title (grows) | status badge (shrinks to fit), same `justify-content: space-between`
@@ -793,10 +756,9 @@ const actions = computed<ActionDescriptor[]>(() => {
   min-width: 0;
   white-space: nowrap;
 }
-/* Rename affordance (parity fix): same "one action per slot" layout as
-   `ConversationThreadBox.vue`'s own `.thread-title-group` — title (or its in-place edit input) plus
-   a small icon-only rename button share this row, with `.rename-error` (if any) on its own line
-   beneath. */
+/* Rename affordance: same "one action per slot" layout as `ConversationThreadBox.vue`'s own
+   `.thread-title-group` — title (or its in-place edit input) plus a small icon-only rename button
+   share this row, with `.rename-error` (if any) on its own line beneath. */
 .title-edit-row {
   display: flex;
   align-items: center;
@@ -830,10 +792,10 @@ const actions = computed<ActionDescriptor[]>(() => {
   gap: 0.5rem;
   max-width: 100%;
 }
-/* Per-button visual styling (bulk-toggle/branch/archive/review) now lives in
+/* Per-button visual styling (bulk-toggle/branch/archive/review) lives in
    `ConversationActionButtons.vue`, shared with `ConversationThreadBox.vue` — the "Archive" action's
-   danger/red treatment (previously this file's own `.close-button` rule) comes from that action's
-   `danger: true` descriptor flag instead of a class name (see `archiveOrReviewAction` above). */
+   danger/red treatment comes from that action's `danger: true` descriptor flag instead of a class
+   name (see `archiveOrReviewAction` above). */
 /* .pane-eyebrow's shared text styling now lives in style.css. */
 /* `.text-wrap-safe`'s shared overflow-wrap handling (applied to the h2 in the template) now lives
    in style.css — closes a gap where a long conversation name had no wrap protection even though
@@ -862,9 +824,9 @@ const actions = computed<ActionDescriptor[]>(() => {
 .message-list {
   min-height: 0;
   overflow-y: auto;
-  /* Fix: reserve the scrollbar's width whether or not it's actually showing — otherwise switching
-     from a long conversation (scrollbar present) to a short one (no scrollbar) visibly shifts
-     every bubble sideways by the scrollbar's width. */
+  /* Reserve the scrollbar's width whether or not it's actually showing — otherwise switching from
+     a long conversation (scrollbar present) to a short one (no scrollbar) visibly shifts every
+     bubble sideways by the scrollbar's width. */
   scrollbar-gutter: stable;
   padding: 0.75rem;
 }
@@ -906,14 +868,13 @@ const actions = computed<ActionDescriptor[]>(() => {
   flex-direction: column;
   flex: 0 0 auto;
 }
-/* Fix: low-noise "sent — awaiting response" indicator (see `awaitingResponse`) — now rendered as
-   the last child of `.message-list`, right after the last message bubble, rather than down in
-   `.input-area`. Sized/spaced like a message bubble (same horizontal padding and bottom margin as
-   `.message-bubble` in MessageBubble.vue) so it sits naturally in the transcript flow, but kept
-   visually distinct from an actual chat bubble — no bubble background/border-radius, just the
-   spinner + status-colored text — so it still reads as a transient status line rather than a
-   message from either party. Reuses the same status color as the header's `working` badge
-   (`--status-active-color`) for visual consistency. */
+/* Low-noise "sent — awaiting response" indicator (see `awaitingResponse`) — rendered as the last
+   child of `.message-list`, right after the last message bubble. Sized/spaced like a message
+   bubble (same horizontal padding and bottom margin as `.message-bubble` in MessageBubble.vue) so
+   it sits naturally in the transcript flow, but kept visually distinct from an actual chat bubble
+   — no bubble background/border-radius, just the spinner + status-colored text — so it still
+   reads as a transient status line rather than a message from either party. Reuses the same status
+   color as the header's `working` badge (`--status-active-color`) for visual consistency. */
 .awaiting-response {
   display: flex;
   align-items: center;
@@ -990,11 +951,10 @@ const actions = computed<ActionDescriptor[]>(() => {
   outline: 2px solid var(--accent-color, #2563eb);
   outline-offset: -2px;
 }
-/* Contrast fix: relying on the browser's native (color-scheme-driven) button-face background for
-   text-color contrast math is fragile — dark mode's native button face isn't reliably dark enough
-   for light/bright accent text (measured well below 4.5:1). Both composer buttons get an explicit
-   background from the token system instead, in every state, so contrast never depends on the
-   browser's own button rendering. */
+/* Relying on the browser's native (color-scheme-driven) button-face background for text-color
+   contrast math is fragile — dark mode's native button face isn't reliably dark enough for
+   light/bright accent text. Both composer buttons get an explicit background from the token system
+   instead, in every state, so contrast never depends on the browser's own button rendering. */
 .send-button,
 .refresh-send-button {
   background: var(--panel-bg-alt, #eef0f3);
@@ -1035,8 +995,8 @@ const actions = computed<ActionDescriptor[]>(() => {
   color: var(--success-color, #065f46);
   font-size: 0.8rem;
 }
-/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
-   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling lives in
+   style.css. */
 .folded-summary-banner pre {
   margin: 0.35rem 0 0;
   font-family: inherit;
@@ -1062,10 +1022,10 @@ const actions = computed<ActionDescriptor[]>(() => {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-/* Bug fix (dark-pattern styling): "Close conversation" is the one irreversible action in this
-   dialog — same danger treatment `ConversationActionButtons.vue`'s `.action-button.danger` already
-   gives the "Archive" action that opens this dialog, reused here since this button isn't rendered
-   through that shared component. */
+/* "Close conversation" is the one irreversible action in this dialog — same danger treatment
+   `ConversationActionButtons.vue`'s `.action-button.danger` already gives the "Archive" action
+   that opens this dialog, reused here since this button isn't rendered through that shared
+   component. */
 .close-dialog-actions button.danger {
   color: var(--danger-color, #b91c1c);
   border-color: var(--danger-color, #b91c1c);
