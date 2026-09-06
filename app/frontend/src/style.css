@@ -256,3 +256,73 @@ body {
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
+
+/* Shared diff-viewer chrome — DiffViewer.vue and RevisionDiffViewer.vue both render a sticky
+   header (view tabs + a "Focus on changes" toggle + Close), collapsed-unchanged-hunk marker
+   buttons, and a two-column side-by-side layout, and previously duplicated all of this verbatim
+   in their own `<style scoped>` blocks. Hoisted here (same pattern as `.pane-eyebrow`/
+   `.text-wrap-safe-pre` above) to de-duplicate; each component keeps only what's actually unique
+   to it (e.g. `.revision-diff-viewer`'s modal chrome, `.hunk`/`.hunk-context`). */
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -1rem -1rem 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--panel-bg, #f7f7f8);
+  border-bottom: 2px solid var(--border-color, #ddd);
+  border-radius: 8px 8px 0 0;
+  /* Sticky within the scrolling dialog body so the view tabs, the focus toggle, and Close stay
+     reachable while scrolling a long diff — `top` matches this element's own negative margin so
+     it stays flush with the dialog's edge instead of jumping down to the padding edge the moment
+     it starts sticking. */
+  position: sticky;
+  top: -1rem;
+  z-index: 1;
+}
+.diff-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.view-toggle button[aria-selected='true'] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.focus-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.collapsed-marker {
+  display: block;
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0.35rem;
+  margin: 0.25rem 0;
+  color: var(--neutral-muted-color, #4b5563);
+  background: var(--panel-bg, #f7f7f8);
+  border: 1px dashed var(--border-color, #ddd);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.collapsed-marker--full-row {
+  grid-column: 1 / -1;
+}
+.side-by-side-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.diff-column-left,
+.diff-column-right {
+  font-family: inherit;
+  overflow: auto;
+  margin: 0;
+  min-width: 0;
+}

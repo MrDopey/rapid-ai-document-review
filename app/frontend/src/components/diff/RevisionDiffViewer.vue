@@ -184,71 +184,14 @@ const identical = computed(
   overflow: auto;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
-.diff-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin: -1rem -1rem 0.75rem;
-  padding: 0.5rem 1rem;
-  background: var(--panel-bg, #f7f7f8);
-  border-bottom: 2px solid var(--border-color, #ddd);
-  border-radius: 8px 8px 0 0;
-  /* Sticky within `.revision-diff-viewer` (the scrolling dialog body) — see DiffViewer.vue's
-     matching rule for why `top` mirrors this element's own negative margin. */
-  position: sticky;
-  top: -1rem;
-  z-index: 1;
-}
-.diff-header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-.view-toggle button[aria-selected='true'] {
-  font-weight: 600;
-  text-decoration: underline;
-}
-.focus-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.85rem;
-}
-.collapsed-marker {
-  display: block;
-  width: 100%;
-  font-family: inherit;
-  font-size: 0.85rem;
-  text-align: center;
-  padding: 0.35rem;
-  margin: 0.25rem 0;
-  color: var(--neutral-muted-color, #4b5563);
-  background: var(--panel-bg, #f7f7f8);
-  border: 1px dashed var(--border-color, #ddd);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.collapsed-marker--full-row {
-  grid-column: 1 / -1;
-}
+/* `.diff-header`, `.diff-header-left`, `.view-toggle button[aria-selected='true']`,
+   `.focus-toggle`, `.collapsed-marker`, `.collapsed-marker--full-row`, `.side-by-side-columns`,
+   and `.diff-column-left`/`.diff-column-right` are shared with DiffViewer.vue and now live in
+   style.css. */
 /* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
    style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .diff-body {
   font-family: inherit;
 }
 /* `.removed`/`.added`/`.marker` are owned by DiffText.vue (single source, see research.md R4/R9). */
-.side-by-side-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-.diff-column-left,
-.diff-column-right {
-  font-family: inherit;
-  overflow: auto;
-  margin: 0;
-  min-width: 0;
-}
 </style>
