@@ -19,3 +19,6 @@ npm run test
 
 echo "==> Build"
 npm run build
+
+echo "==> Check frontend bundle size"
+npm run check:bundle-size --workspace=app/frontend

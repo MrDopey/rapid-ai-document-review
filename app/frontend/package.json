@@ -8,7 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:unit": "vitest run tests/unit",
-    "test:component": "vitest run tests/component"
+    "test:component": "vitest run tests/component",
+    "check:bundle-size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.0",

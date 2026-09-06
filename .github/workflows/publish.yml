@@ -122,6 +122,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check frontend bundle size
+        run: npm run check:bundle-size --workspace=app/frontend
+
   docker:
     needs: [prepare, verify]
     runs-on: ubuntu-latest

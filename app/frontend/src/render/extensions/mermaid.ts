@@ -1,16 +1,30 @@
-import mermaid from 'mermaid';
 import { domPurifySanitizer } from '../sanitizer.js';
 
-let initialized = false;
+// Mermaid pulls in katex and cytoscape (~200KB gzip combined), so it's dynamically imported
+// here rather than at module scope — that keeps those out of the main bundle for documents
+// that never render a mermaid fence.
+let mermaidPromise: ReturnType<typeof loadMermaid> | undefined;
 
-function ensureInitialized(): void {
-  if (initialized) return;
+async function loadMermaid() {
+  const { default: mermaid } = await import('mermaid');
   // htmlLabels: false makes Mermaid emit plain SVG <text> labels instead of
   // <foreignObject><div>…</div></foreignObject> — DOMPurify's mXSS hardening strips HTML
   // elements nested inside foreignObject regardless of the allowlist, which silently blanked
   // every diagram label. Plain SVG text sidesteps that without weakening the sanitizer.
   mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false });
-  initialized = true;
+  return mermaid;
+}
+
+function ensureInitialized() {
+  if (!mermaidPromise) {
+    // If the dynamic import itself fails (e.g. a transient chunk-load network error), don't
+    // cache the rejection — let the next call retry loading mermaid from scratch.
+    mermaidPromise = loadMermaid().catch((err: unknown) => {
+      mermaidPromise = undefined;
+      throw err;
+    });
+  }
+  return mermaidPromise;
 }
 
 function escapeHtml(text: string): string {
@@ -39,10 +53,10 @@ let counter = 0;
  * document (FR-008c).
  */
 export async function renderMermaidBlock(source: string): Promise<string> {
-  ensureInitialized();
   counter += 1;
   const id = `mermaid-${Date.now()}-${counter}`;
   try {
+    const mermaid = await ensureInitialized();
     const renderPromise = mermaid.render(id, source);
     const timeout = new Promise<never>((_resolve, reject) =>
       setTimeout(() => reject(new Error('render timed out')), 5000),
