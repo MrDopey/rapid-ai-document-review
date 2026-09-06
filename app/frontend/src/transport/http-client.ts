@@ -31,6 +31,7 @@ import {
   ReviewConversationResponse,
   SendMessageRequest,
   SendMessageResponse,
+  SystemPromptDto,
   UserSettingsDto,
   UserSettingsPatch,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -274,5 +275,9 @@ export const httpClient = {
     return request('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) }, (j) =>
       UserSettingsDto.parse(j),
     );
+  },
+
+  async getSystemPrompt() {
+    return request('/api/system-prompt', undefined, (j) => SystemPromptDto.parse(j));
   },
 };

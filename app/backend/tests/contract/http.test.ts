@@ -24,6 +24,7 @@ import {
   RetryResponse,
   ReviewConversationResponse,
   SendMessageResponse,
+  SystemPromptDto,
   UserSettingsDto,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import { createTestApp, waitFor } from './test-app.js';
@@ -1661,6 +1662,17 @@ describe('Contract: HTTP API (http-api.md)', () => {
         expect(res.status).toBe(400);
         expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
       });
+    });
+  });
+
+  // ---- System prompt ----
+
+  describe('GET /api/system-prompt', () => {
+    it('returns the pi agent system prompt, read-only', async () => {
+      const res = await call(ctx.app, 'GET', '/api/system-prompt');
+      expect(res.status).toBe(200);
+      const parsed = SystemPromptDto.parse(res.json);
+      expect(parsed.systemPrompt).toContain('AI reviewer embedded in a document review application');
     });
   });
 });

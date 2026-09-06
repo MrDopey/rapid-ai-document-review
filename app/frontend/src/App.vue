@@ -14,6 +14,7 @@ import HudPanel, { type ConversationFilter } from './components/hud/HudPanel.vue
 import ConversationDetailPanel from './components/conversation/ConversationDetailPanel.vue';
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
+import SystemPromptDialog from './components/toolbar/SystemPromptDialog.vue';
 import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
 import {
   loadPaneSizes,
@@ -45,6 +46,7 @@ const pasteText = ref('');
 const historyOpen = ref(false);
 const shortcutsOpen = ref(false);
 const helpOpen = ref(false);
+const systemPromptOpen = ref(false);
 const wsClient = ref<WsClient | null>(null);
 
 // A bare, unstyled "Loading…" with no timeout would hang forever if the backend is unreachable,
@@ -688,7 +690,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
       v-model="pasteText"
       aria-label="Document content"
       placeholder="# My document&#10;&#10;Paste or type Markdown here…"
-    ></textarea>
+    />
     <button type="button" :disabled="!pasteText.trim()" @click="onCreateDocument">
       Start reviewing
     </button>
@@ -709,7 +711,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
            defensive (an empty-string title, say) rather than something this branch is ever
            expected to hit in practice. -->
       <div class="document-title-bar">
-        <h1 class="document-title-text">{{ store.document?.title || 'AI Document Review' }}</h1>
+        <h1 class="document-title-text">
+          {{ store.document?.title || 'AI Document Review' }}
+        </h1>
         <!-- Icon-only controls (labels dropped, aria-label/title kept for a11y), pinned to the
              title bar's right edge. -->
         <div class="title-bar-icons">
@@ -764,6 +768,29 @@ async function onToggleReasoning(event: Event): Promise<void> {
                 stroke-linejoin="round"
               />
               <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="System prompt"
+            title="System prompt"
+            @click="systemPromptOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <path
+                d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3.5v-3.5H6a2 2 0 0 1-2-2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M7.5 8.5h9M7.5 12h6"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -878,6 +905,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
         <HelpDialog @close="helpOpen = false" />
       </div>
     </Transition>
+    <Transition name="modal">
+      <div v-if="systemPromptOpen" class="modal-overlay system-prompt-overlay">
+        <SystemPromptDialog @close="systemPromptOpen = false" />
+      </div>
+    </Transition>
     <div ref="panesEl" class="panes" :style="panesStyle">
       <PreviewComponent
         v-show="previewVisible"
@@ -898,7 +930,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
         :style="{ gridColumn: resizeHandleGridColumn }"
         @pointerdown="onPreviewHandlePointerDown($event)"
         @keydown="editorPreviewResize.onKeydown($event)"
-      ></div>
+      />
       <DocumentCanvas
         ref="documentCanvasRef"
         :style="{ gridColumn: canvasGridColumn }"

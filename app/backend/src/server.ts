@@ -28,6 +28,7 @@ import { registerRevisionRoutes } from './api/http/revisions.ts';
 import { registerConversationRoutes } from './api/http/conversations.ts';
 import { registerEditRoutes } from './api/http/edits.ts';
 import { registerSettingsRoutes } from './api/http/settings.ts';
+import { registerSystemPromptRoutes } from './api/http/system-prompt.ts';
 import { registerStaticRoutes } from './api/http/static.ts';
 import { registerWsRoutes } from './api/ws/index.ts';
 
@@ -195,6 +196,7 @@ export function buildApp() {
     registerConversationRoutes(instance, { conversationService, primaryService, storage });
     registerEditRoutes(instance, { editService });
     registerSettingsRoutes(instance, { storage, eventService, eventHub });
+    registerSystemPromptRoutes(instance);
     registerWsRoutes(instance, { eventHub, storage });
   });
 

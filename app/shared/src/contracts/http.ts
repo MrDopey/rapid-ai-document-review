@@ -176,6 +176,13 @@ export const UserSettingsPatch = z.object({
 });
 export type UserSettingsPatch = z.infer<typeof UserSettingsPatch>;
 
+// Read-only: the pi agent's system prompt is fixed application config, not a user setting — no
+// corresponding Patch schema exists.
+export const SystemPromptDto = z.object({
+  systemPrompt: z.string(),
+});
+export type SystemPromptDto = z.infer<typeof SystemPromptDto>;
+
 // ---- Pagination ----
 
 export const PaginationQuery = z.object({
