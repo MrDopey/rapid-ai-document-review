@@ -565,13 +565,20 @@ async function onToggleReasoning(event: Event): Promise<void> {
   <div v-else class="editor-layout">
     <!-- 006-toolbar-reorg (confirmed layout): a two-column layout (~80/20) — the left column
          holds just the "Conversations (HUD)" box now (the document title used to stack above it
-         here — see the `document.title` watch in <script>, which moved it to the browser tab
-         instead, freeing this column's height for the HUD box); the right column, top-aligned with
-         the HUD box and extending down through its bottom (plain flex-row stretch gives this for
-         free), stacks two visually-boxed sub-sections: Primary on top, Global Actions below. The
-         error banner is pulled out of the Primary box entirely and rendered as its own full-width
-         strip beneath both columns. -->
+         here; freeing this column's height for the HUD box moved it to the browser tab only — see
+         the `document.title` watch in <script> — until the Fix below restored a compact visible
+         copy above both columns); the right column, top-aligned with the HUD box and extending down
+         through its bottom (plain flex-row stretch gives this for free), stacks two visually-boxed
+         sub-sections: Primary on top, Global Actions below. The error banner is pulled out of the
+         Primary box entirely and rendered as its own full-width strip beneath both columns. -->
     <header class="toolbar">
+      <!-- Fix (first-time-user review): the document's name/identity was previously visible only in
+           the browser tab (see the `document.title` watch in <script>) or buried in system-prompt
+           text inside a chat transcript — never in the app's own visible chrome. `store.document` is
+           always set here (this whole branch is `v-else` of `!hasDocument` above), so `.title` is
+           always available; the `'AI Document Review'` fallback is purely defensive (an empty-string
+           title, say) rather than something this branch is ever expected to hit in practice. -->
+      <h1 class="document-title-bar">{{ store.document?.title || 'AI Document Review' }}</h1>
       <div class="toolbar-columns">
         <div class="toolbar-left">
           <div class="hud-box">
@@ -830,10 +837,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
   min-width: 0;
 }
 /* Left column (~80%): just the "Conversations (HUD)" box now — the document title that used to
-   stack above it here moved to the browser tab (see the `document.title` watch in <script>),
-   freeing this column's height for the HUD box. Kept as a flex column (rather than collapsed
-   straight into `.hud-box`) since a future addition to this column would otherwise have to
-   reintroduce the wrapper. */
+   stack above it here moved to the browser tab (see the `document.title` watch in <script>) and,
+   since the Fix above, a compact `.document-title-bar` spanning both columns, freeing this column's
+   height for the HUD box. Kept as a flex column (rather than collapsed straight into `.hud-box`)
+   since a future addition to this column would otherwise have to reintroduce the wrapper. */
 .toolbar-left {
   flex: 4 1 0%;
   min-width: 0;
@@ -952,8 +959,17 @@ async function onToggleReasoning(event: Event): Promise<void> {
   line-height: 0;
   color: inherit;
 }
-/* Error banner: pulled out of the Primary box entirely (see `PrimaryPanel.vue`'s `update:error`) —
-   a full-width strip beneath BOTH toolbar columns, only rendered when there's an error. */
+/* Fix (first-time-user review): the document's name/identity, now visible in the app's own chrome
+   rather than only the browser tab. Deliberately small/unobtrusive — this two-column toolbar layout
+   (see the comment on `.toolbar-columns` below) has no spare vertical room for a large heading. */
+.document-title-bar {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Fix (conflictMessage wiring): same dismissible-notice shape as `PrimaryPanel.vue`'s own
    `.primary-notice`, but amber/warning-toned rather than that one's neutral info-blue — this
    reflects a real, already-happened data-loss event (the user's last edit was dropped), not just
@@ -971,6 +987,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
   border-radius: 4px;
   font-size: 0.8rem;
 }
+/* Error banner: pulled out of the Primary box entirely (see `PrimaryPanel.vue`'s `update:error`) —
+   a full-width strip beneath BOTH toolbar columns, only rendered when there's an error. */
 .toolbar-error-banner {
   padding: 0.4rem 0.5rem;
   background: var(--danger-bg, #fee2e2);
