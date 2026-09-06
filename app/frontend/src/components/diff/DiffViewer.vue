@@ -74,7 +74,12 @@ const fullDocHasNoDiff = computed(
     <header class="diff-header">
       <div class="diff-header-left">
         <span class="pane-eyebrow">Proposed edit</span>
-        <div class="view-toggle" role="tablist" aria-label="Diff view">
+        <div
+          v-if="!preview || preview.reconcilable"
+          class="view-toggle"
+          role="tablist"
+          aria-label="Diff view"
+        >
           <button
             id="diff-tab-hunks"
             type="button"
