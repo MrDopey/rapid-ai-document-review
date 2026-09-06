@@ -62,7 +62,7 @@ export function registerRevisionRoutes(
         return sendError(reply, 400, 'VALIDATION_FAILED', 'revision must be an integer');
       }
       try {
-        const result = revisionService.restore(doc.id, revisionNumber);
+        const result = await revisionService.restore(doc.id, revisionNumber);
         return reply.send(result);
       } catch {
         return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', `Revision not found: ${revisionNumber}`);

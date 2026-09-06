@@ -63,12 +63,13 @@ export function buildApp() {
 
   const eventHub = new EventHub(eventService, getSnapshot);
   const automergeHolder = new AutomergeStoreHolder();
-  const revisionService = new RevisionService(storage, eventService, eventHub, automergeHolder);
-  // Constructed ahead of DocumentService/EditService (moved up from further below) since both now
-  // depend on it too (FIX 4): PrimaryMutex has generalized from just guarding
-  // `propose_document_edit`/Primary-designation switches into the one per-document write lock
-  // every document-mutating path serializes against (see primary-mutex.ts).
+  // Constructed ahead of RevisionService/DocumentService/EditService (moved up from further below)
+  // since all three now depend on it too (FIX 4/FIX 1): PrimaryMutex has generalized from just
+  // guarding `propose_document_edit`/Primary-designation switches into the one per-document write
+  // lock every document-mutating path serializes against, `RevisionService.restore` included (see
+  // primary-mutex.ts).
   const primaryMutex = new PrimaryMutex();
+  const revisionService = new RevisionService(storage, eventService, eventHub, automergeHolder, primaryMutex);
   const documentService = new DocumentService(
     storage,
     eventService,

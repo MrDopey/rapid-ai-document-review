@@ -6,6 +6,7 @@ import type { ConflictDetail, RevisionRow, StorageAdapter } from '../storage/sto
 import { reconcile } from './text-anchor.ts';
 import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
 import type { DocumentService } from './document-service.ts';
+import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 
 export interface CreateRevisionOptions {
   source: RevisionRow['source'];
@@ -53,13 +54,21 @@ export class RevisionService {
   private readonly eventHub: EventHub;
   private readonly automerge: AutomergeStoreHolder;
   private readonly publisher: EventPublisher;
+  private readonly primaryMutex: PrimaryMutex;
 
-  constructor(storage: StorageAdapter, eventService: EventService, eventHub: EventHub, automerge: AutomergeStoreHolder) {
+  constructor(
+    storage: StorageAdapter,
+    eventService: EventService,
+    eventHub: EventHub,
+    automerge: AutomergeStoreHolder,
+    primaryMutex: PrimaryMutex,
+  ) {
     this.storage = storage;
     this.eventService = eventService;
     this.eventHub = eventHub;
     this.automerge = automerge;
     this.publisher = new EventPublisher(eventService, eventHub);
+    this.primaryMutex = primaryMutex;
   }
 
   setDocumentService(documentService: DocumentService): void {
@@ -142,53 +151,60 @@ export class RevisionService {
     });
   }
 
-  restore(documentId: string, revisionNumber: number): RestoreResult {
-    const target = this.storage.getRevision(documentId, revisionNumber);
-    if (!target) {
-      throw new Error(`Revision not found: ${revisionNumber}`);
-    }
-    const store = this.automerge.get();
-    const heads = JSON.parse(target.heads) as string[];
-    const restoredContent = store.view(heads);
+  /** FIX 1 (CRITICAL): runs under this document's `PrimaryMutex` lock, same as every other
+   *  document-mutating path (`DocumentService.applyChanges`, `EditService.apply`, the
+   *  `propose_document_edit` tool — see primary-mutex.ts's own doc comment). Previously restore
+   *  read `store.view(heads)` and called `store.updateText(...)` completely unlocked, so a restore
+   *  landing while another mutation was mid-flight for the same document could silently corrupt it. */
+  restore(documentId: string, revisionNumber: number): Promise<RestoreResult> {
+    return this.primaryMutex.withLock(documentId, () => {
+      const target = this.storage.getRevision(documentId, revisionNumber);
+      if (!target) {
+        throw new Error(`Revision not found: ${revisionNumber}`);
+      }
+      const store = this.automerge.get();
+      const heads = JSON.parse(target.heads) as string[];
+      const restoredContent = store.view(heads);
 
-    // Dry-run reconciliation (T072a, http-api.md §POST /revisions/:revision/restore): computed
-    // against the would-be-restored content *before* anything below commits, and never mutates a
-    // staged_edit's status — a pure read used only to populate the response.
-    const pending = this.storage.listPendingStagedEdits(documentId);
-    const pendingProposalReconciliation: PendingProposalReconciliationEntry[] | undefined =
-      pending.length === 0
-        ? undefined
-        : pending.map((edit) => {
-            const result = reconcile(edit.operations, restoredContent);
-            return result.outcome === 'clean'
-              ? { stagedEditId: edit.id, reconcilable: true }
-              : { stagedEditId: edit.id, reconcilable: false, conflictDetail: result.detail };
-          });
+      // Dry-run reconciliation (T072a, http-api.md §POST /revisions/:revision/restore): computed
+      // against the would-be-restored content *before* anything below commits, and never mutates a
+      // staged_edit's status — a pure read used only to populate the response.
+      const pending = this.storage.listPendingStagedEdits(documentId);
+      const pendingProposalReconciliation: PendingProposalReconciliationEntry[] | undefined =
+        pending.length === 0
+          ? undefined
+          : pending.map((edit) => {
+              const result = reconcile(edit.operations, restoredContent);
+              return result.outcome === 'clean'
+                ? { stagedEditId: edit.id, reconcilable: true }
+                : { stagedEditId: edit.id, reconcilable: false, conflictDetail: result.detail };
+            });
 
-    store.updateText(restoredContent);
+      store.updateText(restoredContent);
 
-    const revisionRow = this.createRevision(documentId, {
-      source: 'user',
-      origin: 'restore',
-      restoredFrom: revisionNumber,
-      note: `Restored v${revisionNumber}`,
+      const revisionRow = this.createRevision(documentId, {
+        source: 'user',
+        origin: 'restore',
+        restoredFrom: revisionNumber,
+        note: `Restored v${revisionNumber}`,
+      });
+
+      this.publish(documentId, {
+        type: 'revision_restored',
+        sequence: null,
+        documentId,
+        conversationId: null,
+        at: revisionRow.createdAt,
+        data: { revision: revisionRow.revision, restoredFrom: revisionNumber, content: restoredContent },
+      });
+
+      return {
+        currentRevision: revisionRow.revision,
+        restoredFrom: revisionNumber,
+        content: restoredContent,
+        pendingProposalReconciliation,
+      };
     });
-
-    this.publish(documentId, {
-      type: 'revision_restored',
-      sequence: null,
-      documentId,
-      conversationId: null,
-      at: revisionRow.createdAt,
-      data: { revision: revisionRow.revision, restoredFrom: revisionNumber, content: restoredContent },
-    });
-
-    return {
-      currentRevision: revisionRow.revision,
-      restoredFrom: revisionNumber,
-      content: restoredContent,
-      pendingProposalReconciliation,
-    };
   }
 
   export(documentId: string, revisionNumber?: number): string | null {
