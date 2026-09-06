@@ -40,6 +40,18 @@ export class ConversationNotErroredError extends Error {}
 export class ConversationNotClosedError extends Error {}
 export class ConversationNotEmptyError extends Error {}
 export class AgentUnavailableError extends Error {}
+/**
+ * Safety guard (specs/006-archivable-main-conversation, FR-002/FR-003): a document must always
+ * have exactly one persistent, available Main conversation. Until the full "archive Main and spin
+ * up a replacement" feature (006) is built, the generic `close()` path must refuse to close a
+ * `kind === 'main'` conversation outright — nothing today ever creates a replacement Main once the
+ * existing one is closed (`ensureMain` only creates one when none exists at all, and a closed Main
+ * still exists, just unusable), so allowing this through would permanently strand the document
+ * without a usable Main. NOT YET mapped to an HTTP status in api/http/conversations.ts's
+ * `handleConversationError` dispatch table — that file is outside this pass's scope; until it's
+ * added there, this throw surfaces as an unmapped/500 error rather than a clean 4xx.
+ */
+export class CannotCloseMainConversationError extends Error {}
 /** Shared shape for "a branch/refresh would exceed a configured depth limit" (FR-*): both
  *  `MaxConversationDepthExceededError` and `MaxEditingDepthExceededError` carry the identical
  *  `{limit, attemptedDepth}` pair — the only thing distinguishing them is which limit was hit,
@@ -381,6 +393,14 @@ export class ConversationService {
    */
   close(conversationId: string, foldSummaryIntoParent: boolean): CloseConversationResponse {
     const conversation = this.getConversationOrThrow(conversationId);
+    if (conversation.kind === 'main') {
+      // See CannotCloseMainConversationError's doc comment: no replacement Main is ever spawned
+      // today, so closing Main here would permanently strand the document without one (FR-002).
+      throw new CannotCloseMainConversationError(
+        'The Main conversation cannot be closed. Archiving Main and replacing it with a fresh ' +
+          'one is not yet supported (specs/006-archivable-main-conversation).',
+      );
+    }
     if (conversation.status === 'closed') {
       return {
         conversationId,
