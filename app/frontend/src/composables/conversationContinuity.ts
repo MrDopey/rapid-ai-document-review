@@ -19,9 +19,8 @@ export interface ConversationContinuity {
 /**
  * Shared continuity-context logic, extracted from `ConversationThreadBox.vue` so
  * `ConversationView.vue`'s focus/detail view can render the exact same parent-continuity messages
- * the sidebar box does (bug fix: this had never been ported to the focus view, so a branch's
- * continuity context silently disappeared once its detail panel was opened). Relies on the
- * parent conversation's messages already being loaded into `store.messagesByConversation` — true
+ * the sidebar box does. Relies on the parent conversation's messages already being loaded into
+ * `store.messagesByConversation` — true
  * in practice because `DocumentCanvas.vue` mounts a `ConversationThreadBox` (which unconditionally
  * `loadDetail`s itself) for every conversation, parent included, regardless of focus state.
  */

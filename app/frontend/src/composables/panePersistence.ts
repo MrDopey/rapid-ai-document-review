@@ -117,14 +117,13 @@ export function persistSyncScrollEnabled(enabled: boolean): void {
  * persisting (or reaching) a state where both are false — these loaders/setters don't enforce that
  * invariant themselves.
  *
- * Bug-fix rename (editor-vs-canvas scope fix): this used to be "Canvas visible", gating the whole
- * `DocumentCanvas` pane (editor *and* the conversation sidebar/thread columns) via `App.vue`'s own
- * `v-show`. The conversation sidebar must stay visible/usable even when the document editor is
- * hidden, so the gate moved down into `DocumentCanvas.vue` itself as an `editorVisible` prop that
- * only affects its `EditorComponent` child — `App.vue`'s `DocumentCanvas` pane now always renders.
- * Renamed the key too (`raidr:canvasVisible` -> `raidr:editorVisible`) since its meaning changed;
- * a viewer with a previously-stored "canvas hidden" preference just resets to the new default
- * (editor visible) once, rather than silently reinterpreting the old value under its new meaning.
+ * `editorVisible` gates only `DocumentCanvas.vue`'s own `EditorComponent` child, not the whole
+ * `DocumentCanvas` pane — the conversation sidebar/thread columns must stay visible/usable even
+ * when the document editor is hidden, so `App.vue`'s `DocumentCanvas` pane always renders
+ * regardless of this flag. Persisted under its own key, `raidr:editorVisible`, distinct from any
+ * old `raidr:canvasVisible` key a viewer's browser might still hold — reusing that key would
+ * silently reinterpret a stored "canvas hidden" value under this flag's different meaning; a fresh
+ * key means such a viewer just resets to the default (editor visible) once instead.
  */
 const PREVIEW_VISIBLE_KEY = 'raidr:previewVisible';
 const EDITOR_VISIBLE_KEY = 'raidr:editorVisible';
