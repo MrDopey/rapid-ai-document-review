@@ -44,13 +44,12 @@ export class DocumentNotFoundError extends Error {}
  */
 export class DocumentOutOfSyncError extends Error {
   readonly statusCode = 409;
+  readonly currentRevision: number;
 
-  constructor(
-    message: string,
-    readonly currentRevision: number,
-  ) {
+  constructor(message: string, currentRevision: number) {
     super(message);
     this.name = 'DocumentOutOfSyncError';
+    this.currentRevision = currentRevision;
   }
 }
 
