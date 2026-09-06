@@ -22,7 +22,7 @@ import type { RunBuffer } from '../events/run-buffer.ts';
 import type { PiService } from '../pi/pi-service.ts';
 import type { TurnRunner } from '../pi/turn-runner.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
-import { toConversationDto } from './conversation-mapper.ts';
+import { toConversationDto, toConversationDtos } from './conversation-mapper.ts';
 import { toStagedEditDto } from '../edit/edit-mapper.ts';
 import {
   buildBranchSeedMessage,
@@ -245,9 +245,13 @@ export class ConversationService {
     // page — `getContent()` re-derives the whole document text from the CRDT and was previously
     // being called inside this `.map()`, redundantly re-materializing it once per row.
     const content = this.automerge.get().getContent();
+    // FIX: batch DTO construction via `toConversationDtos` instead of calling the single-row
+    // `toConversationDto` inside `.map()` — the batched form issues one `getSettings()` call and
+    // one pending-edits scan for the whole page instead of one each per row (see
+    // conversation-mapper.ts's doc comment on `toConversationDtos` for the measured N+1 impact).
     return {
       currentRevision: document.currentRevision,
-      conversations: page.items.map((row) => toConversationDto(this.storage, row, document.currentRevision, content)),
+      conversations: toConversationDtos(this.storage, page.items, document.currentRevision, content),
       nextCursor: page.nextCursor,
     };
   }
