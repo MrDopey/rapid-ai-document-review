@@ -97,6 +97,7 @@ The backend reads the following environment variables (`app/backend/src/config.t
 | `RADR_FE_BACKEND_PORT` | No | `3000` | Vite dev-server proxy target — must match `RADR_BE_PORT`. |
 | `RADR_FE_HOST` | No | `127.0.0.1` | Vite dev-server bind host. |
 | `RADR_FE_PORT` | No | `3001` | Vite dev-server port. |
+| `VITE_RADR_DIFF_CONTEXT_LINES` | No | `3` | Lines of unchanged context kept visible around each change in the Full document/Side by side/revision-comparison diff views before collapsing the rest (client-side; baked in at build time). |
 | `ANTHROPIC_API_KEY` | Only for live agent use | none | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable. |
 
 ### Model configuration precedence

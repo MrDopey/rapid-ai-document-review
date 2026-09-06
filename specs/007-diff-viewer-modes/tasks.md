@@ -45,8 +45,8 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 **⚠️ CRITICAL**: No user story task may begin until this phase is complete.
 
-- [ ] T001 Create `DiffText.vue` in `app/frontend/src/components/diff/DiffText.vue` implementing the `DiffTextProps` contract (`parts: Change[]`, `side: 'unified' | 'left' | 'right'`) from `specs/007-diff-viewer-modes/contracts/diff-text-component.md`: render each included segment as `<del class="removed">`/`<ins class="added">`/`<span>` with the marker glyph (`aria-hidden="true"`) and `.visually-hidden` "removed:"/"added:" label, always via `{{ part.value }}` text interpolation (never `v-html`); `side="left"` filters to `!part.added`, `side="right"` filters to `!part.removed`, `side="unified"` renders every part; include the `.removed`/`.added`/`.marker` scoped CSS rules (moved here as the single source per research.md R4/R9) using the existing `--danger-color`/`--danger-bg`/`--success-color`/`--success-bg` custom properties
-- [ ] T002 Create `app/frontend/tests/component/DiffText.spec.ts`: mount `DiffText.vue` directly with sample `Change[]` fixtures and assert (a) `side="unified"` renders every part in order with correct `<del>`/`<ins>`/`<span>` + marker + visually-hidden-label per FR-010's existing treatment, (b) `side="left"` omits added-only parts, `side="right"` omits removed-only parts, (c) a part containing `<`, `>`, `&` renders as literal text in `wrapper.html()` (never as unescaped markup) — validates FR-005/SC-002 at the shared-component level
+- [X] T001 Create `DiffText.vue` in `app/frontend/src/components/diff/DiffText.vue` implementing the `DiffTextProps` contract (`parts: Change[]`, `side: 'unified' | 'left' | 'right'`) from `specs/007-diff-viewer-modes/contracts/diff-text-component.md`: render each included segment as `<del class="removed">`/`<ins class="added">`/`<span>` with the marker glyph (`aria-hidden="true"`) and `.visually-hidden` "removed:"/"added:" label, always via `{{ part.value }}` text interpolation (never `v-html`); `side="left"` filters to `!part.added`, `side="right"` filters to `!part.removed`, `side="unified"` renders every part; include the `.removed`/`.added`/`.marker` scoped CSS rules (moved here as the single source per research.md R4/R9) using the existing `--danger-color`/`--danger-bg`/`--success-color`/`--success-bg` custom properties
+- [X] T002 Create `app/frontend/tests/component/DiffText.spec.ts`: mount `DiffText.vue` directly with sample `Change[]` fixtures and assert (a) `side="unified"` renders every part in order with correct `<del>`/`<ins>`/`<span>` + marker + visually-hidden-label per FR-010's existing treatment, (b) `side="left"` omits added-only parts, `side="right"` omits removed-only parts, (c) a part containing `<`, `>`, `&` renders as literal text in `wrapper.html()` (never as unescaped markup) — validates FR-005/SC-002 at the shared-component level
 
 **Checkpoint**: `DiffText.vue` exists, is unit-tested, and is ready to be consumed by both `DiffViewer.vue` (US1/US2/US3) and `RevisionDiffViewer.vue` (US4).
 
@@ -60,15 +60,15 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 ### Tests for User Story 1
 
-- [ ] T003 [P] [US1] Create `app/frontend/tests/component/DiffViewer.spec.ts` (new file; none exists today — see research.md R8) covering: Full-document view renders `.added`/`.removed` nodes for a diffing original/proposed pair; a document containing `<script>`, `<b>`, `&amp;` renders those characters literally (`wrapper.html()` assertion) in the Full-document view; a no-op edit (identical original/proposed) shows a "No differences found" message instead of plain text in the Full-document view; the existing hunk view's `.added`/`.removed` output is unchanged after the `DiffText.vue` migration (FR-010 regression guard)
+- [X] T003 [P] [US1] Create `app/frontend/tests/component/DiffViewer.spec.ts` (new file; none exists today — see research.md R8) covering: Full-document view renders `.added`/`.removed` nodes for a diffing original/proposed pair; a document containing `<script>`, `<b>`, `&amp;` renders those characters literally (`wrapper.html()` assertion) in the Full-document view; a no-op edit (identical original/proposed) shows a "No differences found" message instead of plain text in the Full-document view; the existing hunk view's `.added`/`.removed` output is unchanged after the `DiffText.vue` migration (FR-010 regression guard)
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] In `app/frontend/src/components/diff/DiffViewer.vue`, import `useDocumentStore` and add a local `originalSnapshot = ref('')`, set once inside `load()` from `useDocumentStore().content` at the same point `preview` is fetched (research.md R2) — do not read `store.content` reactively elsewhere in the component
-- [ ] T005 [US1] In `DiffViewer.vue`, add `fullDocDiff = computed(() => diffWords(originalSnapshot.value, preview.value?.fullPreview ?? ''))` and a derived `fullDocHasNoDiff = computed(() => fullDocDiff.value.length === 1 && !fullDocDiff.value[0].added && !fullDocDiff.value[0].removed)` (research.md R5, data-model.md "No-diff state")
-- [ ] T006 [US1] In `DiffViewer.vue`, replace the Full-document panel's `<pre class="text-wrap-safe-pre">{{ preview.fullPreview }}</pre>` with: a "No differences found." status message when `fullDocHasNoDiff` is true, otherwise `<pre class="text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="unified" /></pre>` (FR-001, FR-007)
-- [ ] T007 [US1] In `DiffViewer.vue`, migrate the existing hunk view's per-hunk `<del>/<ins>/<span>` template block to `<DiffText :parts="wordDiffs[i]" side="unified" />` (one per hunk), removing the now-redundant inline markup — must not change the hunk view's rendered output (FR-010)
-- [ ] T008 [US1] In `DiffViewer.vue`'s `<style scoped>` block, remove the now-duplicated `.removed`/`.added`/`.marker` rules (owned by `DiffText.vue` since T001); keep only rules still needed locally (e.g. panel/tab layout)
+- [X] T004 [US1] In `app/frontend/src/components/diff/DiffViewer.vue`, import `useDocumentStore` and add a local `originalSnapshot = ref('')`, set once inside `load()` from `useDocumentStore().content` at the same point `preview` is fetched (research.md R2) — do not read `store.content` reactively elsewhere in the component
+- [X] T005 [US1] In `DiffViewer.vue`, add `fullDocDiff = computed(() => diffWords(originalSnapshot.value, preview.value?.fullPreview ?? ''))` and a derived `fullDocHasNoDiff = computed(() => fullDocDiff.value.length === 1 && !fullDocDiff.value[0].added && !fullDocDiff.value[0].removed)` (research.md R5, data-model.md "No-diff state")
+- [X] T006 [US1] In `DiffViewer.vue`, replace the Full-document panel's `<pre class="text-wrap-safe-pre">{{ preview.fullPreview }}</pre>` with: a "No differences found." status message when `fullDocHasNoDiff` is true, otherwise `<pre class="text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="unified" /></pre>` (FR-001, FR-007)
+- [X] T007 [US1] In `DiffViewer.vue`, migrate the existing hunk view's per-hunk `<del>/<ins>/<span>` template block to `<DiffText :parts="wordDiffs[i]" side="unified" />` (one per hunk), removing the now-redundant inline markup — must not change the hunk view's rendered output (FR-010)
+- [X] T008 [US1] In `DiffViewer.vue`'s `<style scoped>` block, remove the now-duplicated `.removed`/`.added`/`.marker` rules (owned by `DiffText.vue` since T001); keep only rules still needed locally (e.g. panel/tab layout)
 
 **Checkpoint**: User Story 1 is fully functional and independently testable — "Full document" shows real highlighting, hunk view is unchanged, no-op edits show the no-diff message.
 
@@ -82,13 +82,13 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Extend `app/frontend/tests/component/DiffViewer.spec.ts`: selecting "Side by side" renders two columns; the left column shows only removed/unchanged segments, the right column shows only added/unchanged segments; a no-op edit shows "No differences found" in this view too; switching hunks → side-by-side → full-document → hunks calls `httpClient.previewEdit` exactly once total (FR-006)
+- [X] T009 [P] [US2] Extend `app/frontend/tests/component/DiffViewer.spec.ts`: selecting "Side by side" renders two columns; the left column shows only removed/unchanged segments, the right column shows only added/unchanged segments; a no-op edit shows "No differences found" in this view too; switching hunks → side-by-side → full-document → hunks calls `httpClient.previewEdit` exactly once total (FR-006)
 
 ### Implementation for User Story 2
 
-- [ ] T010 [US2] In `DiffViewer.vue`, extend `view = ref<'full' | 'hunks'>('hunks')` to `ref<'full' | 'hunks' | 'side-by-side'>('hunks')` and add a third tab button (`id="diff-tab-side-by-side"`, `aria-controls="diff-panel-side-by-side"`) to the existing `role="tablist"` toggle, following the same pattern as the existing two tabs (research.md R7)
-- [ ] T011 [US2] In `DiffViewer.vue`, add the `role="tabpanel"` Side-by-side panel (`id="diff-panel-side-by-side"`, `aria-labelledby="diff-tab-side-by-side"`, `tabindex="0"`, toggled via the `hidden` attribute like the other two panels — not `v-if`), containing two columns: left `<DiffText :parts="fullDocDiff" side="left" />`, right `<DiffText :parts="fullDocDiff" side="right" />` (reuses the `fullDocDiff` computed from T005 — no second diff computation), each showing the same "No differences found" fallback as Full-document when `fullDocHasNoDiff` is true
-- [ ] T012 [US2] In `DiffViewer.vue`'s `<style scoped>` block, add a two-column CSS grid (`grid-template-columns: 1fr 1fr`) for the Side-by-side panel, with each column independently `overflow: auto` and reusing the existing `.text-wrap-safe-pre` utility class for wrapping (research.md R6) — scoped locally, not hoisted to `style.css` (single consumer)
+- [X] T010 [US2] In `DiffViewer.vue`, extend `view = ref<'full' | 'hunks'>('hunks')` to `ref<'full' | 'hunks' | 'side-by-side'>('hunks')` and add a third tab button (`id="diff-tab-side-by-side"`, `aria-controls="diff-panel-side-by-side"`) to the existing `role="tablist"` toggle, following the same pattern as the existing two tabs (research.md R7)
+- [X] T011 [US2] In `DiffViewer.vue`, add the `role="tabpanel"` Side-by-side panel (`id="diff-panel-side-by-side"`, `aria-labelledby="diff-tab-side-by-side"`, `tabindex="0"`, toggled via the `hidden` attribute like the other two panels — not `v-if`), containing two columns: left `<DiffText :parts="fullDocDiff" side="left" />`, right `<DiffText :parts="fullDocDiff" side="right" />` (reuses the `fullDocDiff` computed from T005 — no second diff computation), each showing the same "No differences found" fallback as Full-document when `fullDocHasNoDiff` is true
+- [X] T012 [US2] In `DiffViewer.vue`'s `<style scoped>` block, add a two-column CSS grid (`grid-template-columns: 1fr 1fr`) for the Side-by-side panel, with each column independently `overflow: auto` and reusing the existing `.text-wrap-safe-pre` utility class for wrapping (research.md R6) — scoped locally, not hoisted to `style.css` (single consumer)
 
 **Checkpoint**: User Stories 1 AND 2 both work independently in `DiffViewer.vue`.
 
@@ -102,11 +102,11 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 ### Tests for User Story 3
 
-- [ ] T013 [P] [US3] Extend `app/frontend/tests/component/DiffViewer.spec.ts`: a freshly mounted `DiffViewer` (fresh `editId` prop, simulating `EditsList.vue`'s mount-per-open pattern) always starts with `view === 'hunks'`; after simulating a user selecting "Side by side," then re-mounting the component for a different `editId`, `view` is back to `'hunks'`
+- [X] T013 [P] [US3] Extend `app/frontend/tests/component/DiffViewer.spec.ts`: a freshly mounted `DiffViewer` (fresh `editId` prop, simulating `EditsList.vue`'s mount-per-open pattern) always starts with `view === 'hunks'`; after simulating a user selecting "Side by side," then re-mounting the component for a different `editId`, `view` is back to `'hunks'`
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] In `DiffViewer.vue`, confirm `view` is declared with its `ref('hunks')` default and is never persisted (e.g. no `localStorage`/store read at init) so that `EditsList.vue`'s existing mount-per-open pattern (`v-if="previewingEditId"`) naturally resets it on every new preview — no production code change expected if T010 preserved this; this task exists to make the guarantee explicit and verified by T013, not to add new logic
+- [X] T014 [US3] In `DiffViewer.vue`, confirm `view` is declared with its `ref('hunks')` default and is never persisted (e.g. no `localStorage`/store read at init) so that `EditsList.vue`'s existing mount-per-open pattern (`v-if="previewingEditId"`) naturally resets it on every new preview — no production code change expected if T010 preserved this; this task exists to make the guarantee explicit and verified by T013, not to add new logic
 
 **Checkpoint**: All three `DiffViewer.vue` view modes now work together, defaulting correctly.
 
@@ -120,14 +120,14 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 ### Tests for User Story 4
 
-- [ ] T015 [US4] Update `app/frontend/tests/component/RevisionDiffViewer.spec.ts`: loosen any assertion on `<ins>`/`<del>`'s exact `innerHTML` to assert on text content / class presence instead (to tolerate `DiffText.vue`'s new marker-glyph/visually-hidden-label child nodes — a like-for-like update, not a weakened check, per plan.md's Constitution Check note); add assertions for the marker glyph and visually-hidden label now present (FR-011); add assertions that selecting "Side by side" renders two columns filtered the same way as `DiffViewer.vue`'s (FR-012); assert the view defaults to `'unified'` and resets on a new revision comparison (FR-013); assert no additional `store.exportRevision` (or equivalent fetch) call occurs when switching view modes (FR-014)
+- [X] T015 [US4] Update `app/frontend/tests/component/RevisionDiffViewer.spec.ts`: loosen any assertion on `<ins>`/`<del>`'s exact `innerHTML` to assert on text content / class presence instead (to tolerate `DiffText.vue`'s new marker-glyph/visually-hidden-label child nodes — a like-for-like update, not a weakened check, per plan.md's Constitution Check note); add assertions for the marker glyph and visually-hidden label now present (FR-011); add assertions that selecting "Side by side" renders two columns filtered the same way as `DiffViewer.vue`'s (FR-012); assert the view defaults to `'unified'` and resets on a new revision comparison (FR-013); assert no additional `store.exportRevision` (or equivalent fetch) call occurs when switching view modes (FR-014)
 
 ### Implementation for User Story 4
 
-- [ ] T016 [US4] In `RevisionDiffViewer.vue`, replace the existing inline `<del class="removed">{{ part.value }}</del>` / `<ins class="added">{{ part.value }}</ins>` / `<span>{{ part.value }}</span>` loop with `<DiffText :parts="diffParts" side="unified" />`, keeping `diffParts = computed(() => diffLines(previousText.value, currentText.value))` unchanged (granularity stays `diffLines`, per research.md R9 — do not switch to `diffWords`)
-- [ ] T017 [US4] In `RevisionDiffViewer.vue`, add `view = ref<'unified' | 'side-by-side'>('unified')` and a two-tab `role="tablist"` toggle (mirroring `DiffViewer.vue`'s pattern from T010), with both panels mounted and toggled via the `hidden` attribute
-- [ ] T018 [US4] In `RevisionDiffViewer.vue`, add the Side-by-side panel: two columns reusing the same `diffParts` computed — left `<DiffText :parts="diffParts" side="left" />`, right `<DiffText :parts="diffParts" side="right" />` — with the same two-column CSS grid approach as `DiffViewer.vue` (mirrors T012)
-- [ ] T019 [US4] In `RevisionDiffViewer.vue`'s `<style scoped>` block, remove the now-duplicated `.removed`/`.added`/`.marker` rules (owned by `DiffText.vue` since T001), keeping only rules still needed locally (e.g. the new grid layout from T018)
+- [X] T016 [US4] In `RevisionDiffViewer.vue`, replace the existing inline `<del class="removed">{{ part.value }}</del>` / `<ins class="added">{{ part.value }}</ins>` / `<span>{{ part.value }}</span>` loop with `<DiffText :parts="diffParts" side="unified" />`, keeping `diffParts = computed(() => diffLines(previousText.value, currentText.value))` unchanged (granularity stays `diffLines`, per research.md R9 — do not switch to `diffWords`)
+- [X] T017 [US4] In `RevisionDiffViewer.vue`, add `view = ref<'unified' | 'side-by-side'>('unified')` and a two-tab `role="tablist"` toggle (mirroring `DiffViewer.vue`'s pattern from T010), with both panels mounted and toggled via the `hidden` attribute
+- [X] T018 [US4] In `RevisionDiffViewer.vue`, add the Side-by-side panel: two columns reusing the same `diffParts` computed — left `<DiffText :parts="diffParts" side="left" />`, right `<DiffText :parts="diffParts" side="right" />` — with the same two-column CSS grid approach as `DiffViewer.vue` (mirrors T012)
+- [X] T019 [US4] In `RevisionDiffViewer.vue`'s `<style scoped>` block, remove the now-duplicated `.removed`/`.added`/`.marker` rules (owned by `DiffText.vue` since T001), keeping only rules still needed locally (e.g. the new grid layout from T018)
 
 **Checkpoint**: Both diff experiences in the app (`DiffViewer.vue` and `RevisionDiffViewer.vue`) share identical rendering/accessibility treatment via `DiffText.vue`, and both offer a side-by-side option.
 
@@ -137,9 +137,9 @@ depends on (see research.md R4, data-model.md, contracts/diff-text-component.md)
 
 **Purpose**: Verify the whole feature end-to-end, across both components, with no regressions.
 
-- [ ] T020 [P] Run `npx vitest run tests/component` (full suite) in `app/frontend` — confirm `DiffViewer.spec.ts`, `DiffText.spec.ts`, `RevisionDiffViewer.spec.ts`, and `EditsList.spec.ts` all pass with no regressions
-- [ ] T021 Execute the manual validation steps in `specs/007-diff-viewer-modes/quickstart.md` (all 6 sections, covering US1–US4 and edge cases) against a running dev instance
-- [ ] T022 [P] Performance sanity check: with a typical-size review document, confirm Full-document and Side-by-side rendering (both components) completes within ~2 seconds of selecting the tab (SC-004)
+- [X] T020 [P] Run `npx vitest run tests/component` (full suite) in `app/frontend` — confirm `DiffViewer.spec.ts`, `DiffText.spec.ts`, `RevisionDiffViewer.spec.ts`, and `EditsList.spec.ts` all pass with no regressions
+- [X] T021 Execute the manual validation steps in `specs/007-diff-viewer-modes/quickstart.md` (all 6 sections, covering US1–US4 and edge cases) against a running dev instance
+- [X] T022 [P] Performance sanity check: with a typical-size review document, confirm Full-document and Side-by-side rendering (both components) completes within ~2 seconds of selecting the tab (SC-004)
 
 ---
 

@@ -4,15 +4,40 @@ import { diffWords } from 'diff';
 import type { PreviewEditResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient } from '../../transport/http-client.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
+import { useDocumentStore } from '../../stores/document.js';
+import DiffText from './DiffText.vue';
+import { splitIntoLines, groupByContext, groupParts, type DiffGroup } from './collapseUnchanged.js';
+import { diffContextLinesFromEnv } from '../../composables/diffContextConfig.js';
 
 const props = defineProps<{ editId: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
+const documentStore = useDocumentStore();
+
 const preview = ref<PreviewEditResponse | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
-const view = ref<'full' | 'hunks'>('hunks');
+const view = ref<'full' | 'hunks' | 'side-by-side'>('hunks');
 const rootEl = ref<HTMLElement | null>(null);
+const originalSnapshot = ref('');
+// FR-focused-diff: Full document / Side by side default to a collapsed, context-window view (like
+// a classic unified diff) so a reviewer isn't stuck scrolling past long unchanged stretches;
+// "Show full document" reveals everything. Manually-expanded collapsed groups are tracked by
+// index and reset on every fresh `load()` (a new editId's groups don't line up with the old ones).
+const focusedView = ref(true);
+const expandedGroupIndexes = ref<Set<number>>(new Set());
+
+function expandGroup(index: number): void {
+  expandedGroupIndexes.value = new Set(expandedGroupIndexes.value).add(index);
+}
+function isGroupVisible(group: DiffGroup, index: number): boolean {
+  return group.type === 'visible' || expandedGroupIndexes.value.has(index);
+}
+// Toggling focus off and back on should return to the default collapsed state, not remember
+// which groups a prior look at the full document happened to expand.
+watch(focusedView, () => {
+  expandedGroupIndexes.value = new Set();
+});
 
 // FR-043d: this component only ever exists in the DOM while its preview dialog is open (the
 // parent, EditsList.vue, mounts/unmounts it via `v-if`) — so "active" is simply "for as long as
@@ -24,6 +49,8 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
+    originalSnapshot.value = documentStore.content;
+    expandedGroupIndexes.value = new Set();
     preview.value = await httpClient.previewEdit(props.editId);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load preview.';
@@ -37,6 +64,19 @@ watch(() => props.editId, load);
 
 const wordDiffs = computed(() =>
   (preview.value?.hunks ?? []).map((hunk) => diffWords(hunk.removed, hunk.added)),
+);
+
+const fullDocDiff = computed(() =>
+  diffWords(originalSnapshot.value, preview.value?.fullPreview ?? ''),
+);
+const fullDocHasNoDiff = computed(
+  () =>
+    fullDocDiff.value.length === 1 &&
+    !fullDocDiff.value[0].added &&
+    !fullDocDiff.value[0].removed,
+);
+const fullDocGroups = computed(() =>
+  groupByContext(splitIntoLines(fullDocDiff.value), diffContextLinesFromEnv),
 );
 </script>
 
@@ -66,7 +106,21 @@ const wordDiffs = computed(() =>
           >
             Full document
           </button>
+          <button
+            id="diff-tab-side-by-side"
+            type="button"
+            role="tab"
+            :aria-selected="view === 'side-by-side'"
+            aria-controls="diff-panel-side-by-side"
+            @click="view = 'side-by-side'"
+          >
+            Side by side
+          </button>
         </div>
+        <label v-if="view !== 'hunks' && !fullDocHasNoDiff" class="focus-toggle">
+          <input v-model="focusedView" type="checkbox" />
+          Focus on changes
+        </label>
       </div>
       <button type="button" class="close-button" @click="emit('close')">Close</button>
     </header>
@@ -106,17 +160,7 @@ const wordDiffs = computed(() =>
           <div v-for="(hunk, i) in preview.hunks" :key="hunk.operationIndex" class="hunk">
             <p class="hunk-context">…{{ hunk.contextBefore }}</p>
             <p class="hunk-diff text-wrap-safe-pre">
-              <template v-for="(part, j) in wordDiffs[i]" :key="j">
-                <del v-if="part.removed" class="removed">
-                  <span class="marker" aria-hidden="true">−</span>
-                  <span class="visually-hidden">removed:</span>{{ part.value }}
-                </del>
-                <ins v-else-if="part.added" class="added">
-                  <span class="marker" aria-hidden="true">+</span>
-                  <span class="visually-hidden">added:</span>{{ part.value }}
-                </ins>
-                <span v-else>{{ part.value }}</span>
-              </template>
+              <DiffText :parts="wordDiffs[i]" side="unified" />
             </p>
             <p class="hunk-context">{{ hunk.contextAfter }}…</p>
           </div>
@@ -130,7 +174,40 @@ const wordDiffs = computed(() =>
           tabindex="0"
           :hidden="view !== 'full'"
         >
-          <pre class="text-wrap-safe-pre">{{ preview.fullPreview }}</pre>
+          <p v-if="fullDocHasNoDiff">No differences found.</p>
+          <pre v-else-if="!focusedView" class="text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="unified" /></pre>
+          <pre v-else class="text-wrap-safe-pre"><template v-for="(group, i) in fullDocGroups" :key="i"><DiffText v-if="isGroupVisible(group, i)" :parts="groupParts(group)" side="unified" /><button v-else type="button" class="collapsed-marker" @click="expandGroup(i)">⋯ {{ group.lines.length }} unchanged line{{ group.lines.length === 1 ? '' : 's' }} ⋯</button></template></pre>
+        </div>
+
+        <div
+          id="diff-panel-side-by-side"
+          class="side-by-side-view"
+          role="tabpanel"
+          aria-labelledby="diff-tab-side-by-side"
+          tabindex="0"
+          :hidden="view !== 'side-by-side'"
+        >
+          <p v-if="fullDocHasNoDiff">No differences found.</p>
+          <div v-else-if="!focusedView" class="side-by-side-columns">
+            <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="left" /></pre>
+            <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="fullDocDiff" side="right" /></pre>
+          </div>
+          <div v-else class="side-by-side-columns">
+            <template v-for="(group, i) in fullDocGroups" :key="i">
+              <template v-if="isGroupVisible(group, i)">
+                <pre class="diff-column-left text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="left" /></pre>
+                <pre class="diff-column-right text-wrap-safe-pre"><DiffText :parts="groupParts(group)" side="right" /></pre>
+              </template>
+              <button
+                v-else
+                type="button"
+                class="collapsed-marker collapsed-marker--full-row"
+                @click="expandGroup(i)"
+              >
+                ⋯ {{ group.lines.length }} unchanged line{{ group.lines.length === 1 ? '' : 's' }} ⋯
+              </button>
+            </template>
+          </div>
         </div>
       </template>
     </template>
@@ -154,6 +231,13 @@ const wordDiffs = computed(() =>
   background: var(--panel-bg, #f7f7f8);
   border-bottom: 2px solid var(--border-color, #ddd);
   border-radius: 8px 8px 0 0;
+  /* Sticky within `.diff-viewer` (the scrolling dialog body) so the view tabs, the focus
+     toggle, and Close stay reachable while scrolling a long diff — `top` matches this element's
+     own negative margin so it stays flush with the dialog's edge instead of jumping down to the
+     padding edge the moment it starts sticking. */
+  position: sticky;
+  top: -1rem;
+  z-index: 1;
 }
 .diff-header-left {
   display: flex;
@@ -165,6 +249,29 @@ const wordDiffs = computed(() =>
 .view-toggle button[aria-selected='true'] {
   font-weight: 600;
   text-decoration: underline;
+}
+.focus-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.collapsed-marker {
+  display: block;
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0.35rem;
+  margin: 0.25rem 0;
+  color: var(--neutral-muted-color, #4b5563);
+  background: var(--panel-bg, #f7f7f8);
+  border: 1px dashed var(--border-color, #ddd);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.collapsed-marker--full-row {
+  grid-column: 1 / -1;
 }
 .conflict-banner {
   padding: 0.5rem 0.75rem;
@@ -190,23 +297,22 @@ const wordDiffs = computed(() =>
 .hunk-diff {
   margin: 0.35rem 0;
 }
-.removed {
-  color: var(--danger-color, #991b1b);
-  background: var(--danger-bg, #fee2e2);
-  text-decoration: line-through;
-}
-.added {
-  color: var(--success-color, #065f46);
-  background: var(--success-bg, #d1fae5);
-  text-decoration: none;
-}
-.marker {
-  font-weight: 700;
-  margin-right: 0.15rem;
-}
+/* `.removed`/`.added`/`.marker` are owned by DiffText.vue (single source, see research.md R4/R9). */
 /* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
    style.css (previously missing `overflow-wrap` here, a real sub-bug). */
 .full-preview pre {
   font-family: inherit;
+}
+.side-by-side-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.diff-column-left,
+.diff-column-right {
+  font-family: inherit;
+  overflow: auto;
+  margin: 0;
+  min-width: 0;
 }
 </style>
