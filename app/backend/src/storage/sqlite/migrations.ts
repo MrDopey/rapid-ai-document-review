@@ -124,6 +124,12 @@ const STATEMENTS: string[] = [
 
     UNIQUE (document_id, sequence)
   )`,
+  // `listEventsByConversation` (storage/sqlite/index.ts) does `WHERE conversation_id = ?` for
+  // every `GET /conversations/:id` (and send/retry/branch/discardIfEmpty via `buildMessages`) —
+  // without this it's a full scan of the whole document's event table regardless of which
+  // conversation is requested (measured: 17ms -> 200-250ms once the table held ~2,500 rows).
+  `CREATE INDEX IF NOT EXISTS idx_conversation_event_conversation_id
+    ON conversation_event (conversation_id)`,
   `CREATE TABLE IF NOT EXISTS user_settings (
     id                       INTEGER PRIMARY KEY CHECK (id = 1),
 
