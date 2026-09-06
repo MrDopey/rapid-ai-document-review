@@ -16,8 +16,6 @@ import { AutomergeStore } from './automerge-store.ts';
 import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
 import type { RevisionService } from './revision-service.ts';
 
-const OUT_OF_SYNC_REVISION_THRESHOLD = 50;
-
 export interface DocumentChangeSpec {
   from: number;
   to: number;
@@ -26,6 +24,37 @@ export interface DocumentChangeSpec {
 
 export class DocumentAlreadyExistsError extends Error {}
 export class DocumentNotFoundError extends Error {}
+
+/**
+ * Thrown by `applyChanges` when the client's `baseRevision` no longer matches
+ * `currentRevision`: the `{from, to, insert}` character offsets in `changes` were computed by the
+ * frontend against whatever text it held locally, and the document has since moved on (e.g. a
+ * Primary conversation's agent edit landed while this manual edit was in flight, or another
+ * browser tab wrote first). Automerge's CRDT convergence guarantees do not make a numeric offset
+ * computed against old text keep naming the same logical span once the document's shape has
+ * changed — silently splicing it in anyway (the previous behavior here) risks corrupting content.
+ * This is a hard reject, not a merge attempt; the caller is expected to refetch the current
+ * document and let the user redo their edit.
+ *
+ * No route currently has a dedicated `instanceof` catch clause for this error (unlike
+ * `DocumentAlreadyExistsError`/`DocumentNotFoundError` in `api/http/document.ts`), so it propagates
+ * to Fastify's default error handler. That handler reads a thrown error's own `status`/`statusCode`
+ * property (see `fastify/lib/error-handler.js`'s `setErrorHeaders`) to pick the response status even
+ * with no custom handler registered, so the `statusCode` below is enough on its own to surface this
+ * as an HTTP 409 — routing it through the shared `sendError`/`ErrorCode` envelope used elsewhere is
+ * left for a follow-up (see this file's `applyChanges` doc comment and the fix report).
+ */
+export class DocumentOutOfSyncError extends Error {
+  readonly statusCode = 409;
+
+  constructor(
+    message: string,
+    readonly currentRevision: number,
+  ) {
+    super(message);
+    this.name = 'DocumentOutOfSyncError';
+  }
+}
 
 export interface CreateDocumentResult {
   document: DocumentDto;
@@ -280,12 +309,15 @@ export class DocumentService {
     }
 
     if (changes && changes.length > 0) {
-      if (baseRevision !== undefined && doc.currentRevision - baseRevision > OUT_OF_SYNC_REVISION_THRESHOLD) {
-        // No `event` field: this is a diagnostic about the client's request, not one of the
-        // closed vocabulary's own domain events (FR-042).
-        logger.warn(
-          { documentId: doc.id, baseRevision, currentRevision: doc.currentRevision },
-          'client applying changes from a badly out-of-sync base revision',
+      // Hard reject on ANY base-revision mismatch — see `DocumentOutOfSyncError`. This replaces a
+      // previous coarse diagnostic that only log-warned past a 50-revision drift and otherwise
+      // applied `changes` regardless; that left every smaller mismatch (a single concurrent edit
+      // landing first, which is the common case) silently applying stale offsets.
+      if (baseRevision !== undefined && baseRevision !== doc.currentRevision) {
+        throw new DocumentOutOfSyncError(
+          `Document has changed since baseRevision ${baseRevision} (current revision is ` +
+            `${doc.currentRevision}); refetch the document via GET /api/document and retry your edit.`,
+          doc.currentRevision,
         );
       }
 
