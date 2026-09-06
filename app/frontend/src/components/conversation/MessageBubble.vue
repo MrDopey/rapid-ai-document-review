@@ -12,12 +12,7 @@ import type { ConversationMessageState } from '../../stores/conversations.js';
 // `ConversationView.vue`'s full/focused transcript alike — passes `expanded` explicitly and owns
 // the per-message state itself (data-model.md scopes `MessageDisplayState` by `messageId`, not per-
 // conversation, so the parent — not this component — is the natural owner of "all my messages'"
-// combined state, which `ConversationThreadBox.vue`'s bulk toggle, FR-009, needs). Bug fix history:
-// `ConversationView.vue` used to be the one caller that relied on this default instead of wiring up
-// its own state — since the toggle button still renders whenever content overflows, regardless of
-// `expanded`'s value, that left a "Show more"/"Show less" button in the focused view whose click
-// went nowhere (nothing listened for `update:expanded`). See `ConversationView.vue`'s own
-// `expandedByMessage` for the fix.
+// combined state, which `ConversationThreadBox.vue`'s bulk toggle, FR-009, needs).
 const props = withDefaults(defineProps<{ message: ConversationMessageState; seed?: boolean; expanded?: boolean }>(), {
   expanded: true,
 });
@@ -141,14 +136,14 @@ const safeReasoning = computed(() =>
   gap: 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
-  /* Contrast fix: a flat opacity reduction on inherited text color is background-dependent and
-     measured well under 4.5:1 in dark mode. `--neutral-muted-color` is a real token already
-     validated to clear 4.5:1 against panel/bubble backgrounds in both schemes (see style.css) —
-     use it directly instead, same as the seed-card variant already did. */
+  /* A flat opacity reduction on inherited text color is background-dependent and can measure
+     under 4.5:1 in dark mode. `--neutral-muted-color` is a real token already validated to clear
+     4.5:1 against panel/bubble backgrounds in both schemes (see style.css) — use it directly
+     instead of opacity, same approach as the seed-card variant. */
   color: var(--neutral-muted-color, #4b5563);
   margin-bottom: 0.25rem;
 }
-/* Contrast fix (a11y audit regression): `.message-role-label` sits on this bubble's own tint
+/* `.message-role-label` sits on this bubble's own tint
    (`--user-bubble-bg`/`--assistant-bubble-bg`, both translucent), not a flat panel surface, so it
    needs style.css's tinted-surface token, `--neutral-muted-color-on-tint`, rather than the
    flat-surface `--neutral-muted-color` its `.message-role` parent uses above. In dark mode that
@@ -163,8 +158,8 @@ const safeReasoning = computed(() =>
 /* `.text-wrap-safe`'s shared overflow-wrap/pre/code handling now lives in style.css —
    `.message-bubble`/`.message-list` are plain block boxes here (not flex/grid items), so no
    `min-width: 0` is needed to let anything shrink; `overflow-wrap` alone was what was missing. */
-/* Fix 5: embedded Markdown headings (e.g. a branch-seed excerpt's own section heading) must not
-   render at full document size inside a ~350px-wide chat bubble — that crowds out the message. */
+/* Embedded Markdown headings (e.g. a branch-seed excerpt's own section heading) must not render at
+   full document size inside a ~350px-wide chat bubble — that crowds out the message. */
 .message-text :deep(h1) {
   font-size: 1.1rem;
 }
@@ -201,19 +196,19 @@ const safeReasoning = computed(() =>
   margin-bottom: 0;
 }
 /* research.md §4: real <button>, minimum 24x24px hit area regardless of the bubble's density.
-   Contrast fix (T037): `--accent-color` measured a thin 4.34:1 against `--user-bubble-bg` (both
-   derive from the same blue, so text-on-tint here is a worse case than most other uses of
-   `--accent-color`) — `--neutral-muted-color` is the same already-validated 4.5:1+ token
-   `.stale-badge`/`.no-primary-badge` use for exactly this reason.
-   Visual-affordance fix: a visible border/background (not just underline-on-hover) so this reads
-   as a clickable control at a glance, distinct from the plain-text `.message-role-label` next to it
-   — matching `ConversationThreadBox.vue`'s `.thread-action-button` treatment.
-   Dark-mode contrast fix: this button's own background is the same `--panel-bg` token as its
-   ancestor `.conversation-thread-box`, and `--border-color` measures only ~1.4-1.6:1 against that
+   `--accent-color` measures a thin 4.34:1 against `--user-bubble-bg` (both derive from the same
+   blue, so text-on-tint here is a worse case than most other uses of `--accent-color`) —
+   `--neutral-muted-color` is the same already-validated 4.5:1+ token `.stale-badge`/
+   `.no-primary-badge` use for exactly this reason.
+   A visible border/background (not just underline-on-hover) makes this read as a clickable
+   control at a glance, distinct from the plain-text `.message-role-label` next to it — matching
+   `ConversationThreadBox.vue`'s `.thread-action-button` treatment.
+   This button's own background is the same `--panel-bg` token as its ancestor
+   `.conversation-thread-box`, and `--border-color` measures only ~1.4-1.6:1 against that
    background in dark mode — under WCAG 1.4.11's 3:1 non-text-contrast minimum, so the button's
-   boundary was effectively invisible against the box (same root cause as `.thread-action-button`
-   above). `--neutral-muted-color` clears 3:1 (in fact 4.5:1+) against `--panel-bg` in both color
-   schemes. */
+   boundary would be effectively invisible against the box (same root cause as
+   `.thread-action-button` above). `--neutral-muted-color` clears 3:1 (in fact 4.5:1+) against
+   `--panel-bg` in both color schemes. */
 .expand-toggle-button {
   display: inline-flex;
   align-items: center;

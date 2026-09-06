@@ -183,8 +183,7 @@ const identical = computed(
    `.focus-toggle`, `.collapsed-marker`, `.collapsed-marker--full-row`, `.side-by-side-columns`,
    and `.diff-column-left`/`.diff-column-right` are shared with DiffViewer.vue and now live in
    style.css. */
-/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
-   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling lives in style.css. */
 .diff-body {
   font-family: inherit;
 }

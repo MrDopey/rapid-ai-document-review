@@ -232,20 +232,18 @@ const fullDocHasNoDiff = computed(
   border-radius: 6px;
 }
 .hunk-context {
-  /* Raised from 0.6 (4.95:1 — a thin margin over the 4.5:1 minimum) to match the same 0.7 used
-     for `.pane-eyebrow` and `.message-role` elsewhere, for real headroom. */
+  /* 0.7 matches the same opacity used for `.pane-eyebrow` and `.message-role` elsewhere, giving
+     real headroom over the 4.5:1 contrast minimum. */
   opacity: 0.7;
   font-size: 0.85rem;
   margin: 0.15rem 0;
 }
-/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
-   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling lives in style.css. */
 .hunk-diff {
   margin: 0.35rem 0;
 }
 /* `.removed`/`.added`/`.marker` are owned by DiffText.vue (single source, see research.md R4/R9). */
-/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling now lives in
-   style.css (previously missing `overflow-wrap` here, a real sub-bug). */
+/* `.text-wrap-safe-pre`'s shared overflow-x/white-space/overflow-wrap handling lives in style.css. */
 .full-preview pre {
   font-family: inherit;
 }
