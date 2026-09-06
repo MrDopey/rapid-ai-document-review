@@ -297,4 +297,28 @@ describe('DiffViewer', () => {
     expect(freshWrapper.find('#diff-panel-hunks').attributes('hidden')).toBeUndefined();
     expect(freshWrapper.find('#diff-panel-side-by-side').attributes('hidden')).toBeDefined();
   });
+
+  // Bug fix (e2b3ff1): a proposal that no longer applies cleanly (reconcilable: false) only ever
+  // shows the conflict banner — the tab row (Added/removed, Full document, Side by side) has no
+  // meaningful content to switch between at that point, so it's hidden rather than left clickable.
+  it('hides the view-tab row entirely when the proposal is not reconcilable (FR-0xx conflict banner)', async () => {
+    const store = useDocumentStore();
+    store.content = 'Line one.\nLine two.\nLine three.';
+    vi.mocked(httpClient.previewEdit).mockResolvedValue(
+      preview({
+        reconcilable: false,
+        conflictDetail: { operations: [{ index: 0, reason: 'not_found', occurrences: 0 }] },
+      }),
+    );
+
+    const wrapper = mountViewer(pinia);
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(false);
+    expect(wrapper.find('#diff-tab-hunks').exists()).toBe(false);
+    expect(wrapper.find('#diff-tab-full').exists()).toBe(false);
+    expect(wrapper.find('#diff-tab-side-by-side').exists()).toBe(false);
+    expect(wrapper.find('.conflict-banner').exists()).toBe(true);
+  });
 });
