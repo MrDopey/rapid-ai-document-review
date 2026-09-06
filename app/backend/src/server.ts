@@ -49,10 +49,6 @@ export function buildApp() {
   const getSnapshot = (documentId: string): DocumentSnapshot => {
     const doc = storage.getDocument();
     const content = automergeHolder.isSet() ? automergeHolder.get().getContent() : '';
-    // FIX: batch DTO construction via `toConversationDtos` instead of calling the single-row
-    // `toConversationDto` inside `.map()` — see conversation-mapper.ts's doc comment on
-    // `toConversationDtos` for the measured N+1 impact (this WS-subscribe snapshot builder is one
-    // of the two call sites that comment calls out).
     const conversations = toConversationDtos(
       storage,
       storage.listAllConversations(documentId),
@@ -74,11 +70,9 @@ export function buildApp() {
 
   const eventHub = new EventHub(eventService, getSnapshot);
   const automergeHolder = new AutomergeStoreHolder();
-  // Constructed ahead of RevisionService/DocumentService/EditService (moved up from further below)
-  // since all three now depend on it too (FIX 4/FIX 1): PrimaryMutex has generalized from just
-  // guarding `propose_document_edit`/Primary-designation switches into the one per-document write
-  // lock every document-mutating path serializes against, `RevisionService.restore` included (see
-  // primary-mutex.ts).
+  // Constructed ahead of RevisionService/DocumentService/EditService since all three depend on it
+  // as the one per-document write lock every document-mutating path serializes against,
+  // `RevisionService.restore` included (see primary-mutex.ts).
   const primaryMutex = new PrimaryMutex();
   const revisionService = new RevisionService(storage, eventService, eventHub, automergeHolder, primaryMutex);
   const documentService = new DocumentService(
@@ -129,9 +123,8 @@ export function buildApp() {
 
   const primaryService = new PrimaryService(storage, eventService, eventHub, primaryMutex);
 
-  // ConversationService split (959-line/5-responsibility cleanup): fold-summary delivery and
-  // closed-conversation review are extracted into their own collaborators, sharing the same
-  // storage/piService/publisher primitives ConversationService itself gets injected below.
+  // Fold-summary delivery and closed-conversation review are separate collaborators, sharing the
+  // same storage/piService/publisher primitives ConversationService itself gets injected below.
   const conversationEventPublisher = new EventPublisher(eventService, eventHub);
   const conversationFoldService = new ConversationFoldService(storage, piService, conversationEventPublisher);
   const conversationReviewService = new ConversationReviewService(

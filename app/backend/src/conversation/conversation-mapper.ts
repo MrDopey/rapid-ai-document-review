@@ -2,16 +2,16 @@ import type { ConversationDto, ConversationSeedSelectionDto } from '@rapid-ai-do
 import type { ConversationRow, StorageAdapter, UserSettingsRow } from '../storage/storage-adapter.ts';
 
 /**
- * Resolves a stored anchor against the CURRENT document (review finding #1). A naive
+ * Resolves a stored anchor against the CURRENT document. A naive
  * `documentContent.slice(from, to) !== text` check is a false-positive machine: any edit applied
  * anywhere EARLIER in the document shifts every later raw offset, so an anchor whose text is still
  * present, byte-for-byte, just at a new offset, would otherwise get flagged `anchorOrphaned: true`.
  *
- * Fix: only trust the raw offset as a fast path when it still matches verbatim. Otherwise search
- * the whole document for the anchor text (same "anchored find" idea `text-anchor.ts`'s `reconcile`
- * already uses for staged edits) and, if found, treat the closest occurrence to the original offset
- * as the anchor's true current position — a true orphan is only text that no longer appears
- * anywhere in the document at all.
+ * The raw offset is trusted as a fast path only when it still matches verbatim. Otherwise the
+ * whole document is searched for the anchor text (same "anchored find" idea `text-anchor.ts`'s
+ * `reconcile` already uses for staged edits) and, if found, the closest occurrence to the original
+ * offset is treated as the anchor's true current position — a true orphan is only text that no
+ * longer appears anywhere in the document at all.
  */
 function resolveSeedSelection(
   documentContent: string,
@@ -114,23 +114,18 @@ export function toConversationDto(
 }
 
 /**
- * Batch counterpart of `toConversationDto` (review finding #2 — measured WS-subscribe snapshot
- * latency going from 2.7ms at 0 conversations to 54ms at 1,200, unpaginated). `toConversationDto`
- * costs one `getSettings()` call plus one `listStagedEditsByConversation()` call EVERY time it's
- * invoked, so any `rows.map(row => toConversationDto(...))` loop turns into 2N storage round trips
- * for N rows in one request.
+ * Batch counterpart of `toConversationDto`. `toConversationDto` costs one `getSettings()` call
+ * plus one `listStagedEditsByConversation()` call EVERY time it's invoked, so any
+ * `rows.map(row => toConversationDto(...))` loop turns into 2N storage round trips for N rows in
+ * one request.
  *
  * This fetches `getSettings()` once and pending staged edits once per distinct `documentId` among
  * `rows` (normally exactly one query, since a request's rows are almost always all for the same
  * document) via the already-batch-shaped `listPendingStagedEdits(documentId)`, groups them by
  * conversation id in memory, and reuses both across every row — collapsing the per-row loop to a
- * constant number of storage calls regardless of row count.
- *
- * Existing call sites that currently do `rows.map((row) => toConversationDto(storage, row, ...))`
- * (`server.ts`'s WS-subscribe snapshot builder, `ConversationService.getAll`) need to switch to
- * calling this once over the whole array to actually realize the fix — `toConversationDto` itself
- * is kept as-is, unchanged, for single-row call sites (branch/rename/review/etc.) where there's no
- * N+1 to begin with.
+ * constant number of storage calls regardless of row count. Used by both `server.ts`'s WS-subscribe
+ * snapshot builder and `ConversationService.getAll`. `toConversationDto` itself is kept as-is for
+ * single-row call sites (branch/rename/review/etc.) where there's no N+1 to begin with.
  */
 export function toConversationDtos(
   storage: StorageAdapter,
