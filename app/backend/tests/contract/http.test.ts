@@ -1672,7 +1672,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const res = await call(ctx.app, 'GET', '/api/system-prompt');
       expect(res.status).toBe(200);
       const parsed = SystemPromptDto.parse(res.json);
-      expect(parsed.systemPrompt).toContain('AI reviewer embedded in a document review application');
+      expect(parsed.systemPrompt).toContain(
+        'AI reviewer embedded in a document review application',
+      );
     });
   });
 });

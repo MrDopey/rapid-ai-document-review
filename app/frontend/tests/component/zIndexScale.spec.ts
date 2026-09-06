@@ -66,13 +66,19 @@ function expectZIndexToken(raw: string, expectedToken: string, expectedValue: nu
  *  name in `tiersToBeat` — the invariant that actually matters for a "must render above X" overlay
  *  (must outrank --z-overlay-detail/--z-overlay-primary), without pinning the test to one specific
  *  token name/value the way `expectZIndexToken` does. */
-function expectZIndexAbove(raw: string, tokens: Record<string, number>, tiersToBeat: string[]): void {
+function expectZIndexAbove(
+  raw: string,
+  tokens: Record<string, number>,
+  tiersToBeat: string[],
+): void {
   expect(raw).not.toBe('auto');
   expect(raw).not.toBe('');
   expect(raw).not.toBe('0');
   const varMatch = raw.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*(-?\d+)\s*)?\)$/);
   const resolved = varMatch
-    ? (varMatch[2] !== undefined ? Number(varMatch[2]) : tokens[varMatch[1]])
+    ? varMatch[2] !== undefined
+      ? Number(varMatch[2])
+      : tokens[varMatch[1]]
     : Number(raw);
   for (const tier of tiersToBeat) {
     expect(resolved).toBeGreaterThan(tokens[tier]);
