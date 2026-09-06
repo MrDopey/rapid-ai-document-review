@@ -148,11 +148,16 @@ Open `http://127.0.0.1:3001`. The Vite dev server proxies `/api` and `/events` t
 
 ## Deployment
 
+A containerized deployment is supported via Docker Compose:
+
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-This builds the frontend and backend, serves the built frontend from the backend at `http://127.0.0.1:3000`, and persists `RADR_BE_DATABASE_PATH` and `RADR_BE_PI_SESSION_STORAGE_PATH` to the `app-data` volume so the document, revisions, and conversations survive a container restart. The published port is bound to `127.0.0.1` only. `RADR_BE_PI_AGENT_MODEL` must be supplied (e.g. via a `.env` file next to `docker-compose.yml`) since it is required.
+See [`docker/README.md`](docker/README.md) for setup (env vars, data persistence, known gaps). The
+backend serves the built frontend directly (`@fastify/static`, with an SPA fallback to
+`index.html`) alongside the JSON API/WebSocket routes, so `http://127.0.0.1:3000` serves the full
+app.
 
 ---
 

@@ -63,14 +63,6 @@ if needed), but it's worth knowing before you try to edit those files as your ow
 
 ## Known gaps
 
-- **The frontend is not actually served.** `docker/Dockerfile` copies the built frontend into
-  `app/backend/dist/public` inside the image, but `app/backend/src/server.ts` has no static-file
-  serving code (no `@fastify/static`, no catch-all route) and `app/backend/package.json` doesn't
-  even depend on a static-file plugin. In its current state, `docker compose up` starts a working
-  backend API but **does not serve the UI** — hitting `http://127.0.0.1:3000` gets you `/healthz`
-  and the JSON API/WebSocket routes only, not the Vue app. This is a backend application gap, not
-  a Docker configuration issue; fixing it means adding static-file serving (and an SPA fallback
-  route) to the backend.
 - **Model provider credentials aren't wired through.** `docker-compose.yml`'s `environment:` block
   only sets the `RADR_BE_*` variables read directly by `app/backend/src/config.ts`; it does not
   pass through a provider credential like `ANTHROPIC_API_KEY`. Live agent conversations need one

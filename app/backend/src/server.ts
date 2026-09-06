@@ -28,6 +28,7 @@ import { registerRevisionRoutes } from './api/http/revisions.ts';
 import { registerConversationRoutes } from './api/http/conversations.ts';
 import { registerEditRoutes } from './api/http/edits.ts';
 import { registerSettingsRoutes } from './api/http/settings.ts';
+import { registerStaticRoutes } from './api/http/static.ts';
 import { registerWsRoutes } from './api/ws/index.ts';
 
 export function buildApp() {
@@ -178,6 +179,12 @@ export function buildApp() {
     registerEditRoutes(instance, { editService });
     registerSettingsRoutes(instance, { storage, eventService, eventHub });
     registerWsRoutes(instance, { eventHub, storage });
+  });
+
+  // Wrapped like the routes above (rather than passing `app` directly) to dodge a Fastify+TS
+  // quirk: `app`'s concrete pino Logger type won't widen back to FastifyInstance's default logger type.
+  app.register(async (instance) => {
+    registerStaticRoutes(instance, { logger });
   });
 
   // `piService` is returned alongside `app`/`storage` solely for black-box contract tests
