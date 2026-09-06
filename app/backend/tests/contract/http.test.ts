@@ -238,13 +238,9 @@ describe('Contract: HTTP API (http-api.md)', () => {
         changes: [{ from: 0, to: 0, insert: 'x' }],
       });
       expect(res.status).toBe(409);
-      // DocumentOutOfSyncError has no dedicated `instanceof` catch/ErrorCode mapping in
-      // api/http/document.ts (unlike DocumentNotFoundError/DocumentAlreadyExistsError there), so it
-      // propagates to Fastify's default error handler instead of the app's `{ error: { code, ... } }`
-      // ErrorEnvelope — hence checking the raw body shape here rather than `ErrorEnvelope.parse`.
-      const body = res.json as { statusCode: number; error: string; message: string };
-      expect(body.statusCode).toBe(409);
-      expect(body.message).toMatch(/baseRevision -1000/);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('DOCUMENT_OUT_OF_SYNC');
+      expect(err.error.message).toMatch(/baseRevision -1000/);
     });
 
     it('404 DOCUMENT_NOT_FOUND before creation', async () => {
