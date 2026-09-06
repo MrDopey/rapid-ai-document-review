@@ -4,18 +4,15 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${RADR_BE_PORT:-3000}:${RADR_BE_PORT:-3000}"
     environment:
-      RADR_BE_PORT: "3000"
-      RADR_BE_HOST: "127.0.0.1"
-      RADR_BE_DATABASE_PATH: "/data/document-review.sqlite"
-      RADR_BE_PI_SESSION_STORAGE_PATH: "/data/pi-sessions"
-      RADR_BE_PI_CODING_AGENT_DIR: "/data/pi-agent"
+      RADR_BE_PORT: "${RADR_BE_PORT:-3000}"
+      RADR_BE_HOST: "${RADR_BE_HOST:-127.0.0.1}"
+      RADR_BE_DATABASE_PATH: "${RADR_BE_DATABASE_PATH:-/data/document-review.sqlite}"
+      RADR_BE_PI_SESSION_STORAGE_PATH: "${RADR_BE_PI_SESSION_STORAGE_PATH:-/data/pi-sessions}"
+      RADR_BE_PI_CODING_AGENT_DIR: "${RADR_BE_PI_CODING_AGENT_DIR:-/data/pi-agent}"
       RADR_BE_PI_AGENT_MODEL: "${RADR_BE_PI_AGENT_MODEL:?RADR_BE_PI_AGENT_MODEL is required}"
-      RADR_BE_LOG_LEVEL: "info"
+      RADR_BE_LOG_LEVEL: "${RADR_BE_LOG_LEVEL:-info}"
     volumes:
-      - app-data:/data
+      - ../app/backend/data:/data
     restart: unless-stopped
-
-volumes:
-  app-data:

@@ -4,6 +4,7 @@ node_modules
 **/coverage
 **/*.sqlite
 **/*.sqlite3
+**/*.tsbuildinfo
 .git
 tests/e2e
 playwright-report
