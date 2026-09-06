@@ -8,15 +8,12 @@ import { EventBridge } from './event-bridge.ts';
 import type { PiService } from './pi-service.ts';
 
 /**
- * Shared turn-starting wiring, extracted out of `ConversationService.send()` and
- * `EditService.requestReplacement()` (both of which independently constructed an `EventBridge`,
- * wired its release callback to `ConcurrencyLimiter.release`, and called
- * `ConcurrencyLimiter.acquire(...)` with the identical shape). Both services depend on this
- * collaborator rather than one of them calling into the other's turn-starting method directly,
- * which would create a `PiService <-> EditService <-> ConversationService` construction cycle —
- * `PiService` already depends on `EditService` (to build the `propose_document_edit` tool), and
- * `EditService`/`ConversationService` both need to start a turn against `PiService`. Behavior is
- * unchanged from what each call site did inline before this extraction.
+ * Shared turn-starting wiring used by both `ConversationService.send()` and
+ * `EditService.requestReplacement()`. Both services depend on this collaborator rather than one
+ * of them calling into the other's turn-starting method directly, which would create a
+ * `PiService <-> EditService <-> ConversationService` construction cycle — `PiService` already
+ * depends on `EditService` (to build the `propose_document_edit` tool), and
+ * `EditService`/`ConversationService` both need to start a turn against `PiService`.
  */
 export class TurnRunner {
   private readonly storage: StorageAdapter;
@@ -47,8 +44,8 @@ export class TurnRunner {
    * callback wired to free this conversation's `ConcurrencyLimiter` slot once the turn settles),
    * admitted through `ConcurrencyLimiter.acquire` (which runs it immediately if under
    * `maxConcurrentAgents`, else FIFO-queues it). Returns the same `AcquireResult` shape
-   * `ConcurrencyLimiter.acquire` does, so callers keep whatever immediate-failure handling
-   * (`AGENT_UNAVAILABLE`) they already had around the inline version of this code.
+   * `ConcurrencyLimiter.acquire` does, so callers can handle an immediate failure
+   * (`AGENT_UNAVAILABLE`) themselves.
    */
   start(conversation: ConversationRow, message: string): AcquireResult {
     const turnId = newId('turn');

@@ -54,13 +54,13 @@ export class ConcurrencyLimiter {
    * Starts `run` immediately if under the limit, else FIFO-queues it and emits `agent_queued`.
    * Cancellation is not supported in v1 — once submitted, a queued prompt always eventually runs.
    *
-   * FIX 2: a conversation already admitted (its own turn still in flight) is never admitted a
-   * second time, regardless of how much headroom is left under `max_concurrent_agents` — it is
-   * queued instead, same as any other over-the-limit submission. Without this, a fast overlapping
-   * second `send()` on the same conversation would reach `session.prompt()` while the first turn
-   * was still streaming, which throws synchronously ("already streaming") and flips the
-   * conversation to `errored` via the event bridge — a confusing failure mode for what is really
-   * just a double-send, not a genuine agent error.
+   * A conversation already admitted (its own turn still in flight) is never admitted a second
+   * time, regardless of how much headroom is left under `max_concurrent_agents` — it is queued
+   * instead, same as any other over-the-limit submission. Without this, a fast overlapping second
+   * `send()` on the same conversation would reach `session.prompt()` while the first turn was
+   * still streaming, which throws synchronously ("already streaming") and flips the conversation
+   * to `errored` via the event bridge — a confusing failure mode for what is really just a
+   * double-send, not a genuine agent error.
    */
   acquire(
     documentId: string,
@@ -128,19 +128,15 @@ export class ConcurrencyLimiter {
   }
 
   /**
-   * FIX (queue-position rebroadcast storm): every `release()` used to unconditionally re-persist
-   * *and* re-broadcast an `agent_queued` frame for every remaining queued entry, even though only
-   * a client-visible position hint changes here (nothing gates admission on it — `acquire`/`release`
-   * only ever consult the in-memory `running`/`queues` maps). With a deep queue this made the
-   * `conversation_event` table's drain cost quadratic in queue depth (measured: ~800 sends across
-   * 40 conversations produced ~185k persisted `agent_queued` rows, 98% of the table).
-   *
-   * Persisted history of `agent_queued` is never read back for anything but WS-reconnect replay
-   * (`listEventsByConversation`'s only consumers — `buildMessages`/`hasUserSentMessage`/
-   * `getLastUserMessageText` in conversation-service.ts — filter to `message_completed` only), so
-   * a reshuffled position is broadcast live (currently-connected sockets still see it immediately)
-   * without also writing a row for it. Only the entry's very first enqueue (`publishQueued` above,
-   * from `acquire`) still persists — that one is a genuine state transition, not a reshuffle.
+   * Nothing gates admission on a queued entry's client-visible `queuePosition` hint —
+   * `acquire`/`release` only ever consult the in-memory `running`/`queues` maps — so a reshuffled
+   * position only needs to be broadcast live (currently-connected sockets see it immediately), not
+   * persisted. Persisted history of `agent_queued` is never read back for anything but
+   * WS-reconnect replay (`listEventsByConversation`'s only consumers —
+   * `buildMessages`/`hasUserSentMessage`/`getLastUserMessageText` in conversation-service.ts —
+   * filter to `message_completed` only). Only the entry's very first enqueue (`publishQueued`
+   * above, from `acquire`) persists a row — that one is a genuine state transition, not a
+   * reshuffle.
    */
   private reemitQueuePositions(documentId: string): void {
     const limit = this.storage.getSettings().maxConcurrentAgents;

@@ -90,15 +90,13 @@ export class ConflictService {
 
   /** Consumed by `EditService.stage` when creating a new proposal for `conversationId`.
    *
-   *  This pointer is derived by querying persisted `staged_edit` rows rather than tracked in an
-   *  in-memory `Map` (as it originally was): a `Map` bridging "conflict recorded as superseded" to
-   *  "replacement staged" is silently dropped by a process restart in between, breaking FR-032a's
-   *  chain-budget accounting with no error surfaced. Deriving it from storage means the pointer
-   *  survives a restart, and — since `EditService.stage` persists the replacement with
-   *  `supersedesId` pointing back at the superseded edit as part of the very same call that
-   *  consumes this value — the query is naturally self-consuming: once that successor row exists,
-   *  the superseded edit no longer qualifies as "awaiting" on any later call. No explicit
-   *  delete/consume step is needed. */
+   *  This pointer is derived by querying persisted `staged_edit` rows, not tracked in an in-memory
+   *  `Map` — the link between "conflict recorded as superseded" and "replacement staged" must
+   *  survive a process restart in between, for FR-032a's chain-budget accounting to stay correct.
+   *  Since `EditService.stage` persists the replacement with `supersedesId` pointing back at the
+   *  superseded edit as part of the very same call that consumes this value, the query is
+   *  naturally self-consuming: once that successor row exists, the superseded edit no longer
+   *  qualifies as "awaiting" on any later call. No explicit delete/consume step is needed. */
   consumeAwaitingReplacement(conversationId: string): string | null {
     return this.findAwaitingReplacementId(conversationId);
   }
@@ -109,8 +107,7 @@ export class ConflictService {
    *  exhausted at the moment it was superseded — recomputed here via `getChainAttempts` so it
    *  exactly mirrors the `willRequest` decision `recordConflict` made when it set that status.
    *  When more than one such candidate exists (shouldn't happen in the normal single-active-chain
-   *  flow, but mirrors the prior Map's last-write-wins semantics for safety) the most recently
-   *  created one wins. */
+   *  flow), the most recently created one wins. */
   private findAwaitingReplacementId(conversationId: string): string | null {
     const edits = this.storage.listStagedEditsByConversation(conversationId);
     const alreadySucceeded = new Set(

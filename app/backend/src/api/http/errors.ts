@@ -14,10 +14,10 @@ export function sendError(
 
 /**
  * Shared `schema.safeParse(input)` + 400 VALIDATION_FAILED boilerplate, repeated across every route
- * file that validates a request body/query against a Zod schema. Caller pattern:
+ * file that validates a request body/query against a Zod schema. On failure this sends the 400
+ * response itself and returns `undefined`, so callers must:
  *   const data = parseOrFail(reply, Schema, request.body);
  *   if (!data) return;
- * On failure this already sent the (byte-identical) error response; the caller just needs to stop.
  */
 export function parseOrFail<T>(reply: FastifyReply, schema: z.ZodType<T>, input: unknown): T | undefined {
   const parsed = schema.safeParse(input);

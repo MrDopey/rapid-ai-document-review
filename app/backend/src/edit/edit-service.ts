@@ -190,15 +190,13 @@ export class EditService {
    * within the proposing tool call's own execution (the Primary path) — the caller then embeds
    * `conflictMessage` in that same tool's result instead of a new turn being started here.
    *
-   * FIX 4: the entire read-reconcile-write sequence runs under this document's `PrimaryMutex`
-   * lock, so two overlapping `apply()` calls for the same document — e.g. an HTTP accept racing
-   * another accept, or a manual edit racing an accept — always serialize instead of both reading
-   * document content before either has written its own change. Previously only the
-   * `propose_document_edit` tool path (document-tools.ts) acquired this lock at all; the
-   * HTTP-triggered accept/accept-remaining path (edits.ts) went completely unlocked. `PrimaryMutex`
-   * is reentrant per document within one call chain, so `stageAndApplyPrimary` below — itself
-   * already invoked from inside document-tools.ts's own `withLock` — calling back into `apply()`
-   * does not deadlock against itself.
+   * The entire read-reconcile-write sequence runs under this document's `PrimaryMutex` lock, so
+   * two overlapping `apply()` calls for the same document — e.g. an HTTP accept racing another
+   * accept, or a manual edit racing an accept — always serialize instead of both reading document
+   * content before either has written its own change. `PrimaryMutex` is reentrant per document
+   * within one call chain, so `stageAndApplyPrimary` below — itself already invoked from inside
+   * document-tools.ts's own `withLock` — calling back into `apply()` does not deadlock against
+   * itself.
    */
   async apply(editId: string, opts: { requestReplacementViaNewTurn?: boolean } = {}): Promise<ApplyOutcomeInternal> {
     const requestViaNewTurn = opts.requestReplacementViaNewTurn ?? true;
@@ -320,13 +318,13 @@ export class EditService {
   }
 
   /**
-   * FIX 3: `updateStagedEdit` → `updateConversation` → the Automerge splice (which itself writes
-   * a `document_change` row) → `revisionService.createRevision` (its own `revision` +
-   * `document.current_revision` writes) is wrapped as one atomic transaction — previously a
-   * mid-sequence crash could leave a staged edit marked `applied` with no corresponding revision
-   * row, desyncing `document.current_revision` from the actual latest `revision` row. Nests
-   * correctly inside `apply()`'s `PrimaryMutex` lock and inside `createRevision`'s own (redundant
-   * but harmless) `storage.transaction()` call.
+   * `updateStagedEdit` → `updateConversation` → the Automerge splice (which itself writes a
+   * `document_change` row) → `revisionService.createRevision` (its own `revision` +
+   * `document.current_revision` writes) runs as one atomic transaction, so a mid-sequence crash
+   * can't leave a staged edit marked `applied` with no corresponding revision row, desyncing
+   * `document.current_revision` from the actual latest `revision` row. Nests correctly inside
+   * `apply()`'s `PrimaryMutex` lock and inside `createRevision`'s own (redundant but harmless)
+   * `storage.transaction()` call.
    */
   private applyClean(edit: StagedEditRow, patches: { from: number; to: number; insert: string }[]): ApplyEditResponse {
     const document = this.storage.getDocument();

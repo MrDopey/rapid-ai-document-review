@@ -33,10 +33,9 @@ import { parseOrFail, sendError } from './errors.ts';
 
 /**
  * Maps every known error thrown by ConversationService/PrimaryService's methods to its HTTP
- * status/code/details, mirroring edits.ts's `handleEditError` — one dispatch table instead of each
- * route handler repeating its own `if (err instanceof X) return sendError(...)` chain. A route
- * whose handler can throw a type not covered here (there are none currently) would simply get
- * `null` back and rethrow, same as edits.ts's pattern.
+ * status/code/details — one dispatch table instead of each route handler below repeating its own
+ * `if (err instanceof X) return sendError(...)` chain. A route whose handler throws a type not
+ * covered here gets `null` back and rethrows.
  */
 function handleConversationError(
   err: unknown,
@@ -88,12 +87,6 @@ function handleConversationError(
   return null;
 }
 
-/**
- * Shared try/catch + `handleConversationError` dispatch wrapper, repeated identically at the end of
- * every route handler below. `fn`'s return value (including any `reply.send(...)`/`reply.status(...)`
- * call it makes) is passed straight through on success; on a thrown error it maps and sends via
- * `handleConversationError`/`sendError` exactly as before, or rethrows when unmapped.
- */
 async function withConversationErrors(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
   try {
     return await fn();
