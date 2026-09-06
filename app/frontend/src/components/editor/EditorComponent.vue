@@ -14,7 +14,7 @@ import { ChangeBatcher } from './ChangeBatcher';
 // ConversationThreadBox.vue's identical cap check) — same raw-props-down convention, just one level
 // further. Defaults (an empty set, cap 3) match ConversationThreadBox.vue's own `maxFocused` default
 // so a bare `mount(EditorComponent, { props: { modelValue } })` (existing tests) behaves as "never at
-// cap", exactly as before this change.
+// cap".
 const props = withDefaults(
   defineProps<{ modelValue: string; focusedConversationIds?: ReadonlySet<string>; maxFocusedConversations?: number }>(),
   { focusedConversationIds: () => new Set(), maxFocusedConversations: 3 },
@@ -257,16 +257,16 @@ defineExpose({
      (research.md §1/§2) and must size to its own full content height — a floating page, not a
      viewport-bounded box with its own internal scrollbar. */
   border-right: 1px solid var(--border-color, #ccc);
-  /* Coordinator follow-up (scroll jiggle): without an explicit flex-basis, this pane defaults to
-     flex: 0 1 auto — shrink-to-fit sized by its content's intrinsic (max-content) width. CodeMirror
-     6 virtualizes line rendering around the visible viewport of `.document-canvas` (mounting/
-     unmounting line DOM as the user scrolls), so different lines scrolling into view have different
-     intrinsic widths, which recalculated this pane's shrink-to-fit width and pushed `.thread-columns`
-     sideways every scroll tick. `flex: 1 1 0` + `min-width: 0` makes this pane's width a pure
-     function of the flex split with `.thread-columns` in `.canvas-content` (DocumentCanvas.vue),
-     independent of whichever lines CodeMirror currently has mounted — same pattern as App.vue's
-     `min-width: 0` fix for its own shrink-to-fit-vs-flex layout. Width only; the floating-page
-     height behavior above is untouched. */
+  /* Without an explicit flex-basis, this pane defaults to flex: 0 1 auto — shrink-to-fit sized by
+     its content's intrinsic (max-content) width. CodeMirror 6 virtualizes line rendering around
+     the visible viewport of `.document-canvas` (mounting/unmounting line DOM as the user scrolls),
+     so different lines scrolling into view have different intrinsic widths, which would
+     recalculate this pane's shrink-to-fit width and push `.thread-columns` sideways every scroll
+     tick. `flex: 1 1 0` + `min-width: 0` makes this pane's width a pure function of the flex split
+     with `.thread-columns` in `.canvas-content` (DocumentCanvas.vue), independent of whichever
+     lines CodeMirror currently has mounted — same pattern as App.vue's `min-width: 0` handling for
+     its own shrink-to-fit-vs-flex layout. Width only; the floating-page height behavior above is
+     untouched. */
   flex: 1 1 0;
   min-width: 0;
 }
@@ -277,21 +277,20 @@ defineExpose({
   gap: 0.5rem;
   padding: 0.35rem 0.5rem;
   border-bottom: 2px solid var(--border-color, #ddd);
-  /* Fix 2/6: gives the Editor pane the same distinct-surface + visible-label treatment as the
+  /* Gives the Editor pane the same distinct-surface + visible-label treatment as the
      other regions (HUD, transcript, Preview). */
   background: var(--panel-bg, #f7f7f8);
-  /* Coordinator follow-up (Branch buttons scrolling out of view): `.editor-pane` deliberately has
-     no forced height (comment above) and lives entirely in-flow inside `DocumentCanvas.vue`'s
-     `.document-canvas`, the actual scrolling ancestor — so without this, scrolling a long document
-     scrolls this toolbar away with it. `position: sticky` pins it to the top of that scrollport
-     instead; the opaque `background` above already prevents content from showing through
-     underneath. `--z-sticky` only needs to beat this same stacking context's own unstyled
-     (z-index: auto) content scrolling beneath it — it's far below every app-level overlay's
-     z-index (style.css's `--z-overlay`/`--z-overlay-detail`/`--z-overlay-primary`/`--z-indicator`
-     scale, used by App.vue's `.shortcuts-overlay`/`.help-overlay`/`.conversation-detail-overlay`,
-     HistoryPanel.vue's `.diff-overlay`, EditsList.vue's `.preview-overlay`, PrimaryPanel.vue's/
-     ConversationView.vue's confirmation dialogs, and ReconnectingIndicator.vue), so it can never
-     sit on top of any of those. */
+  /* .editor-pane deliberately has no forced height (comment above) and lives entirely in-flow
+     inside DocumentCanvas.vue's .document-canvas, the actual scrolling ancestor — so without
+     position: sticky below, scrolling a long document scrolls this toolbar away with it.
+     position: sticky pins it to the top of that scrollport instead; the opaque background above
+     already prevents content from showing through underneath. --z-sticky only needs to beat this
+     same stacking context's own unstyled (z-index: auto) content scrolling beneath it — it's far
+     below every app-level overlay's z-index (style.css's --z-overlay/--z-overlay-detail/
+     --z-overlay-primary/--z-indicator scale, used by App.vue's .shortcuts-overlay/.help-overlay/
+     .conversation-detail-overlay, HistoryPanel.vue's .diff-overlay, EditsList.vue's
+     .preview-overlay, PrimaryPanel.vue's/ConversationView.vue's confirmation dialogs, and
+     ReconnectingIndicator.vue), so it can never sit on top of any of those. */
   position: sticky;
   top: 0;
   z-index: var(--z-sticky, 2);

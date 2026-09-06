@@ -346,10 +346,10 @@ const threadColumnsWidth = computed(() => {
 // computed value either way, so the horizontal scroll extent needed to reach the deepest branch
 // column (FR-006) is never lost.
 
-// Coordinator follow-up (parent/child branch lineage): a lightweight visual connector between a
-// branch and the conversation it was branched from, drawn on the canvas alongside the existing
-// column layout — nothing here changes `computeConversationLayout`'s own math, this only reads its
-// output (`layoutEntries`) plus each conversation's already-loaded `parentId`.
+// A lightweight visual connector between a branch and the conversation it was branched from, drawn
+// on the canvas alongside the existing column layout — nothing here changes
+// `computeConversationLayout`'s own math, this only reads its output (`layoutEntries`) plus each
+// conversation's already-loaded `parentId`.
 //
 // Scope note (checked against conversation-service.ts/`app/shared/src/domain/index.ts` before
 // implementing): this domain model has no message-level fork-point field. `ConversationDto.parentId`
@@ -520,11 +520,10 @@ defineExpose({
   height: 100%;
   min-height: 0;
   overflow: auto;
-  /* Coordinator follow-up (scroll jiggle) defense-in-depth: reserves the scrollbar's width
-     up front so its appearance/disappearance (e.g. vertical scroll extent changing as
-     CodeMirror mounts/unmounts virtualized lines) can't itself shift `.canvas-content`'s
-     available width. No direct evidence this was the active driver, but it's a cheap guard
-     alongside the `.editor-pane` flex-basis fix below. */
+  /* Defense-in-depth: reserves the scrollbar's width up front so its appearance/disappearance
+     (e.g. vertical scroll extent changing as CodeMirror mounts/unmounts virtualized lines) can't
+     itself shift `.canvas-content`'s available width. A cheap guard alongside `.editor-pane`'s own
+     flex-basis handling (EditorComponent.vue) — not confirmed as necessary on its own. */
   scrollbar-gutter: stable;
   background: var(--panel-bg-alt, #eef0f3);
 }

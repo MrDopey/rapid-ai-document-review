@@ -183,7 +183,7 @@ async function onCopy(revision: number): Promise<void> {
   height: 100%;
   padding: 0.5rem;
   text-align: left;
-  /* Fix 2: a distinct panel surface, self-contained even when this component is used outside the
+  /* A distinct panel surface, self-contained even when this component is used outside the
      App.vue drawer overlay that also sets this background. */
   background: var(--panel-bg, #f7f7f8);
 }
@@ -212,11 +212,10 @@ async function onCopy(revision: number): Promise<void> {
   gap: 0.5rem;
   align-items: center;
 }
-/* Fix: this entire style block previously had no overflow-wrap/min-width:0 at all, so an
-   LLM-generated edit summary, a user-entered conversation name, or a `rev.note` revision note
-   could overflow this fixed-width panel. `.text-wrap-safe`'s shared overflow-wrap handling
-   (applied via the template class) now lives in style.css; `min-width: 0` is set here since
-   `.summary-text`/`.conversation-name`/`.origin` sit inside flex rows
+/* Without overflow-wrap/min-width: 0, an LLM-generated edit summary, a user-entered conversation
+   name, or a `rev.note` revision note could overflow this fixed-width panel. `.text-wrap-safe`'s
+   shared overflow-wrap handling (applied via the template class) lives in style.css; `min-width: 0`
+   is set here since `.summary-text`/`.conversation-name`/`.origin` sit inside flex rows
    (`.reconciliation-list li`/`.history-entry-header`) that would otherwise refuse to let them
    shrink below their content's intrinsic width — harmless on `.note` and the block-level
    `.conversation-name` div, neither of which is a flex item, since a plain block element's own

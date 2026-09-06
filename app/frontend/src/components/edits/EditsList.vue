@@ -124,7 +124,7 @@ function closePreview(): void {
 .edits-list {
   padding: 0.5rem 0.75rem;
   border-top: 2px solid var(--border-color, #ddd);
-  /* Fix 2: a surface distinct from the transcript above it. */
+  /* A surface distinct from the transcript above it. */
   background: var(--panel-bg, #f7f7f8);
   /* New: when ConversationView.vue's transcript|edits split is active, this is a grid row sized
      by `fr` rather than by content — min-height: 0 lets it actually shrink to that row instead of
@@ -132,7 +132,7 @@ function closePreview(): void {
      Inert (no visible scrollbar) when the split isn't active and this sizes to its own content. */
   min-height: 0;
   overflow-y: auto;
-  /* Same fix as ConversationView.vue's .message-list: reserve the scrollbar's width so switching
+  /* Reserve the scrollbar's width (same as ConversationView.vue's `.message-list`) so switching
      to a conversation with a different pending-edit count doesn't shift this pane's content. */
   scrollbar-gutter: stable;
 }
@@ -166,7 +166,7 @@ function closePreview(): void {
 .edit-summary {
   display: flex;
   justify-content: space-between;
-  /* Fix: flex's default `align-items: stretch` was letting `.status-badge` grow tall/thin
+  /* flex's default `align-items: stretch` was letting `.status-badge` grow tall/thin
      (its 1px `currentColor` border stretching into a distorted pill) to match `.summary-text`'s
      height whenever a long summary wrapped to multiple lines — i.e. the badge's height tracked
      its sibling's content height instead of staying fixed to its own text. `flex-start` pins it
@@ -175,7 +175,7 @@ function closePreview(): void {
   gap: 0.5rem;
   font-weight: 600;
 }
-/* Fix: an LLM-generated edit summary is unbounded text sitting in `.edit-summary`'s flex row,
+/* An LLM-generated edit summary is unbounded text sitting in `.edit-summary`'s flex row,
    which otherwise refuses to let this span shrink below its content's intrinsic width.
    `.text-wrap-safe`'s shared overflow-wrap handling (applied via the template class) now lives in
    style.css; `min-width: 0` stays here since it's this flex item's own layout concern. */

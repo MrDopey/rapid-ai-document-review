@@ -75,15 +75,14 @@ defineExpose({
   align-items: center;
   padding: 0.35rem 0.5rem;
   border-bottom: 2px solid var(--border-color, #ddd);
-  /* Fix 2/6: same distinct-surface + visible-label treatment as Editor/HUD/transcript. */
+  /* Same distinct-surface + visible-label treatment as Editor/HUD/transcript. */
   background: var(--panel-bg, #f7f7f8);
 }
 /* .pane-eyebrow's shared text styling now lives in style.css. */
-/* Fix: this renders the exact same markdown, through the exact same `render()` pipeline, as
-   MessageBubble.vue's `.message-text` — but had none of that component's overflow-wrap/pre/code
-   handling, so an unbroken run (a long URL, identifier, or fenced-code line) overflowed this pane
-   the same way it once did the chat bubble. `.text-wrap-safe`'s shared overflow-wrap/pre/code
-   handling (applied via the template class) now lives in style.css. */
+/* This renders the exact same markdown, through the exact same `render()` pipeline, as
+   MessageBubble.vue's `.message-text` — so it carries the same risk of an unbroken run (a long
+   URL, identifier, or fenced-code line) overflowing the pane. `.text-wrap-safe`'s shared
+   overflow-wrap/pre/code handling (applied via the template class) lives in style.css. */
 .preview-pane {
   flex: 1;
   min-height: 0;
