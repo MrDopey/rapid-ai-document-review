@@ -8,7 +8,7 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function makeMarkdownIt(html: boolean): MarkdownIt {
+function makeMarkdownIt(html: boolean): InstanceType<typeof MarkdownIt> {
   const instance = new MarkdownIt({
     html, // pasted raw SVG passes through when true; the sanitizer (run after this) is the real gate
     linkify: true,
