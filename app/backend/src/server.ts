@@ -10,7 +10,7 @@ import { EventHub, type DocumentSnapshot } from './events/event-hub.ts';
 import { AutomergeStoreHolder } from './document/automerge-store-holder.ts';
 import { RevisionService } from './document/revision-service.ts';
 import { DocumentService } from './document/document-service.ts';
-import { toConversationDto } from './conversation/conversation-mapper.ts';
+import { toConversationDtos } from './conversation/conversation-mapper.ts';
 import { ConversationService } from './conversation/conversation-service.ts';
 import { ConversationFoldService } from './conversation/conversation-fold-service.ts';
 import { ConversationReviewService } from './conversation/conversation-review-service.ts';
@@ -49,9 +49,16 @@ export function buildApp() {
   const getSnapshot = (documentId: string): DocumentSnapshot => {
     const doc = storage.getDocument();
     const content = automergeHolder.isSet() ? automergeHolder.get().getContent() : '';
-    const conversations = storage
-      .listAllConversations(documentId)
-      .map((c) => toConversationDto(storage, c, doc?.currentRevision ?? 0, content));
+    // FIX: batch DTO construction via `toConversationDtos` instead of calling the single-row
+    // `toConversationDto` inside `.map()` — see conversation-mapper.ts's doc comment on
+    // `toConversationDtos` for the measured N+1 impact (this WS-subscribe snapshot builder is one
+    // of the two call sites that comment calls out).
+    const conversations = toConversationDtos(
+      storage,
+      storage.listAllConversations(documentId),
+      doc?.currentRevision ?? 0,
+      content,
+    );
     return {
       document: {
         id: doc?.id ?? documentId,
