@@ -86,6 +86,10 @@ async function waitIdle(page: Page): Promise<void> {
 
 test.describe('US3 — branch from a selection and review proposed edits', () => {
   test('branch, propose, preview, accept, drop, bulk, act-while-active, close-blocked', async ({ page }) => {
+    // 79c2d07/61d7e3d: per-row Drop and "Drop remaining" now gate behind window.confirm —
+    // Playwright auto-dismisses unhandled native dialogs, so accept every one for this test's
+    // several Drop/Drop-remaining click sites further below.
+    page.on('dialog', (dialog) => void dialog.accept());
     let branchName = '';
 
     await test.step('fixture document exists with known marker content', async () => {
@@ -107,10 +111,14 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
 
       await expect(page.getByRole('navigation', { name: 'Conversations' }).getByText('US3 Body')).toBeVisible();
 
-      // FR-012: the seeded first message contains the highlighted text.
-      await expect(page.locator('.message-bubble[data-role="user"]').first()).toContainText(
-        'US3-MARKER-INTRO',
-      );
+      // FR-012: the seeded first message contains the highlighted text. Scoped to the focused
+      // conversation panel (`.conversation-view` — ConversationView.vue's root class), not
+      // page-wide: a bare `.message-bubble[data-role="user"]` is ambiguous when this spec runs
+      // after us1/us2 in the same sequential `npm run test:e2e` process, since Main's own
+      // always-present seed/earlier message also matches and can sort first in the DOM.
+      await expect(
+        page.locator('.conversation-view .message-bubble[data-role="user"]').first(),
+      ).toContainText('US3-MARKER-INTRO');
 
       await waitIdle(page);
     });
@@ -148,7 +156,14 @@ test.describe('US3 — branch from a selection and review proposed edits', () =>
       await expect(dialog.locator('ins.added .marker').first()).toHaveText('+');
 
       await dialog.getByRole('tab', { name: 'Full document' }).click();
-      await expect(dialog.locator('.full-preview pre')).toContainText('This sentence has been tightened.');
+      // FR-022/007-diff-viewer-modes (fcdf30b): the "Full document" view now shows real
+      // word-level diff highlighting in the context of the whole document, not the old plain
+      // resolved text — so the changed sentence appears with its changed span split across
+      // <del>/<ins>, not as one contiguous "This sentence has been tightened." string.
+      await expect(dialog.locator('.full-preview pre')).toContainText('US3-MARKER-TARGET-1');
+      await expect(dialog.locator('.full-preview del.removed').first()).toBeVisible();
+      await expect(dialog.locator('.full-preview ins.added').first()).toBeVisible();
+      await expect(dialog.locator('.full-preview pre')).toContainText('tightened');
 
       await dialog.getByRole('button', { name: 'Close' }).click();
       await expect(dialog).not.toBeVisible();

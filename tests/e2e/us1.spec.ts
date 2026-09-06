@@ -124,6 +124,12 @@ test.describe('US1 — create and edit a document with tracked history', () => {
       contentBeforeRestore = await page.locator('.editor-host').innerText();
       const oldestEntry = page.locator('.history-entry').last();
       await oldestEntry.getByRole('button', { name: 'Restore' }).click();
+      // c92bf3f: Restore now opens a confirmation dialog (role="alertdialog") before actually
+      // restoring — click through it to exercise the full restore flow.
+      const restoreDialog = page.getByRole('alertdialog', { name: 'Restore revision' });
+      await expect(restoreDialog).toBeVisible();
+      await restoreDialog.getByRole('button', { name: 'Restore' }).click();
+      await expect(restoreDialog).not.toBeVisible();
       await expect(page.locator('.preview-pane')).not.toContainText('Appended by tab one.');
     });
 

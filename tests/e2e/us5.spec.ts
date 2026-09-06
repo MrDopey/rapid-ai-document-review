@@ -103,6 +103,10 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
   test('Primary defaults, auto-apply, switch-while-busy, staging, and Primary conflict (FR-027 - FR-030)', async ({
     page,
   }) => {
+    // 79c2d07: dropping a proposed edit now gates behind window.confirm — Playwright
+    // auto-dismisses unhandled native dialogs, so accept it here (this test's Drop click further
+    // below).
+    page.on('dialog', (dialog) => void dialog.accept());
     let branchName = '';
 
     await test.step('fixture document exists with known marker content', async () => {

@@ -125,9 +125,16 @@ async function branchFromMarker(page: Page, markerText: string): Promise<string>
   await page.keyboard.press('Shift+End');
   await page.keyboard.press(BRANCH_SHORTCUT);
 
-  await expect(page.locator('.conversation-header h2')).toHaveText('US6 Body', { timeout: 10_000 });
+  // a26fbec: auto-generated conversation names are now de-duplicated on collision — a second
+  // branch from the same enclosing heading gets " (2)" appended, a third " (3)", etc. — so this
+  // reads back whatever name was actually assigned instead of hardcoding "US6 Body". Every marker
+  // in this file's MARKER_BLOCK sits under the same "## US6 Body" heading, and this file's two
+  // tests both branch from it, so the second call here returns "US6 Body (2)".
+  const header = page.locator('.conversation-header h2');
+  await expect(header).toContainText('US6 Body', { timeout: 10_000 });
+  const branchName = ((await header.textContent()) ?? '').trim();
   await waitIdle(page);
-  return 'US6 Body';
+  return branchName;
 }
 
 test.describe('US6 — Resolve conflicts when applying an out-of-date proposal', () => {
@@ -368,6 +375,9 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
   test('7. restoring an earlier revision surfaces the dry-run reconciliation without altering a pending proposal', async ({
     page,
   }) => {
+    // 79c2d07: dropping a proposed edit now gates behind window.confirm — Playwright auto-dismisses
+    // unhandled native dialogs, so accept it here (this test's only Drop click, further below).
+    page.on('dialog', (dialog) => void dialog.accept());
     await ensureFixtureDocument(page);
 
     const beforeMarker = await getDocumentState(page);
@@ -394,9 +404,11 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     await expect(row.locator('.status-badge')).toHaveText('pending', { timeout: 10_000 });
     await waitIdle(page);
 
-    // `branchName` ("US6 Body", derived from the enclosing heading) collides with the branch
-    // created earlier in this file's first test — `GET /api/conversations` orders by `createdAt`
-    // ascending (http-api.md), so the *last* match by that name is this test's own fresh branch.
+    // `branchName` is now already de-duplicated (a26fbec — e.g. "US6 Body (2)" since this file's
+    // first test already created a "US6 Body" branch from the same enclosing heading), so this
+    // filter matches exactly this test's own fresh branch. `.at(-1)` is kept defensively (`GET
+    // /api/conversations` orders by `createdAt` ascending, per http-api.md) in case a name ever
+    // collides again for some other reason.
     const conversationsBefore = (await page.request.get('/api/conversations').then((r) => r.json())) as {
       conversations: { id: string; name: string }[];
     };
@@ -416,6 +428,12 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       .locator('.history-entry')
       .filter({ has: page.locator('strong', { hasText: new RegExp(`^v${beforeMarker.currentRevision}$`) }) });
     await targetEntry.getByRole('button', { name: 'Restore' }).click();
+    // c92bf3f: Restore now opens a confirmation dialog (role="alertdialog") before actually
+    // restoring — click through it to exercise the full restore flow.
+    const restoreDialog = page.getByRole('alertdialog', { name: 'Restore revision' });
+    await expect(restoreDialog).toBeVisible();
+    await restoreDialog.getByRole('button', { name: 'Restore' }).click();
+    await expect(restoreDialog).not.toBeVisible();
 
     await expect(page.locator('.reconciliation-panel')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.reconciliation-panel')).toContainText('No longer applies');
