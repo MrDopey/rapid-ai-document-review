@@ -12,6 +12,9 @@ interface QueueEntry {
    *  callers/telemetry that need to know what the request "meant" at submission time. */
   contextRevision: number;
   run: () => Promise<void>;
+  /** The `queuePosition` last broadcast for this entry — lets `reemitQueuePositions` skip
+   *  re-announcing entries whose position didn't move on a given `release()` (see there). */
+  lastEmittedPosition: number;
 }
 
 export interface AcquireResult {
@@ -80,8 +83,8 @@ export class ConcurrencyLimiter {
     }
 
     const queue = this.queueFor(documentId);
-    queue.push({ conversationId, turnId, contextRevision, run });
-    const queuePosition = queue.length;
+    const queuePosition = queue.length + 1;
+    queue.push({ conversationId, turnId, contextRevision, run, lastEmittedPosition: queuePosition });
     this.publishQueued(documentId, conversationId, queuePosition, runningSet.size, limit);
     return { queued: true, queuePosition };
   }
@@ -124,12 +127,49 @@ export class ConcurrencyLimiter {
     return queue;
   }
 
+  /**
+   * FIX (queue-position rebroadcast storm): every `release()` used to unconditionally re-persist
+   * *and* re-broadcast an `agent_queued` frame for every remaining queued entry, even though only
+   * a client-visible position hint changes here (nothing gates admission on it — `acquire`/`release`
+   * only ever consult the in-memory `running`/`queues` maps). With a deep queue this made the
+   * `conversation_event` table's drain cost quadratic in queue depth (measured: ~800 sends across
+   * 40 conversations produced ~185k persisted `agent_queued` rows, 98% of the table).
+   *
+   * Persisted history of `agent_queued` is never read back for anything but WS-reconnect replay
+   * (`listEventsByConversation`'s only consumers — `buildMessages`/`hasUserSentMessage`/
+   * `getLastUserMessageText` in conversation-service.ts — filter to `message_completed` only), so
+   * a reshuffled position is broadcast live (currently-connected sockets still see it immediately)
+   * without also writing a row for it. Only the entry's very first enqueue (`publishQueued` above,
+   * from `acquire`) still persists — that one is a genuine state transition, not a reshuffle.
+   */
   private reemitQueuePositions(documentId: string): void {
     const limit = this.storage.getSettings().maxConcurrentAgents;
     const runningCount = this.runningSetFor(documentId).size;
     const queue = this.queueFor(documentId);
     queue.forEach((entry, index) => {
-      this.publishQueued(documentId, entry.conversationId, index + 1, runningCount, limit);
+      const queuePosition = index + 1;
+      if (entry.lastEmittedPosition === queuePosition) return;
+      entry.lastEmittedPosition = queuePosition;
+      this.broadcastQueued(documentId, entry.conversationId, queuePosition, runningCount, limit);
+    });
+  }
+
+  /** Live-only counterpart to `publishQueued` — same frame shape, but never appended to
+   *  `conversation_event` (see `reemitQueuePositions` above for why that's safe here). */
+  private broadcastQueued(
+    documentId: string,
+    conversationId: string,
+    queuePosition: number,
+    runningCount: number,
+    limit: number,
+  ): void {
+    this.eventHub.broadcast(documentId, {
+      type: 'agent_queued',
+      sequence: null,
+      documentId,
+      conversationId,
+      at: new Date().toISOString(),
+      data: { queuePosition, runningCount, limit },
     });
   }
 
