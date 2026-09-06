@@ -85,6 +85,13 @@ export function useConversationStatusBadges(
         ariaLabel: orphanedText,
       });
     }
+    // specs/006-archivable-main-conversation FR-010/research.md §6: distinguishes a closed former
+    // Main from the current Main (never `status: 'closed'`) and from any other closed conversation
+    // when browsing conversation history. Keyed off kind+status only (not `isCurrentMain`) — the two
+    // conditions are naturally exclusive since the current Main is never closed.
+    if (conv.kind === 'main' && conv.status === 'closed') {
+      list.push({ key: 'archived-main', className: 'archived-main-badge', label: 'Archived Main' });
+    }
     if (variant === 'full' && conv.pendingEditCount > 0) {
       list.push({ key: 'pending', className: 'pending-badge', label: String(conv.pendingEditCount) });
     }

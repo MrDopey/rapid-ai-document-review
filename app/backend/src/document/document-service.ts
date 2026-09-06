@@ -212,6 +212,7 @@ export class DocumentService {
       status: 'idle',
       errorMessage: null,
       isPrimary: true,
+      isCurrentMain: true,
       contextRevision: revisionRow.revision,
       branchDepth: 0,
       seedSelection: null,

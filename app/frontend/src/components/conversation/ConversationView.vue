@@ -484,17 +484,18 @@ async function onRequestReview(): Promise<void> {
 }
 
 // Archive-or-Request-review stays local (not shared with `ConversationThreadBox.vue`, which has no
-// equivalent action of its own) — mutually exclusive by `conversation.status`/`kind`, unchanged
-// behavior: "Request review" once closed, "Archive" while still open (only for `kind !== 'main'`).
+// equivalent action of its own) — mutually exclusive by `conversation.status`: "Request review"
+// once closed, "Archive" while still open, for every `kind` including `main`
+// (specs/006-archivable-main-conversation, US1).
 const archiveOrReviewAction = computed<ActionDescriptor | null>(() => {
   if (!conversation.value) return null;
   if (conversation.value.status === 'closed') {
     return { key: 'request-review', label: 'Request review', disabled: reviewing.value, onClick: () => void onRequestReview() };
   }
-  if (conversation.value.kind !== 'main') {
-    return { key: 'archive', label: 'Archive', disabled: closing.value, danger: true, onClick: openCloseDialog };
-  }
-  return null;
+  // specs/006-archivable-main-conversation (US1): archiving Main is now a supported operation
+  // (it atomically archives the current Main and replaces it with a fresh one) — Main gets the
+  // same "Archive" action any other open conversation already has, no `kind` gating.
+  return { key: 'archive', label: 'Archive', disabled: closing.value, danger: true, onClick: openCloseDialog };
 });
 
 const actions = computed<ActionDescriptor[]>(() => {
@@ -520,8 +521,8 @@ const actions = computed<ActionDescriptor[]>(() => {
          action this view offers: the bulk expand/collapse toggle and Branch (parity with
          `ConversationThreadBox.vue`'s sidebar box, always shown when applicable) alongside
          whichever single close-state action currently applies — "Request review" once closed, or
-         "Archive" while still open (subject to the same kind-based gating as before,
-         `kind !== 'main'`). -->
+         "Archive" while still open, for every kind including `main`
+         (specs/006-archivable-main-conversation, US1). -->
     <header class="conversation-header">
       <div class="header-top">
         <div class="header-titles">

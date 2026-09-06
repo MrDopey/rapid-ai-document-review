@@ -18,6 +18,10 @@ function conversationFixture(overrides: Partial<ConversationDto> & { id: string 
     branchDepth: 0,
     status: 'idle',
     isPrimary: false,
+    // specs/006-archivable-main-conversation T001/T002: required on ConversationDto since US1;
+    // defaulted false here (only Main conversations are ever `true`) so every existing fixture call
+    // below that doesn't care about it still satisfies the type.
+    isCurrentMain: false,
     contextRevision: 1,
     isStale: false,
     pendingEditCount: 0,
@@ -110,5 +114,38 @@ describe('useConversationStatusBadges', () => {
 
     store.conversations[0]!.isStale = false;
     expect(badges.value.map((b) => b.key)).toEqual(['status']);
+  });
+
+  // specs/006-archivable-main-conversation, T027 (US3): an "Archived Main" badge distinguishes a
+  // closed former-current Main from the current Main and from any other closed conversation, when
+  // browsing conversation history (spec.md FR-010, research.md §6). Not yet implemented — T029
+  // (a separate implementation pass) adds this case to `useConversationStatusBadges`; expected to
+  // FAIL until then.
+  describe('Archived Main badge (kind === "main" && status === "closed")', () => {
+    it('renders an "Archived Main" badge (in addition to the status badge) for a closed Main conversation', () => {
+      useConversationsStore().conversations = [
+        conversationFixture({ id: 'c1', kind: 'main', status: 'closed', isCurrentMain: false }),
+      ];
+      const { badges } = useConversationStatusBadges(() => 'c1');
+      expect(badges.value.map((b) => b.key)).toEqual(['status', 'archived-main']);
+      const archivedMain = badges.value.find((b) => b.key === 'archived-main')!;
+      expect(archivedMain.label).toBe('Archived Main');
+    });
+
+    it('does NOT render the "Archived Main" badge for the current Main (isCurrentMain: true), regardless of status', () => {
+      useConversationsStore().conversations = [
+        conversationFixture({ id: 'c1', kind: 'main', status: 'idle', isCurrentMain: true }),
+      ];
+      const { badges } = useConversationStatusBadges(() => 'c1');
+      expect(badges.value.map((b) => b.key)).not.toContain('archived-main');
+    });
+
+    it('does NOT render the "Archived Main" badge for a closed non-Main conversation (e.g. a closed branch)', () => {
+      useConversationsStore().conversations = [
+        conversationFixture({ id: 'c1', kind: 'branch', status: 'closed', isCurrentMain: false }),
+      ];
+      const { badges } = useConversationStatusBadges(() => 'c1');
+      expect(badges.value.map((b) => b.key)).not.toContain('archived-main');
+    });
   });
 });

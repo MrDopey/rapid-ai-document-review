@@ -73,6 +73,7 @@ export class ConversationReviewService {
       status: 'idle',
       errorMessage: null,
       isPrimary: false,
+      isCurrentMain: false,
       contextRevision: document.currentRevision,
       branchDepth: 0,
       seedSelection: null,

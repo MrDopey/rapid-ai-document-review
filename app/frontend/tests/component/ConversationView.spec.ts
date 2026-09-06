@@ -613,6 +613,74 @@ describe('ConversationView — Primary conversation indicator', () => {
   });
 });
 
+// specs/006-archivable-main-conversation (US1): `archiveOrReviewAction` used to gate "Archive"
+// behind `kind !== 'main'` — closing Main was refused outright by the backend
+// (`CannotCloseMainConversationError`), so this view never offered the action for it. Now that
+// archiving Main is a supported operation (it atomically archives the current Main and replaces it
+// with a fresh one), Main gets the same "Archive" action any other open conversation already has —
+// unchanged for every other kind/status combination.
+describe('ConversationView — archiveOrReviewAction (specs/006-archivable-main-conversation)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.getConversation).mockReset();
+    vi.mocked(httpClient.listEdits).mockReset();
+    vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
+  });
+
+  function mountView(overrides: Partial<ConversationDto>) {
+    const store = useConversationsStore();
+    const conversation = conversationFixture({ id: 'conv-1', ...overrides });
+    store.conversations = [conversation];
+    store.messagesByConversation['conv-1'] = [];
+    vi.mocked(httpClient.getConversation).mockResolvedValue({ conversation, messages: [], stagedEdits: [] });
+    return mount(ConversationView, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+  }
+
+  it('renders the "Archive" action for an open (non-closed) Main conversation', async () => {
+    const wrapper = mountView({ kind: 'main', status: 'idle' });
+    await flushPromises();
+    const archiveButton = wrapper.find('[data-action="archive"]');
+    expect(archiveButton.exists()).toBe(true);
+    expect(archiveButton.text()).toBe('Archive');
+  });
+
+  it('renders "Request review", not "Archive", for a closed Main conversation — same as any other closed kind', async () => {
+    const wrapper = mountView({ kind: 'main', status: 'closed' });
+    await flushPromises();
+    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
+    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
+  });
+
+  it('still renders "Archive" for an open branch conversation (unchanged)', async () => {
+    const wrapper = mountView({ kind: 'branch', status: 'idle' });
+    await flushPromises();
+    expect(wrapper.find('[data-action="archive"]').exists()).toBe(true);
+  });
+
+  it('still renders "Request review", not "Archive", for a closed branch conversation (unchanged)', async () => {
+    const wrapper = mountView({ kind: 'branch', status: 'closed' });
+    await flushPromises();
+    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
+    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
+  });
+
+  it('still renders "Archive" for an open review-kind conversation (unchanged)', async () => {
+    const wrapper = mountView({ kind: 'review', status: 'idle' });
+    await flushPromises();
+    expect(wrapper.find('[data-action="archive"]').exists()).toBe(true);
+  });
+
+  it('still renders "Request review", not "Archive", for a closed review-kind conversation (unchanged)', async () => {
+    const wrapper = mountView({ kind: 'review', status: 'closed' });
+    await flushPromises();
+    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
+    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
+  });
+});
+
 // Bug fix (scroll-to-top-of-message): a new assistant message arriving used to always scroll the
 // whole transcript to its bottom (`scrollToBottomIfSticky`, previously wired to a `deep` watch over
 // `messages`) — for a long reply, that could show only whatever the tail currently looks like as it

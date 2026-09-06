@@ -69,7 +69,8 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
 
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(1);
+    // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
 
     // The pre-existing row survived the upgrade untouched, and the newly-added column on it reads
     // back as the migration's own DEFAULT (ALTER TABLE ADD COLUMN ... DEFAULT applies retroactively
@@ -116,7 +117,60 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(1);
+    // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
     db.close();
+  });
+});
+
+/**
+ * Migration version 2 (specs/006-archivable-main-conversation): `conversation.is_current_main`
+ * plus the `conversation_one_current_main` partial unique index enforcing exactly one current
+ * Main per document.
+ */
+function indexNames(db: DatabaseSync, table: string): string[] {
+  return (db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map((i) => i.name);
+}
+
+describe('migration version 2: is_current_main (specs/006-archivable-main-conversation)', () => {
+  it('a fresh install gets the column and the unique index at the latest user_version', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db);
+    expect(tableColumns(db, 'conversation')).toContain('is_current_main');
+    expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    db.close();
+  });
+
+  it('an existing database missing the column gets it added, its single non-closed Main backfilled, and the index created', () => {
+    const db = createPreMigration1Database();
+    expect(tableColumns(db, 'conversation')).not.toContain('is_current_main');
+
+    migrate(db);
+
+    expect(tableColumns(db, 'conversation')).toContain('is_current_main');
+    expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+
+    const conversation = db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old') as Record<
+      string,
+      unknown
+    >;
+    expect(conversation.is_current_main).toBe(1);
+
+    db.close();
+  });
+
+  it('does not backfill a closed kind=main row', () => {
+    const db = createPreMigration1Database();
+    db.prepare(`UPDATE conversation SET status = 'closed' WHERE id = 'conv_old'`).run();
+
+    migrate(db);
+
+    const conversation = db.prepare('SELECT * FROM conversation WHERE id = ?').get('conv_old') as Record<
+      string,
+      unknown
+    >;
+    expect(conversation.is_current_main).toBe(0);
   });
 });

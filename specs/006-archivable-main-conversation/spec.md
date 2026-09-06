@@ -8,6 +8,14 @@
 
 **Input**: User description: "the main conversation needs to be archiveable, this causes the old main to be archived and the new one spawns 'in place' creating a fresh context for another round of changes"
 
+## Clarifications
+
+### Session 2026-09-06
+
+- Q: When the reviewer archives a Main that currently holds the Primary designation, what happens to Primary? → A: Primary clears with no auto-transfer, matching the existing rule that closing the Primary conversation clears the designation without transferring it. The new Main does not automatically become Primary.
+- Q: Should the new Main be re-seeded with a fresh excerpt/summary of the document's current state? → A: Yes — the new Main is re-seeded the same way Main is seeded when a document is first created, using a fresh excerpt/summary reflecting the document's current state.
+- Q: Should the new Main carry a visible "continued from" link back to the Main it replaced? → A: No — the archived Main appears as an ordinary entry in conversation history with no special forward/backward linkage to the new Main.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Retire an overgrown Main and start a fresh round (Priority: P1)
@@ -76,9 +84,9 @@ Weeks into a long review, a reviewer wants to understand why a particular change
 - **FR-004**: Archiving the current Main MUST be subject to the same preconditions already enforced when closing any other conversation (e.g., no unresolved pending proposals, not currently mid-response).
 - **FR-005**: A conversation previously branched from a Main that is later archived MUST remain open and fully usable, and MUST retain its visible historical link to that now-archived Main, unaffected by the archival itself.
 - **FR-006**: The system MUST support a document having more than one Main conversation over its lifetime (one current, any number of archived predecessors), while continuing to guarantee exactly one of them is the current Main at all times.
-- **FR-007**: When the reviewer archives a Main conversation that currently holds the Primary designation, the new Main [NEEDS CLARIFICATION: does the new Main automatically become Primary, or does the document end up with no Primary — matching the existing rule that closing the Primary conversation clears the designation without transferring it]?
-- **FR-008**: The new Main produced by an archive MUST start with no message history from its predecessor. [NEEDS CLARIFICATION: should the new Main otherwise be re-seeded with a fresh excerpt/summary of the document's current state, the same way Main is seeded when a document is first created — or should it start with no seeded context at all, relying only on the reviewer's next message]?
-- **FR-009**: When a Main conversation is archived, the new Main [NEEDS CLARIFICATION: should it carry a visible reference back to the Main it replaced (e.g., a "continued from" link a reviewer can follow), or should the archived Main simply appear as an ordinary entry in conversation history with no special forward/backward linkage to the new Main]?
+- **FR-007**: When the reviewer archives a Main conversation that currently holds the Primary designation, the Primary designation MUST clear with no automatic transfer to the new Main — consistent with the existing rule that closing the Primary conversation clears the designation without transferring it. The reviewer may subsequently designate the new Main (or any other conversation) as Primary.
+- **FR-008**: The new Main produced by an archive MUST start with no message history from its predecessor, but MUST be re-seeded with a fresh excerpt/summary of the document's current state, using the same seeding mechanism used when Main is first created for a document.
+- **FR-009**: When a Main conversation is archived, the new Main MUST NOT carry any visible "continued from" reference back to the Main it replaced; the archived Main appears as an ordinary entry in the document's conversation history with no special forward/backward linkage to the new Main.
 - **FR-010**: Archived Main conversations MUST be distinguishable from each other and from the current Main when browsing the document's conversation history.
 - **FR-011**: Edits that were auto-applied by a Main conversation before it was archived MUST remain attributed to that specific (now-archived) conversation in the document's revision history.
 

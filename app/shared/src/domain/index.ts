@@ -41,6 +41,7 @@ export interface Conversation {
   status: ConversationStatus;
   errorMessage: string | null;
   isPrimary: boolean;
+  isCurrentMain: boolean;
   contextRevision: number;
   branchDepth: number;
   seedSelection: ConversationSeedSelection | null;

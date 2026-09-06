@@ -862,15 +862,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(parsed.summaryFoldedIntoParent).toBe(false);
     });
 
-    it('409 CANNOT_CLOSE_MAIN_CONVERSATION when closing Main (2275aa6/0031872)', async () => {
-      const created = await createDoc(ctx.app, ctx.storage);
-      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/close`, {});
-      expect(res.status).toBe(409);
-      const err = ErrorEnvelope.parse(res.json);
-      expect(err.error.code).toBe('CANNOT_CLOSE_MAIN_CONVERSATION');
-    });
-
-    it('409 PENDING_EDITS_BLOCK_CLOSE with pendingEditIds while a proposal is pending', async () => {
+    it('409 PENDING_EDITS_BLOCK_CLOSE with pendingEditIds while a proposal is pending (branch)', async () => {
       const created = await createDoc(ctx.app, ctx.storage);
       const b = await branchAndSettle(ctx.app, ctx.storage, created.mainConversation.id);
       const branchId = (b.json as { id: string }).id;
@@ -888,7 +880,110 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(err.error.code).toBe('PENDING_EDITS_BLOCK_CLOSE');
       expect(err.error.details).toEqual({ pendingEditIds: [editId] });
     });
+
+    // specs/006-archivable-main-conversation (US1): closing Main is no longer refused — it
+    // archives the current Main (full history preserved, read-only) and atomically replaces it
+    // with a fresh, empty, freshly-seeded Main in the same slot. Replaces the old
+    // `409 CANNOT_CLOSE_MAIN_CONVERSATION` case (`CannotCloseMainConversationError` is removed
+    // entirely, not just no longer thrown here).
+    it('200 status:"closed" when closing Main, replacing it with a new current Main (specs/006-archivable-main-conversation)', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const oldMainId = created.mainConversation.id;
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${oldMainId}/close`, {});
+      expect(res.status).toBe(200);
+      const parsed = CloseConversationResponse.parse(res.json);
+      expect(parsed.status).toBe('closed');
+
+      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const archivedMain = list.conversations.find((c) => c.id === oldMainId)!;
+      expect(archivedMain.isCurrentMain).toBe(false);
+
+      const newMain = list.conversations.find((c) => c.kind === 'main' && c.isCurrentMain === true);
+      expect(newMain).toBeDefined();
+      expect(newMain!.id).not.toBe(oldMainId);
+    });
+
+    it('409 PENDING_EDITS_BLOCK_CLOSE when Main has a pending proposal', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const mainId = created.mainConversation.id;
+      // Test bug fix: Main is Primary by construction (createDoc's document-creation response),
+      // and a Primary conversation's proposal auto-applies immediately (edit-service.ts's
+      // `stage()`: `autoApplied: conversation.isPrimary && supersedesId === null`) rather than
+      // staying `pending` — so without clearing Primary first, this test's proposal would never
+      // actually reach the `pending` state it exercises. Clearing Primary here has no bearing on
+      // what's under test (the pending-edits-blocks-close guard).
+      await call(ctx.app, 'DELETE', `/api/conversations/${mainId}/primary`, undefined);
+      await call(ctx.app, 'POST', `/api/conversations/${mainId}/send`, {
+        message: proposeDirective('pending main change', [
+          { old_string: 'Trailing unique tail xyz123.', new_string: 'Trailing unique tail changed.' },
+        ]),
+      });
+      await waitFor(() => ctx.storage.listStagedEditsByConversation(mainId).length === 1);
+      const editId = ctx.storage.listStagedEditsByConversation(mainId)[0]!.id;
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${mainId}/close`, {});
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('PENDING_EDITS_BLOCK_CLOSE');
+      expect(err.error.details).toEqual({ pendingEditIds: [editId] });
+    });
+
+    it('409 CONVERSATION_BUSY when Main is currently working', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const mainId = created.mainConversation.id;
+      const sendRes = await call(ctx.app, 'POST', `/api/conversations/${mainId}/send`, {
+        message: 'a message that will take a little while to answer',
+      });
+      expect(sendRes.status).toBe(202);
+      expect(ctx.storage.getConversation(mainId)?.status).toBe('working');
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${mainId}/close`, {});
+      expect(res.status).toBe(409);
+      const err = ErrorEnvelope.parse(res.json);
+      expect(err.error.code).toBe('CONVERSATION_BUSY');
+
+      await waitFor(() => ctx.storage.getConversation(mainId)?.status === 'idle');
+    });
+
+    it('retrying close on an already-archived Main is idempotently 200, spawning no second replacement', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      const oldMainId = created.mainConversation.id;
+
+      const firstClose = await call(ctx.app, 'POST', `/api/conversations/${oldMainId}/close`, {});
+      expect(firstClose.status).toBe(200);
+      const listAfterFirst = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      const countAfterFirst = listAfterFirst.conversations.length;
+
+      const secondClose = await call(ctx.app, 'POST', `/api/conversations/${oldMainId}/close`, {});
+      expect(secondClose.status).toBe(200);
+      expect(CloseConversationResponse.parse(secondClose.json).status).toBe('closed');
+
+      const listAfterSecond = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      expect(listAfterSecond.conversations).toHaveLength(countAfterFirst);
+    });
   });
+
+  // specs/006-archivable-main-conversation (US1, FR-007): archiving a Primary Main clears Primary
+  // rather than transferring it — same rule `close()` already applies to any Primary conversation
+  // (`PrimaryService.closeClears`), unchanged by archiving Main specifically.
+  describe('POST /api/conversations/:id/close — archiving a Primary Main clears Primary with no transfer', () => {
+    it('leaves no conversation Primary after the Primary Main is archived; the replacement Main is not Primary', async () => {
+      const created = await createDoc(ctx.app, ctx.storage);
+      expect(created.mainConversation.isPrimary).toBe(true);
+
+      const res = await call(ctx.app, 'POST', `/api/conversations/${created.mainConversation.id}/close`, {});
+      expect(res.status).toBe(200);
+
+      const list = ListConversationsResponse.parse((await call(ctx.app, 'GET', '/api/conversations')).json);
+      expect(list.conversations.every((c) => c.isPrimary === false)).toBe(true);
+
+      const newMain = list.conversations.find((c) => c.kind === 'main' && c.isCurrentMain === true)!;
+      expect(newMain).toBeDefined();
+      expect(newMain.isPrimary).toBe(false);
+    });
+  });
+
 
   describe('POST /api/conversations/:id/review', () => {
     it('409 CONVERSATION_NOT_CLOSED when the target is not closed', async () => {

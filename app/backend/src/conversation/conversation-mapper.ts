@@ -80,6 +80,7 @@ function buildConversationDto(
     branchDepth: row.branchDepth,
     status: row.status,
     isPrimary: row.isPrimary,
+    isCurrentMain: row.isCurrentMain,
     contextRevision: row.contextRevision,
     isStale: row.contextRevision < currentRevision,
     pendingEditCount,

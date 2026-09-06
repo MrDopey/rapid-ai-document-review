@@ -66,6 +66,7 @@ const STATEMENTS: string[] = [
     error_message      TEXT,
 
     is_primary         INTEGER NOT NULL DEFAULT 0,
+    is_current_main    INTEGER NOT NULL DEFAULT 0,
 
     context_revision   INTEGER NOT NULL,
     branch_depth       INTEGER NOT NULL DEFAULT 0,
@@ -82,6 +83,8 @@ const STATEMENTS: string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_primary
     ON conversation (document_id) WHERE is_primary = 1`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_current_main
+    ON conversation (document_id) WHERE is_current_main = 1`,
   `CREATE TABLE IF NOT EXISTS staged_edit (
     id                 TEXT PRIMARY KEY,
     document_id        TEXT NOT NULL,
@@ -180,6 +183,15 @@ const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    version: 2,
+    apply: (db) => {
+      addColumnIfMissing(db, 'conversation', 'is_current_main', 'INTEGER NOT NULL DEFAULT 0');
+      db.exec(`UPDATE conversation SET is_current_main = 1 WHERE kind = 'main' AND status != 'closed'`);
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_current_main
+        ON conversation (document_id) WHERE is_current_main = 1`);
+    },
+  },
 ];
 
 /** Adds `table.column` with `definition` only if it isn't already there — safe to call whether
@@ -208,13 +220,30 @@ function applyMigrations(db: DatabaseSync): void {
   }
 }
 
+/** True for a `CREATE [UNIQUE] INDEX` statement in `STATEMENTS` — as opposed to a `CREATE TABLE`
+ *  one. See `migrate()`'s doc comment on why the two need to run in different phases. */
+function isIndexStatement(statement: string): boolean {
+  return /^\s*CREATE (UNIQUE )?INDEX/i.test(statement);
+}
+
 export function migrate(db: DatabaseSync): void {
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
+  // `STATEMENTS`' `CREATE TABLE IF NOT EXISTS` entries run first — a no-op against a database that
+  // already has the table, so this step alone is always safe regardless of install age. Its
+  // `CREATE INDEX IF NOT EXISTS` entries run LAST, after `applyMigrations` below, deliberately:
+  // a partial index like `conversation_one_current_main` (WHERE is_current_main = 1) references a
+  // column that only a fresh `CREATE TABLE` body has from the start — an existing install missing
+  // it only gets it via `applyMigrations`' `addColumnIfMissing`, so creating the index any earlier
+  // would fail with "no such column" against that install's still-unmigrated on-disk schema.
   for (const statement of STATEMENTS) {
+    if (isIndexStatement(statement)) continue;
     db.exec(statement);
   }
   applyMigrations(db);
+  for (const statement of STATEMENTS) {
+    if (isIndexStatement(statement)) db.exec(statement);
+  }
   const now = new Date().toISOString();
   db.prepare(
     `INSERT OR IGNORE INTO user_settings (id, updated_at) VALUES (1, ?)`,

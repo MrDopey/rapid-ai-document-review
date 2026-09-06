@@ -90,6 +90,7 @@ interface ConversationDbRow {
   status: string;
   error_message: string | null;
   is_primary: number;
+  is_current_main: number;
   context_revision: number;
   branch_depth: number;
   seed_selection: string | null;
@@ -110,6 +111,7 @@ function mapConversation(row: ConversationDbRow): ConversationRow {
     status: row.status as ConversationRow['status'],
     errorMessage: row.error_message,
     isPrimary: toBool(row.is_primary),
+    isCurrentMain: toBool(row.is_current_main),
     contextRevision: row.context_revision,
     branchDepth: row.branch_depth,
     seedSelection: row.seed_selection ? JSON.parse(row.seed_selection) : null,
@@ -391,9 +393,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
       .prepare(
         `INSERT INTO conversation
            (id, document_id, parent_id, name, kind, pi_session_path, status, error_message,
-            is_primary, context_revision, branch_depth, seed_selection, forked_from_message_id,
+            is_primary, is_current_main, context_revision, branch_depth, seed_selection, forked_from_message_id,
             created_at, updated_at, closed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -405,6 +407,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         row.status,
         row.errorMessage,
         row.isPrimary ? 1 : 0,
+        row.isCurrentMain ? 1 : 0,
         row.contextRevision,
         row.branchDepth,
         row.seedSelection ? JSON.stringify(row.seedSelection) : null,
@@ -436,7 +439,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   getMainConversation(documentId: string): ConversationRow | null {
     const row = this.db
-      .prepare(`SELECT * FROM conversation WHERE document_id = ? AND kind = 'main' LIMIT 1`)
+      .prepare(`SELECT * FROM conversation WHERE document_id = ? AND kind = 'main' AND is_current_main = 1 LIMIT 1`)
       .get(documentId) as ConversationDbRow | undefined;
     return row ? mapConversation(row) : null;
   }
@@ -498,7 +501,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
       .prepare(
         `UPDATE conversation SET
            parent_id = ?, name = ?, kind = ?, pi_session_path = ?, status = ?, error_message = ?,
-           is_primary = ?, context_revision = ?, branch_depth = ?, seed_selection = ?,
+           is_primary = ?, is_current_main = ?, context_revision = ?, branch_depth = ?, seed_selection = ?,
            forked_from_message_id = ?, updated_at = ?, closed_at = ?
          WHERE id = ?`,
       )
@@ -510,6 +513,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
         merged.status,
         merged.errorMessage,
         merged.isPrimary ? 1 : 0,
+        merged.isCurrentMain ? 1 : 0,
         merged.contextRevision,
         merged.branchDepth,
         merged.seedSelection ? JSON.stringify(merged.seedSelection) : null,

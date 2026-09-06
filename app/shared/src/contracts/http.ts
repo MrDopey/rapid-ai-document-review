@@ -49,7 +49,7 @@ export const ErrorCode = z.enum([
   'CONVERSATION_ERRORED',
   'CONVERSATION_NOT_CLOSED',
   'CONVERSATION_NOT_EMPTY',
-  'CANNOT_CLOSE_MAIN_CONVERSATION',
+  'CONVERSATION_BUSY',
   'DOCUMENT_OUT_OF_SYNC',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
@@ -83,6 +83,7 @@ export const ConversationDto = z.object({
   branchDepth: z.number().int(),
   status: ConversationStatus,
   isPrimary: z.boolean(),
+  isCurrentMain: z.boolean(),
   contextRevision: z.number().int(),
   isStale: z.boolean(),
   pendingEditCount: z.number().int(),

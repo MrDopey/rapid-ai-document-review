@@ -42,17 +42,6 @@ export class ConversationNotErroredError extends Error {}
 export class ConversationNotClosedError extends Error {}
 export class ConversationNotEmptyError extends Error {}
 export class AgentUnavailableError extends Error {}
-/**
- * Safety guard (specs/006-archivable-main-conversation, FR-002/FR-003): a document must always
- * have exactly one persistent, available Main conversation. Until the full "archive Main and spin
- * up a replacement" feature (006) is built, the generic `close()` path must refuse to close a
- * `kind === 'main'` conversation outright — nothing today ever creates a replacement Main once the
- * existing one is closed (`ensureMain` only creates one when none exists at all, and a closed Main
- * still exists, just unusable), so allowing this through would permanently strand the document
- * without a usable Main. Mapped to 409/`CANNOT_CLOSE_MAIN_CONVERSATION` in
- * api/http/conversations.ts's `handleConversationError` dispatch table.
- */
-export class CannotCloseMainConversationError extends Error {}
 /** Shared shape for "a branch/refresh would exceed a configured depth limit" (FR-*): both
  *  `MaxConversationDepthExceededError` and `MaxEditingDepthExceededError` carry the identical
  *  `{limit, attemptedDepth}` pair — the only thing distinguishing them is which limit was hit,
@@ -78,6 +67,12 @@ export class PendingEditsBlockCloseError extends Error {
     this.pendingEditIds = pendingEditIds;
   }
 }
+/**
+ * Guard for an operation that requires a conversation to not be actively `working` (e.g. closing
+ * it) — specs/006-archivable-main-conversation. Mapped to 409/`CONVERSATION_BUSY` in
+ * api/http/conversations.ts's `handleConversationError` dispatch table.
+ */
+export class ConversationBusyError extends Error {}
 
 export interface PaginationOptions {
   cursor?: string;
@@ -174,6 +169,7 @@ export class ConversationService {
       status: 'idle',
       errorMessage: null,
       isPrimary: true,
+      isCurrentMain: true,
       contextRevision: document.currentRevision,
       branchDepth: 0,
       seedSelection: null,
@@ -363,6 +359,7 @@ export class ConversationService {
       status: 'idle',
       errorMessage: null,
       isPrimary: false,
+      isCurrentMain: false,
       contextRevision: document.currentRevision,
       branchDepth,
       seedSelection,
@@ -405,14 +402,6 @@ export class ConversationService {
    */
   close(conversationId: string, foldSummaryIntoParent: boolean): CloseConversationResponse {
     const conversation = this.getConversationOrThrow(conversationId);
-    if (conversation.kind === 'main') {
-      // See CannotCloseMainConversationError's doc comment: no replacement Main is ever spawned
-      // today, so closing Main here would permanently strand the document without one (FR-002).
-      throw new CannotCloseMainConversationError(
-        'The Main conversation cannot be closed. Archiving Main and replacing it with a fresh ' +
-          'one is not yet supported (specs/006-archivable-main-conversation).',
-      );
-    }
     if (conversation.status === 'closed') {
       return {
         conversationId,
@@ -422,6 +411,12 @@ export class ConversationService {
       };
     }
 
+    // A conversation whose agent turn produced a still-pending proposal reports that specific,
+    // more actionable reason (PendingEditsBlockCloseError) even though the turn that created the
+    // proposal may not have fully settled back to `idle` yet (the tool call that stages the edit
+    // completes, and is externally observable via `listStagedEditsByConversation`, slightly before
+    // the turn's own trailing response finishes streaming and flips status back) — checked before
+    // the general `working` guard below so this more specific case always wins.
     const pending = this.storage
       .listStagedEditsByConversation(conversationId)
       .filter((e) => e.status === 'pending');
@@ -430,6 +425,19 @@ export class ConversationService {
         `Cannot close conversation while ${pending.length} proposal(s) are pending`,
         pending.map((e) => e.id),
       );
+    }
+
+    // Guards against closing while a turn is in flight (specs/006-archivable-main-conversation) —
+    // applies to every kind, checked after the more specific pending-edits guard above.
+    if (conversation.status === 'working') {
+      throw new ConversationBusyError('Cannot close a conversation while it is working');
+    }
+
+    // Archiving Main (specs/006-archivable-main-conversation, US1): closing Main atomically
+    // replaces it with a fresh, current, freshly-seeded Main in the same slot rather than leaving
+    // the document without a usable one (FR-002/FR-003) — see `archiveMain` below.
+    if (conversation.kind === 'main') {
+      return this.archiveMain(conversation.documentId);
     }
 
     const now = new Date().toISOString();
@@ -488,6 +496,94 @@ export class ConversationService {
       status: 'closed',
       summaryFoldedIntoParent: willFold,
       parentConversationId: conversation.parentId,
+    };
+  }
+
+  /**
+   * Archives the current Main and atomically replaces it with a fresh, current, freshly-seeded
+   * Main in the same slot (specs/006-archivable-main-conversation, US1/FR-002/FR-003/FR-007/
+   * FR-008). Invoked from `close()`'s `kind === 'main'` branch above — no new HTTP route or WS
+   * event type, the existing `POST /api/conversations/:id/close` and `conversation_closed`/
+   * `conversation_started` events are reused verbatim. The old-Main-closed and new-Main-created
+   * writes are wrapped in a single `this.storage.transaction` so the document is never observably
+   * left with zero or more than one `isCurrentMain` row for any caller reading between the two
+   * writes (research.md §5) — everything after the transaction (Primary clearing, event
+   * publishing, Pi-session eviction, seeding) is a post-commit side effect, mirroring `close()`'s
+   * own DB-write-then-publish ordering above.
+   */
+  private archiveMain(documentId: string): CloseConversationResponse {
+    const document = this.storage.getDocument();
+    if (!document || document.id !== documentId) {
+      throw new DocumentNotFoundError(`Document not found: ${documentId}`);
+    }
+    const oldMain = this.storage.getMainConversation(documentId);
+    if (!oldMain) {
+      throw new ConversationNotFoundError(`Main conversation not found for document: ${documentId}`);
+    }
+
+    const now = new Date().toISOString();
+    const wasPrimary = oldMain.isPrimary;
+    const newMainId = newId('conv');
+
+    this.storage.transaction(() => {
+      this.storage.updateConversation(oldMain.id, { status: 'closed', closedAt: now, isCurrentMain: false });
+      this.storage.createConversation({
+        id: newMainId,
+        documentId,
+        parentId: null,
+        name: 'Main',
+        kind: 'main',
+        piSessionPath: join(document.piSessionDir, `main-${newMainId}.jsonl`),
+        status: 'idle',
+        errorMessage: null,
+        isPrimary: false,
+        isCurrentMain: true,
+        contextRevision: document.currentRevision,
+        branchDepth: 0,
+        seedSelection: null,
+        forkedFromMessageId: null,
+        createdAt: now,
+        updatedAt: now,
+        closedAt: null,
+      });
+    });
+
+    // Archiving the Primary Main clears Primary rather than transferring it (FR-007) — same rule
+    // `close()` already applies to any Primary conversation, reused verbatim.
+    if (wasPrimary) {
+      this.primaryService.closeClears(oldMain.id);
+    }
+
+    this.publish(documentId, oldMain.id, 'conversation_closed', {
+      closedAt: now,
+      summaryFoldedIntoParent: false,
+      parentConversationId: oldMain.parentId,
+    });
+    this.publish(documentId, newMainId, 'conversation_started', {
+      conversationId: newMainId,
+      name: 'Main',
+      kind: 'main',
+      parentId: null,
+      branchDepth: 0,
+      contextRevision: document.currentRevision,
+      seedSelection: null,
+      forkedFromMessageId: null,
+    });
+
+    // Same reasoning as `close()`'s own unconditional eviction above: nothing will ever call
+    // `getOrCreateSession` for the now-archived Main again (no fold-into-parent concept applies to
+    // Main), so its cached Pi session can be evicted right away.
+    this.piService.evictSession(oldMain.id);
+
+    // FR-008: the replacement Main is seeded with the document's current content, same as any
+    // brand-new Main (`ensureMain` above).
+    this.seedMain(newMainId, document.title, document.currentRevision, this.automerge.get().getContent());
+
+    return {
+      conversationId: oldMain.id,
+      status: 'closed',
+      summaryFoldedIntoParent: false,
+      parentConversationId: oldMain.parentId,
     };
   }
 

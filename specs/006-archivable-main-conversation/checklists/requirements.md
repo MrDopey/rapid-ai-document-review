@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -32,4 +32,5 @@
 ## Notes
 
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
-- FR-007, FR-008, FR-009 carry open [NEEDS CLARIFICATION] markers pending user answers.
+- FR-007, FR-008, FR-009 were resolved via user clarification (see spec.md → Clarifications →
+  Session 2026-09-06) before planning began.
