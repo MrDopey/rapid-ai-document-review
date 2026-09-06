@@ -1,4 +1,5 @@
 name: Publish
+run-name: Publish (${{ inputs.bump }})
 
 on:
   workflow_dispatch:
@@ -19,72 +20,215 @@ permissions:
 
 concurrency:
   group: publish
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  # Bump the version in package.json per the chosen bump type and commit it.
+  # Everything downstream builds and releases this commit's version. A
+  # "patch" dispatch releases whatever version is already sitting in
+  # package.json (the previous run's post-release bump already prepared it).
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      previous_tag: ${{ steps.resolve.outputs.previous_tag }}
+      previous_date: ${{ steps.resolve.outputs.previous_date }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
-          persist-credentials: true
-
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.1.0"
 
       - name: Bump minor/major version
         if: inputs.bump != 'patch'
         run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version "${{ inputs.bump }}" --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
-          git commit -am "chore: bump version to v${VERSION}"
-          git push
+          git commit -am "chore(release): bump version to v${VERSION}"
+          git push origin HEAD:${{ github.ref_name }}
 
-      - name: Read release version
+      - name: Resolve release version
+        id: resolve
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          PREV_TAG=$(git describe --tags --abbrev=0 --exclude="$TAG" 2>/dev/null || echo "")
+          echo "previous_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+
+          # Date of the previous release, used to count PRs merged since then.
+          # No previous tag (first release) - use the repo's first commit date instead.
+          if [[ -n "$PREV_TAG" ]]; then
+            PREV_DATE=$(git log -1 --format=%aI "$PREV_TAG")
+          else
+            PREV_DATE=$(git log --reverse --format=%aI | head -1)
+          fi
+          echo "previous_date=${PREV_DATE}" >> "$GITHUB_OUTPUT"
+
+  # Gate the release on the same checks CI would run. Runs before the image
+  # is built so a broken build/test never gets tagged, pushed, or released.
+  verify:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26.1.0"
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Resolve image name
+        id: image
+        run: |
+          set -euo pipefail
           IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE }}:${{ env.VERSION }}
-            ${{ env.IMAGE }}:latest
+            ${{ steps.image.outputs.image }}:${{ needs.prepare.outputs.version }}
+            ${{ steps.image.outputs.image }}:latest
 
-      - name: Create GitHub release
+  release:
+    needs: [prepare, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Create release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          PREV_DATE: ${{ needs.prepare.outputs.previous_date }}
+          IMAGE: ${{ needs.docker.outputs.image }}
         run: |
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
-            --generate-notes \
-            --target "$(git rev-parse HEAD)"
+          set -euo pipefail
 
-      - name: Bump patch version for next release
+          # Prefer GitHub's PR/label-based notes (reads .github/release.yml
+          # categories) when PRs were actually merged since the last release.
+          # Repos that commit straight to the release branch - no merged PRs
+          # in range - get a plain commit log instead, so a release is never
+          # published with a blank body.
+          MERGED_PR_COUNT="$(gh pr list --repo "${{ github.repository }}" --state merged --search "merged:>=${PREV_DATE}" --json number --jq 'length')"
+
+          {
+            echo "**Image:** \`${IMAGE}:${{ needs.prepare.outputs.version }}\`"
+            echo
+          } > notes-header.md
+
+          if [[ "${MERGED_PR_COUNT}" -gt 0 ]]; then
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --target "${{ needs.prepare.outputs.sha }}" \
+              --title "${TAG}" \
+              --notes-file notes-header.md \
+              --generate-notes
+          else
+            if [[ -n "${PREV_TAG}" ]]; then
+              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" >> notes-header.md
+            else
+              git log --pretty=format:"- %s (%h)" >> notes-header.md
+            fi
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --target "${{ needs.prepare.outputs.sha }}" \
+              --title "${TAG}" \
+              --notes-file notes-header.md
+          fi
+
+  # Leave the branch on a fresh dev/patch version so the next dispatch (of
+  # any bump type) starts from an unreleased version number.
+  post-release:
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26.1.0"
+
+      - name: Bump to next patch version
         run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version patch --no-git-tag-version
           NEXT_VERSION=$(node -p "require('./package.json').version")
-          git commit -am "chore: bump version to v${NEXT_VERSION}"
-          git push
+          git commit -am "chore(release): bump version to v${NEXT_VERSION} (post-release)"
+          git push origin HEAD:${{ github.ref_name }}
