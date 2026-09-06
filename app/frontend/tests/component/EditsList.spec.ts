@@ -191,3 +191,55 @@ describe('EditsList — edit-preview overlay dismissal', () => {
     expect(w.find('.diff-viewer').exists()).toBe(false);
   });
 });
+
+// Bug fix (79c2d07): dropping a single proposed edit is destructive with no undo, so it's gated
+// behind a window.confirm before it fires — same gate DropAllButton.vue has for "Drop remaining".
+describe('EditsList — per-row Drop confirmation gate', () => {
+  let pinia: Pinia;
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.listEdits).mockReset();
+    vi.mocked(httpClient.dropEdit).mockReset();
+    confirmSpy = vi.spyOn(window, 'confirm');
+  });
+
+  afterEach(() => {
+    confirmSpy.mockRestore();
+  });
+
+  async function mountWithOnePending() {
+    vi.mocked(httpClient.listEdits).mockResolvedValue({
+      stagedEdits: [stagedEdit({ id: 'edit-1', createdAt: '2026-01-01T00:00:10.000Z' })],
+    });
+    const wrapper = mount(EditsList, { props: { conversationId: 'conv-1' }, global: { plugins: [pinia] } });
+    await flushPromises();
+    return wrapper;
+  }
+
+  it('confirming the dialog proceeds with the drop', async () => {
+    confirmSpy.mockReturnValue(true);
+    vi.mocked(httpClient.dropEdit).mockResolvedValue({ outcome: 'dropped', stagedEditId: 'edit-1' });
+
+    const wrapper = await mountWithOnePending();
+    await wrapper.get('[aria-label="Drop: edit-1"]').trigger('click');
+    await flushPromises();
+
+    expect(confirmSpy).toHaveBeenCalledWith('Drop this proposed edit? This cannot be undone.');
+    expect(httpClient.dropEdit).toHaveBeenCalledWith('edit-1');
+  });
+
+  it('cancelling the dialog is a no-op — the edit is neither dropped nor left busy', async () => {
+    confirmSpy.mockReturnValue(false);
+
+    const wrapper = await mountWithOnePending();
+    await wrapper.get('[aria-label="Drop: edit-1"]').trigger('click');
+    await flushPromises();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(httpClient.dropEdit).not.toHaveBeenCalled();
+    expect(wrapper.get('.status-badge').text()).toBe('pending');
+  });
+});
