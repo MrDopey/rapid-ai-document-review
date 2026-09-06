@@ -30,7 +30,7 @@
 	"forwardPorts": [ 3000, 3001 ],
 	// 'appPort' actually publishes these via Docker's -p so the bare devcontainer CLI
 	// (not just VS Code/Codespaces' forwarding proxy) exposes them to the host.
-	"appPort": [ 3000, 3001 ],
+	"appPort": [ 3000, 3001, 4000, 4001 ],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install --user -r requirements.txt",
