@@ -70,6 +70,7 @@ describe('z-index scale — style.css :root tokens', () => {
     ['--z-overlay', 50],
     ['--z-overlay-detail', 55],
     ['--z-overlay-primary', 60],
+    ['--z-overlay-blocking', 70],
     ['--z-indicator', 1000],
   ])('defines %s: %i', (name, value) => {
     expect(tokens[name]).toBe(value);
@@ -222,7 +223,7 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-raised', 1);
   });
 
-  it('HistoryPanel.vue\'s .diff-overlay uses --z-overlay once the Diff modal is open', async () => {
+  it('HistoryPanel.vue\'s .diff-overlay uses --z-overlay-blocking once the Diff modal is open', async () => {
     const store = useDocumentStore();
     store.revisions = [
       makeRevision({ revision: 2, createdAt: '2026-01-02T00:00:00.000Z' }),
@@ -240,11 +241,11 @@ describe('z-index scale — cheaply-mounted real components reference the expect
 
     const overlay = wrapper.find('.diff-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay', 50);
+    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
   });
 });
 
-describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay', () => {
+describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay-blocking', () => {
   let pinia: Pinia;
   let wrapper: VueWrapper | null = null;
 
@@ -262,7 +263,7 @@ describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay', ()
     wrapper = null;
   });
 
-  it('resolves --z-overlay once a preview is open', async () => {
+  it('resolves --z-overlay-blocking once a preview is open', async () => {
     vi.mocked(httpClient.listEdits).mockResolvedValue({
       stagedEdits: [
         {
@@ -309,7 +310,7 @@ describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay', ()
 
     const overlay = wrapper.find('.preview-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay', 50);
+    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
   });
 });
 
@@ -472,22 +473,22 @@ describe('z-index scale — App.vue overlays', () => {
     vi.unstubAllGlobals();
   });
 
-  it('.shortcuts-overlay uses --z-overlay once open', async () => {
+  it('.shortcuts-overlay uses --z-overlay-blocking once open', async () => {
     const wrapper = await mountApp();
     await wrapper.get('[aria-label="Keyboard shortcuts"]').trigger('click');
     await flushPromises();
     const overlay = wrapper.find('.shortcuts-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay', 50);
+    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
   });
 
-  it('.help-overlay uses --z-overlay once open', async () => {
+  it('.help-overlay uses --z-overlay-blocking once open', async () => {
     const wrapper = await mountApp();
     await wrapper.get('[aria-label="Help"]').trigger('click');
     await flushPromises();
     const overlay = wrapper.find('.help-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay', 50);
+    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
   });
 
   it('.conversation-detail-overlay uses --z-overlay-detail once a conversation is focused', async () => {

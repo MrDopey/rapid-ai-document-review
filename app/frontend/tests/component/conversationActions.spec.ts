@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
-import { ref } from 'vue';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { useConversationBranchAction, useBulkToggleAction } from '../../src/composables/conversationActions.js';
@@ -145,8 +144,7 @@ describe('useBulkToggleAction', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' })];
-    const expandedByMessage = ref<Record<string, boolean>>({});
-    const { visible } = useBulkToggleAction(() => 'c1', expandedByMessage);
+    const { visible } = useBulkToggleAction(() => 'c1');
     expect(visible.value).toBe(false);
   });
 
@@ -154,8 +152,8 @@ describe('useBulkToggleAction', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' }), makeMessage({ id: 'm2' })];
-    const expandedByMessage = ref<Record<string, boolean>>({ m1: false, m2: false });
-    const { action, visible } = useBulkToggleAction(() => 'c1', expandedByMessage);
+    store.expandedByMessage['c1'] = { m1: false, m2: false };
+    const { action, visible } = useBulkToggleAction(() => 'c1');
     expect(visible.value).toBe(true);
     expect(action.value.label).toBe('Expand all');
     expect(action.value.ariaLabel).toBe('Expand all messages in this conversation');
@@ -165,24 +163,29 @@ describe('useBulkToggleAction', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' }), makeMessage({ id: 'm2' })];
-    const expandedByMessage = ref<Record<string, boolean>>({ m1: true, m2: true });
-    const { action } = useBulkToggleAction(() => 'c1', expandedByMessage);
+    store.expandedByMessage['c1'] = { m1: true, m2: true };
+    const { action } = useBulkToggleAction(() => 'c1');
     expect(action.value.label).toBe('Collapse all');
   });
 
-  it('clicking mutates the shared expandedByMessage ref for every message at once', () => {
+  // Bug fix (0470e9f): this composable no longer takes a host-local `expandedByMessage` ref — it
+  // now reads/writes `conversationsStore.expandedByMessage[conversationId]` directly (via
+  // `store.setMessagesExpanded`), so both `ConversationThreadBox.vue` and `ConversationView.vue`
+  // act on the exact same shared state instead of two refs that could silently diverge. Assert
+  // against the store slice itself rather than a local ref.
+  it('clicking mutates the shared store.expandedByMessage slice for every message at once', () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'c1' })];
     store.messagesByConversation['c1'] = [makeMessage({ id: 'm1' }), makeMessage({ id: 'm2' })];
-    const expandedByMessage = ref<Record<string, boolean>>({ m1: false, m2: true });
-    const { action } = useBulkToggleAction(() => 'c1', expandedByMessage);
+    store.expandedByMessage['c1'] = { m1: false, m2: true };
+    const { action } = useBulkToggleAction(() => 'c1');
 
     // Any collapsed (m1) -> clicking expands every message.
     action.value.onClick();
-    expect(expandedByMessage.value).toEqual({ m1: true, m2: true });
+    expect(store.expandedByMessage['c1']).toEqual({ m1: true, m2: true });
 
     // Now all expanded -> clicking collapses every message.
     action.value.onClick();
-    expect(expandedByMessage.value).toEqual({ m1: false, m2: false });
+    expect(store.expandedByMessage['c1']).toEqual({ m1: false, m2: false });
   });
 });

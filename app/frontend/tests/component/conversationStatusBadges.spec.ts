@@ -89,9 +89,16 @@ describe('useConversationStatusBadges', () => {
     expect(badges.value.map((b) => b.key)).toEqual(['status', 'stale', 'orphaned']);
   });
 
-  it('excludes pendingEditCount/queueInfo — those stay HudPanel.vue-only, out of scope here', () => {
+  it('includes a pending-count badge by default ("full" variant) — parity fix, no longer HudPanel.vue-only', () => {
     useConversationsStore().conversations = [conversationFixture({ id: 'c1', pendingEditCount: 5 })];
     const { badges } = useConversationStatusBadges(() => 'c1');
+    expect(badges.value.map((b) => b.key)).toEqual(['status', 'pending']);
+    expect(badges.value.find((b) => b.key === 'pending')?.label).toBe('5');
+  });
+
+  it('"compact" variant excludes pendingEditCount/queueInfo badges', () => {
+    useConversationsStore().conversations = [conversationFixture({ id: 'c1', pendingEditCount: 5 })];
+    const { badges } = useConversationStatusBadges(() => 'c1', 'compact');
     expect(badges.value.map((b) => b.key)).toEqual(['status']);
   });
 
