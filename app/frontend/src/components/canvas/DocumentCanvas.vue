@@ -85,18 +85,16 @@ const boxHeights = ref(new Map<string, number>());
 const observedEls = new Map<string, HTMLElement>();
 let resizeObserver: ResizeObserver | null = null;
 
-// Perf fix (stress-test pass, measured with real load — see this file's own layoutEntries comment
-// below for the full mechanism this addresses): each box independently reporting its own real
-// height as its content mounts/loads produces a *burst* of separate `ResizeObserver` callback
-// invocations rather than one single batch, especially at realistic conversation counts (measured:
-// 153ms render time at 25 conversations -> 10,490ms at 130, non-linear). Every one of those
-// invocations used to write straight into the reactive `boxHeights` ref, so each box resizing
-// forced its own full `layoutEntries` recompute (and, before the anchorY cache below, its own full
-// re-measurement of *every* conversation's CodeMirror anchor). Buffering pending height changes in
-// a plain (non-reactive) map and flushing them into `boxHeights` at most once per animation frame
-// collapses a burst of N separate resize notifications into far fewer reactive updates — the
-// `layoutEntries` computed still sees every real height change, just coalesced, so the final
-// stacked layout is identical, only computed less often.
+// Each box independently reporting its own real height as its content mounts/loads produces a
+// *burst* of separate `ResizeObserver` callback invocations rather than one single batch,
+// especially at realistic conversation counts. Writing every one of those invocations straight
+// into the reactive `boxHeights` ref would force its own full `layoutEntries` recompute per box
+// (and, before the anchorY cache below, its own full re-measurement of *every* conversation's
+// CodeMirror anchor). Buffering pending height changes in a plain (non-reactive) map and flushing
+// them into `boxHeights` at most once per animation frame collapses a burst of N separate resize
+// notifications into far fewer reactive updates — the `layoutEntries` computed still sees every
+// real height change, just coalesced, so the final stacked layout is identical, only computed less
+// often.
 const pendingBoxHeights = new Map<string, number>();
 let boxHeightsFlushHandle: number | null = null;
 const scheduleFrame: (cb: () => void) => number =
@@ -255,26 +253,24 @@ function heightOf(conversationId: string): number {
   return boxHeights.value.get(conversationId) ?? ESTIMATED_BOX_HEIGHT_PX;
 }
 
-// Perf fix (stress-test pass — root cause of the measured 153ms @ 25 conversations -> 10,490ms @
-// 130 conversations, non-linear, jank): resolving each conversation's anchored *root* and, if that
-// root has a `seedSelection`, calling into CodeMirror (`EditorComponent.vue`'s
-// `anchorTop`: `view.coordsAtPos` + `paneRef.getBoundingClientRect()`) — both of which force a
-// synchronous browser layout. `layoutEntries` below necessarily depends on `boxHeights.value` (the
-// sibling-collision stacking math needs real box heights), so *any single* conversation's box
-// resizing — which happens independently, per box, as each one's content mounts/loads — used to
-// invalidate the whole computed and rerun this CodeMirror measurement for *every* conversation, not
-// just the one whose height actually changed. At N conversations with boxes reporting real heights
-// in a staggered burst (the normal case), that's O(N) full-sweep re-measurements, each itself O(N)
-// — the O(N^2)-or-worse blowup this fixes.
+// Resolving each conversation's anchored *root* and, if that root has a `seedSelection`, calling
+// into CodeMirror (`EditorComponent.vue`'s `anchorTop`: `view.coordsAtPos` +
+// `paneRef.getBoundingClientRect()`) both force a synchronous browser layout. `layoutEntries` below
+// necessarily depends on `boxHeights.value` (the sibling-collision stacking math needs real box
+// heights), so without caching, *any single* conversation's box resizing — which happens
+// independently, per box, as each one's content mounts/loads — would invalidate the whole computed
+// and rerun this CodeMirror measurement for *every* conversation, not just the one whose height
+// actually changed. At N conversations with boxes reporting real heights in a staggered burst (the
+// normal case), that's O(N) full-sweep re-measurements, each itself O(N).
 //
 // anchorY only actually depends on the resolved root's identity/seedSelection and the editor
-// instance — never on any box's height — so it's safe (and produces byte-identical positions, this
-// is a pure caching layer with no behavior change) to memoize per conversation id and only redo the
-// expensive CodeMirror measurement when one of those actually-relevant inputs has changed. The
-// store replaces a conversation's own object only on a genuine conversation-level update (branch
-// created, status change, etc. — never on a message/box-height change, which lives in a separate
-// `messagesByConversation` map), so this cache stays valid across the boxHeights churn that used to
-// drive the quadratic cost, while still picking up any real anchor-affecting change immediately.
+// instance — never on any box's height — so it's safe (and produces byte-identical positions) to
+// memoize per conversation id and only redo the expensive CodeMirror measurement when one of those
+// actually-relevant inputs has changed. The store replaces a conversation's own object only on a
+// genuine conversation-level update (branch created, status change, etc. — never on a
+// message/box-height change, which lives in a separate `messagesByConversation` map), so this
+// cache stays valid across boxHeights churn while still picking up any real anchor-affecting change
+// immediately.
 const anchorYCache = new Map<
   string,
   { root: ConversationLayoutInput; editor: AnchorPositionSource | null; y: number }

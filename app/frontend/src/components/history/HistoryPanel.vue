@@ -15,9 +15,9 @@ const editsStore = useEditsStore();
 
 const diffingRevision = ref<number | null>(null);
 
-// Fix: Restore instantly overwrites the live document with no undo — every other state-changing
-// action in this app (e.g. closing a conversation, ConversationView.vue's close dialog) gates
-// behind a confirmation dialog first. Mirrors that same role="alertdialog"/focus-trap pattern.
+// Restore instantly overwrites the live document with no undo — every other state-changing action
+// in this app (e.g. closing a conversation, ConversationView.vue's close dialog) gates behind a
+// confirmation dialog first. Mirrors that same role="alertdialog"/focus-trap pattern.
 const restoreDialogOpen = ref(false);
 const restoreTarget = ref<number | null>(null);
 const restoreDialogEl = ref<HTMLElement | null>(null);
@@ -232,9 +232,9 @@ async function onCopy(revision: number): Promise<void> {
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
-/* Fix: Restore overwrites the live document with no undo, unlike Download/Copy/Diff (all
-   read-only) — give it a danger-toned treatment (same pattern as DropAllButton.vue) so it doesn't
-   read as an equally-weighted peer of the three safe actions beside it. */
+/* Restore overwrites the live document with no undo, unlike Download/Copy/Diff (all read-only) —
+   danger-toned treatment (same pattern as DropAllButton.vue) so it doesn't read as an
+   equally-weighted peer of the three safe actions beside it. */
 .restore-button {
   background: transparent;
   border-color: var(--danger-color, #b91c1c);
@@ -274,21 +274,19 @@ async function onCopy(revision: number): Promise<void> {
   color: var(--danger-color, #b3261e);
   border-color: currentColor;
 }
-/* Fix: `.diff-overlay` previously relied on `.modal-overlay`'s shared base rule alone, which
-   (per that rule's own comment in style.css) deliberately leaves z-index to each caller since
-   overlays nest. Left at the resulting `z-index: auto`, this `position: fixed` overlay doesn't
-   establish its own stacking context and so painted in plain tree order within the page's root
-   stacking context — where EditorComponent.vue's `position: sticky` `.editor-toolbar`
-   (`--z-sticky`) DOES establish one and paints above any unstyled (auto) content in that same
-   root context, regardless of DOM order. That let the sticky editor header render on top of this
-   modal instead of behind it.
-   Second fix (unclickable-Close-button bug): this is an independent, page-level "simple" modal
-   that can be opened while a conversation is focused (`--z-overlay-detail`) — it previously used
-   `--z-overlay` (the same token as App.vue's `.shortcuts-overlay`/`.help-overlay`/EditsList.vue's
-   `.preview-overlay`), which sits BELOW `--z-overlay-detail`, so it rendered sliced in half
-   underneath the focused panel with its Close button genuinely unclickable. `--z-overlay-blocking`
-   (style.css `:root`) is the tier reserved for exactly this "must always render above everything
-   else" case. */
+/* `.modal-overlay`'s shared base rule (see its own comment in style.css) deliberately leaves
+   z-index to each caller, since overlays nest. `.diff-overlay` needs an explicit z-index here: at
+   `z-index: auto`, this `position: fixed` overlay wouldn't establish its own stacking context and
+   would paint in plain tree order within the page's root stacking context — where
+   EditorComponent.vue's `position: sticky` `.editor-toolbar` (`--z-sticky`) DOES establish one and
+   paints above any unstyled (auto) content in that same root context, regardless of DOM order,
+   letting the sticky editor header render on top of this modal instead of behind it.
+   It must specifically use `--z-overlay-blocking`, not `--z-overlay`: this is an independent,
+   page-level "simple" modal that can be opened while a conversation is focused
+   (`--z-overlay-detail`), so it must always render above that tier — `--z-overlay` sits BELOW
+   `--z-overlay-detail` and would render sliced in half underneath the focused panel, with its
+   Close button unclickable. `--z-overlay-blocking` (style.css `:root`) is the tier reserved for
+   exactly this "must always render above everything else" case. */
 .diff-overlay {
   z-index: var(--z-overlay-blocking, 70);
 }

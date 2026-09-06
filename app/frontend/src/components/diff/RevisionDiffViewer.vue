@@ -165,16 +165,13 @@ const identical = computed(
 </template>
 
 <style scoped>
-/* Fix: matches the same modal-dialog pattern already used by HelpDialog.vue,
-   KeyboardShortcutsDialog.vue, and EditsList.vue's `:deep(.diff-viewer)` override (background,
-   border-radius, width/max-width, max-height, box-shadow) — this component previously had none of
-   those, so it rendered with no visible chrome and, critically, no `max-height`: inside
-   `.modal-overlay`'s viewport-centering flexbox, a long document's diff could grow taller than the
-   viewport with nothing to cap it, pushing the header/close button and most of the diff off-screen
-   with no scrollbar to reach them (`overflow: auto` only takes effect once a max-height/height
-   exists for content to overflow against). Background/color/border-radius/box-shadow now live in
-   style.css's shared `.dialog-box` class (applied via the template class above); only the
-   width/max-width/max-height/padding/overflow specific to this dialog stay here. */
+/* Inside `.modal-overlay`'s viewport-centering flexbox, a long document's diff could grow taller
+   than the viewport with nothing to cap it, pushing the header/close button and most of the diff
+   off-screen with no scrollbar to reach them — `overflow: auto` only takes effect once a
+   max-height/height exists for content to overflow against, hence the explicit `max-height` below.
+   Background/color/border-radius/box-shadow live in style.css's shared `.dialog-box` class
+   (applied via the template class above); only the width/max-width/max-height/padding/overflow
+   specific to this dialog stay here. */
 .revision-diff-viewer {
   padding: 1rem;
   width: 48rem;
