@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CloseConversationRequest,
   CreateConversationRequest,
@@ -84,6 +84,22 @@ function handleConversationError(
   return null;
 }
 
+/**
+ * Shared try/catch + `handleConversationError` dispatch wrapper, repeated identically at the end of
+ * every route handler below. `fn`'s return value (including any `reply.send(...)`/`reply.status(...)`
+ * call it makes) is passed straight through on success; on a thrown error it maps and sends via
+ * `handleConversationError`/`sendError` exactly as before, or rethrows when unmapped.
+ */
+async function withConversationErrors(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return await fn();
+  } catch (err) {
+    const mapped = handleConversationError(err);
+    if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
+    throw err;
+  }
+}
+
 export function registerConversationRoutes(
   app: FastifyInstance,
   deps: { conversationService: ConversationService; primaryService: PrimaryService; storage: StorageAdapter },
@@ -103,14 +119,10 @@ export function registerConversationRoutes(
   app.post('/api/conversations', async (request, reply) => {
     const data = parseOrFail(reply, CreateConversationRequest, request.body);
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const conversation = conversationService.branch(data);
       return reply.status(201).send(conversation);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   // 005-canvas-conversation-threads follow-up: discards an untouched branch placeholder (zero
@@ -118,121 +130,81 @@ export function registerConversationRoutes(
   // rather than leaving it soft-closed forever. Distinct from `POST /:id/close` (FR-033), which
   // stays untouched by this addition.
   app.delete<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
-    try {
+    return withConversationErrors(reply, async () => {
       const result = conversationService.discardIfEmpty(request.params.id);
       return reply.send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.get<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
-    try {
+    return withConversationErrors(reply, async () => {
       return reply.send(conversationService.getOne(request.params.id));
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.patch<{ Params: { id: string } }>('/api/conversations/:id', async (request, reply) => {
     const data = parseOrFail(reply, RenameConversationRequest, request.body);
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const conversation = conversationService.rename(request.params.id, data.name);
       return reply.send(conversation);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/send', async (request, reply) => {
     const data = parseOrFail(reply, SendMessageRequest, request.body);
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const result = await conversationService.send(request.params.id, data.message);
       return reply.status(202).send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/refresh-send', async (request, reply) => {
     const data = parseOrFail(reply, SendMessageRequest, request.body);
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const result = await conversationService.refreshAndSend(request.params.id, data.message);
       return reply.status(202).send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/retry', async (request, reply) => {
-    try {
+    return withConversationErrors(reply, async () => {
       const result = await conversationService.retry(request.params.id);
       return reply.status(202).send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/close', async (request, reply) => {
     const data = parseOrFail(reply, CloseConversationRequest, request.body ?? {});
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const result = conversationService.close(request.params.id, data.foldSummaryIntoParent);
       return reply.send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/review', async (request, reply) => {
-    try {
+    return withConversationErrors(reply, async () => {
       const result = conversationService.review(request.params.id);
       return reply.status(201).send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/conversations/:id/primary', async (request, reply) => {
     const data = parseOrFail(reply, DesignatePrimaryRequest, request.body ?? {});
     if (!data) return;
-    try {
+    return withConversationErrors(reply, async () => {
       const result = await primaryService.designate(request.params.id, data.whenBusy);
       return reply.send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 
   app.delete<{ Params: { id: string } }>('/api/conversations/:id/primary', async (request, reply) => {
-    try {
+    return withConversationErrors(reply, async () => {
       const result = await primaryService.clear(request.params.id);
       return reply.send(result);
-    } catch (err) {
-      const mapped = handleConversationError(err);
-      if (mapped) return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
-      throw err;
-    }
+    });
   });
 }
