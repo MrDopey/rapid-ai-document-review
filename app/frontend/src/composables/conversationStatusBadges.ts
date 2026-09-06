@@ -25,39 +25,28 @@ export type StatusBadgeVariant = 'full' | 'compact';
 
 export interface ConversationStatusBadges {
   badges: ComputedRef<StatusBadge[]>;
-  /** Parity fix: `conversation.isPrimary` computed once here rather than each of
-   *  `ConversationView.vue`/`ConversationThreadBox.vue`/`HudPanel.vue` re-deriving it locally for
+  /** `conversation.isPrimary` computed once here rather than each of
+   *  `ConversationView.vue`/`ConversationThreadBox.vue`/`HudPanel.vue` deriving it independently for
    *  their own `.is-primary` class binding — see each consumer's own `--primary-indicator-shadow`
    *  usage in its `<style scoped>` block. */
   isPrimary: ComputedRef<boolean>;
 }
 
-/** Bug fix (ConversationView.vue never rendered a Stale/Orphaned-anchor badge — see the badge list
- *  below): the exact same three status pills `HudPanel.vue` (topnav) and `ConversationThreadBox.vue`
- *  (sidebar/canvas box) already each hand-duplicated — the primary `conversation.status` badge
- *  (always present), a `Stale` badge (`conversation.isStale`), and an `Orphaned anchor` badge
- *  (`conversation.anchorOrphaned`, previously only on `ConversationThreadBox.vue`) — consolidated
- *  into one shared composable so all three surfaces render identically and can never drift apart
- *  again.
+/** The same three status pills render identically across `HudPanel.vue` (topnav),
+ *  `ConversationThreadBox.vue` (sidebar/canvas box), and `ConversationView.vue` (focus/detail
+ *  view): the primary `conversation.status` badge (always present), a `Stale` badge
+ *  (`conversation.isStale`), and an `Orphaned anchor` badge (`conversation.anchorOrphaned`). One
+ *  shared composable is the single source for all three surfaces, so they can never drift apart.
  *
- *  Parity fix: the pending-proposal-count and queue-position badges (`conv.pendingEditCount`,
- *  `store.queueInfo`) used to be `HudPanel.vue`-only, hand-rendered outside this composable
- *  entirely (deliberately "out of scope" per this doc comment's own previous wording) — so a canvas
- *  box for a conversation with pending proposals or a queued turn (`ConversationThreadBox.vue`)
- *  gave no visual cue at all unless its detail panel was opened. Folded in here (gated by
- *  `variant`, see `StatusBadgeVariant` above) so every consumer of this composable gets the same
- *  parity `HudPanel.vue` already had, with no separate copy of this logic to keep in sync.
+ *  The pending-proposal-count and queue-position badges (`conv.pendingEditCount`,
+ *  `store.queueInfo`) are gated by `variant` (see `StatusBadgeVariant` above) so every consumer of
+ *  this composable can show the same information, with no separate copy of this logic to keep in
+ *  sync.
  *
- *  Deviation from the two pre-existing copies of this logic: the "Stale" tooltip differed between
- *  `HudPanel.vue` (the fuller text, naming the "Refresh + Send" remedy) and
- *  `ConversationThreadBox.vue` (a shorter sentence with no remedy named) — they were not actually
- *  identical, despite both describing the same state. The fuller `HudPanel.vue` wording is kept as
- *  the one canonical string here, since it's strictly more informative regardless of which surface
- *  renders it (even a surface with no composer of its own still benefits from knowing what fixes
- *  it). Likewise, `HudPanel.vue`'s `status-badge[data-status='closed']` color
- *  (`--status-closed-color`) differed from `ConversationThreadBox.vue`'s/`ConversationView.vue`'s
- *  own (`--danger-color`, per a documented "color-consistency fix" in `ConversationView.vue`) — the
- *  more recently, deliberately fixed `--danger-color` value is kept as canonical here too. See
+ *  Two values are pinned as canonical and must not vary per surface: the "Stale" tooltip always
+ *  uses the fuller text naming the "Refresh + Send" remedy (strictly more informative regardless of
+ *  which surface renders it, even one with no composer of its own), and the closed-status color is
+ *  always `--danger-color` (never a separate `--status-closed-color`). See
  *  `ConversationStatusBadges.vue`'s own doc comment for the color rule itself. */
 export function useConversationStatusBadges(
   conversationId: () => string,

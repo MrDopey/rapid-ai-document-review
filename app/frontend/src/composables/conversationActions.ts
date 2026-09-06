@@ -50,10 +50,9 @@ export interface ConversationBranchAction {
 }
 
 /**
- * Shared "Branch this conversation" action descriptor, extracted from `ConversationThreadBox.vue`
- * and `ConversationView.vue` — both hand-duplicated the exact same disabled-reason priority
- * (server-computed `canBranch` first, then the live focus-cap check) and tooltip/aria-label wording
- * (each component's own doc comment explicitly called out the duplication). Preserves both exactly.
+ * Shared "Branch this conversation" action descriptor, used by both `ConversationThreadBox.vue` and
+ * `ConversationView.vue`: the same disabled-reason priority (server-computed `canBranch` first,
+ * then the live focus-cap check) and tooltip/aria-label wording for both.
  */
 export function useConversationBranchAction(
   conversationId: () => string,
@@ -87,9 +86,9 @@ export function useConversationBranchAction(
     }
   }
 
-  /** Disabled-reason priority: the existing server-computed `canBranch` (closed/max-depth) wins
-   *  over the "at focus cap" reason — same pre-existing wording as before this extraction; the
-   *  shared cap tooltip only applies once `canBranch` isn't the active reason. */
+  /** Disabled-reason priority: the server-computed `canBranch` (closed/max-depth) wins over the "at
+   *  focus cap" reason — the shared cap tooltip only applies once `canBranch` isn't the active
+   *  reason. */
   const title = computed(() => {
     if (!conversation.value?.canBranch) return 'Maximum conversation depth reached';
     if (options.atFocusCap()) return focusCapBranchTooltip(options.maxFocused());
@@ -122,13 +121,12 @@ export interface ConversationBulkToggleAction {
 }
 
 /**
- * Shared "Expand all"/"Collapse all" bulk-toggle action descriptor, extracted from
- * `ConversationThreadBox.vue` and `ConversationView.vue`. Bug fix: this used to take the host's own
- * local `expandedByMessage` ref and mutate it directly — now that per-message expand state lives in
- * `conversationsStore.expandedByMessage` (see that store's own doc comment: both components can be
- * mounted at once for the same conversation, and two separate local refs could silently diverge),
- * this composable reads/writes that same shared store slice via `conversationId` alone, so both
- * hosts' bulk toggle acts on the exact one state both of them render from.
+ * Shared "Expand all"/"Collapse all" bulk-toggle action descriptor, used by both
+ * `ConversationThreadBox.vue` and `ConversationView.vue`. Reads/writes
+ * `conversationsStore.expandedByMessage` (see that store's own doc comment) via `conversationId`
+ * alone rather than a host-owned local ref — both components can be mounted at once for the same
+ * conversation, so a local ref per host would let the two silently diverge; this way both hosts'
+ * bulk toggle acts on the exact one state both of them render from.
  */
 export function useBulkToggleAction(conversationId: () => string): ConversationBulkToggleAction {
   const store = useConversationsStore();

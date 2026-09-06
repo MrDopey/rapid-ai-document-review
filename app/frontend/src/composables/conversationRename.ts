@@ -13,16 +13,14 @@ export interface ConversationRename {
 }
 
 /**
- * Shared click-to-edit conversation-title rename affordance, extracted from
- * `ConversationThreadBox.vue` and `ConversationView.vue` — both hand-duplicated this byte-for-byte
- * identical state/logic (including identical error handling:
- * `err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to rename
- * conversation.'`), following the same "one action per slot" convention every other per-conversation
- * action in this app uses: an inline `<input>` replaces the plain-text title, save on Enter/blur,
- * cancel on Escape (constitution's "UI Conventions": no confirmation dialog for a reversible,
- * single-field text edit). Mirrors `useConversationBranchAction`'s shape (`conversationActions.ts`)
- * — a composable taking a conversationId accessor and returning the draft ref/save/cancel/start
- * functions, consumed identically by both hosts.
+ * Shared click-to-edit conversation-title rename affordance, used by both
+ * `ConversationThreadBox.vue` and `ConversationView.vue`, following the same "one action per slot"
+ * convention every other per-conversation action in this app uses: an inline `<input>` replaces the
+ * plain-text title, save on Enter/blur, cancel on Escape (constitution's "UI Conventions": no
+ * confirmation dialog for a reversible, single-field text edit). Mirrors
+ * `useConversationBranchAction`'s shape (`conversationActions.ts`) — a composable taking a
+ * conversationId accessor and returning the draft ref/save/cancel/start functions, consumed
+ * identically by both hosts.
  *
  * `nameInputEl` is supplied by the caller (rather than owned here) — each host still declares its
  * own `ref<HTMLInputElement | null>(null)` for the `ref="nameInputEl"` template binding (a template
