@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import EditorComponent from '../editor/EditorComponent.vue';
 import ConversationThreadBox from '../conversation/ConversationThreadBox.vue';
 import { useConversationsStore } from '../../stores/conversations.js';
-import type { AnchorPositionSource } from './anchorY.js';
-import { computeConversationLayout, resolveBaseAnchorY, type ConversationLayoutInput } from './conversationLayout.js';
+import { computeAnchorY, type AnchorPositionSource } from './anchorY.js';
+import { computeConversationLayout, resolveAnchorRoot, type ConversationLayoutInput } from './conversationLayout.js';
 import {
   loadCanvasScrollPosition,
   persistCanvasScrollPosition,
@@ -85,6 +85,34 @@ const boxHeights = ref(new Map<string, number>());
 const observedEls = new Map<string, HTMLElement>();
 let resizeObserver: ResizeObserver | null = null;
 
+// Perf fix (stress-test pass, measured with real load — see this file's own layoutEntries comment
+// below for the full mechanism this addresses): each box independently reporting its own real
+// height as its content mounts/loads produces a *burst* of separate `ResizeObserver` callback
+// invocations rather than one single batch, especially at realistic conversation counts (measured:
+// 153ms render time at 25 conversations -> 10,490ms at 130, non-linear). Every one of those
+// invocations used to write straight into the reactive `boxHeights` ref, so each box resizing
+// forced its own full `layoutEntries` recompute (and, before the anchorY cache below, its own full
+// re-measurement of *every* conversation's CodeMirror anchor). Buffering pending height changes in
+// a plain (non-reactive) map and flushing them into `boxHeights` at most once per animation frame
+// collapses a burst of N separate resize notifications into far fewer reactive updates — the
+// `layoutEntries` computed still sees every real height change, just coalesced, so the final
+// stacked layout is identical, only computed less often.
+const pendingBoxHeights = new Map<string, number>();
+let boxHeightsFlushHandle: number | null = null;
+const scheduleFrame: (cb: () => void) => number =
+  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : ((cb) => setTimeout(cb, 0) as unknown as number);
+const cancelScheduledFrame: (handle: number) => void =
+  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : ((handle) => clearTimeout(handle));
+
+function flushBoxHeights(): void {
+  boxHeightsFlushHandle = null;
+  if (pendingBoxHeights.size === 0) return;
+  const next = new Map(boxHeights.value);
+  for (const [conversationId, height] of pendingBoxHeights) next.set(conversationId, height);
+  pendingBoxHeights.clear();
+  boxHeights.value = next;
+}
+
 function registerBoxEl(conversationId: string, instance: { el: HTMLElement | null } | null): void {
   const el = instance?.el ?? null;
   const previous = observedEls.get(conversationId);
@@ -95,24 +123,24 @@ function registerBoxEl(conversationId: string, instance: { el: HTMLElement | nul
     resizeObserver?.observe(el);
   } else {
     observedEls.delete(conversationId);
+    pendingBoxHeights.delete(conversationId);
     boxHeights.value.delete(conversationId);
   }
 }
 
 onMounted(() => {
   resizeObserver = new ResizeObserver((entries) => {
-    const next = new Map(boxHeights.value);
     let changed = false;
     for (const entry of entries) {
       const conversationId = (entry.target as HTMLElement).dataset.conversationId;
       if (!conversationId) continue;
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-      if (next.get(conversationId) !== height) {
-        next.set(conversationId, height);
+      if (boxHeights.value.get(conversationId) !== height) {
+        pendingBoxHeights.set(conversationId, height);
         changed = true;
       }
     }
-    if (changed) boxHeights.value = next;
+    if (changed && boxHeightsFlushHandle === null) boxHeightsFlushHandle = scheduleFrame(flushBoxHeights);
   });
   for (const el of observedEls.values()) resizeObserver.observe(el);
 });
@@ -120,6 +148,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
+  if (boxHeightsFlushHandle !== null) cancelScheduledFrame(boxHeightsFlushHandle);
   if (scrollFlushTimer) clearTimeout(scrollFlushTimer);
 });
 
@@ -226,6 +255,44 @@ function heightOf(conversationId: string): number {
   return boxHeights.value.get(conversationId) ?? ESTIMATED_BOX_HEIGHT_PX;
 }
 
+// Perf fix (stress-test pass — root cause of the measured 153ms @ 25 conversations -> 10,490ms @
+// 130 conversations, non-linear, jank): resolving each conversation's anchored *root* and, if that
+// root has a `seedSelection`, calling into CodeMirror (`EditorComponent.vue`'s
+// `anchorTop`: `view.coordsAtPos` + `paneRef.getBoundingClientRect()`) — both of which force a
+// synchronous browser layout. `layoutEntries` below necessarily depends on `boxHeights.value` (the
+// sibling-collision stacking math needs real box heights), so *any single* conversation's box
+// resizing — which happens independently, per box, as each one's content mounts/loads — used to
+// invalidate the whole computed and rerun this CodeMirror measurement for *every* conversation, not
+// just the one whose height actually changed. At N conversations with boxes reporting real heights
+// in a staggered burst (the normal case), that's O(N) full-sweep re-measurements, each itself O(N)
+// — the O(N^2)-or-worse blowup this fixes.
+//
+// anchorY only actually depends on the resolved root's identity/seedSelection and the editor
+// instance — never on any box's height — so it's safe (and produces byte-identical positions, this
+// is a pure caching layer with no behavior change) to memoize per conversation id and only redo the
+// expensive CodeMirror measurement when one of those actually-relevant inputs has changed. The
+// store replaces a conversation's own object only on a genuine conversation-level update (branch
+// created, status change, etc. — never on a message/box-height change, which lives in a separate
+// `messagesByConversation` map), so this cache stays valid across the boxHeights churn that used to
+// drive the quadratic cost, while still picking up any real anchor-affecting change immediately.
+const anchorYCache = new Map<
+  string,
+  { root: ConversationLayoutInput; editor: AnchorPositionSource | null; y: number }
+>();
+
+function cachedAnchorYOf(
+  conversation: ConversationLayoutInput,
+  byId: ReadonlyMap<string, ConversationLayoutInput>,
+  editor: AnchorPositionSource | null,
+): number {
+  const root = resolveAnchorRoot(conversation, byId);
+  const cached = anchorYCache.get(conversation.id);
+  if (cached && cached.root === root && cached.editor === editor) return cached.y;
+  const y = computeAnchorY(root.seedSelection, editor);
+  anchorYCache.set(conversation.id, { root, editor, y });
+  return y;
+}
+
 // US2/T023: only conversations present in this array get laid out — a closed-and-filtered-out or
 // hidden conversation (Phase 6/US4's `HudPanel` "Active only" filter, not yet reintroduced) simply
 // isn't in the array on a later recompute, and `computeConversationLayout` naturally closes the gap
@@ -243,8 +310,12 @@ const layoutEntries = computed(() => {
   // itself got filtered out shouldn't strand its still-visible branches with no anchor to inherit
   // from), so it's built from the *full* store list, not the filtered `conversations` above.
   const byId = new Map(conversationsStore.conversations.map((c) => [c.id, c]));
+  // Housekeeping only (no effect on the numbers computed below): drop cache entries for
+  // conversations no longer in the store at all, so a long session that creates/closes many
+  // conversations over time doesn't leak one `anchorYCache` entry per conversation ever seen.
+  for (const id of anchorYCache.keys()) if (!byId.has(id)) anchorYCache.delete(id);
   return computeConversationLayout(conversations, {
-    anchorYOf: (c) => resolveBaseAnchorY(c, byId, editorRef.value),
+    anchorYOf: (c) => cachedAnchorYOf(c, byId, editorRef.value),
     heightOf,
     minGap: MIN_STACK_GAP_PX,
   });
