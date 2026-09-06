@@ -100,10 +100,7 @@ export const useEditsStore = defineStore('edits', {
       }
     },
 
-    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
-    // this method rather than hand-listing `editsStore.handleServerFrame` alongside every other
-    // store's own call — see the sibling `subscribeToFrames` methods on the other stores App.vue
-    // fans frames out to.
+    // Registered by App.vue's connectWs — see there for why every store owns this.
     subscribeToFrames(wsClient: WsClient): () => void {
       return wsClient.onFrame((frame) => this.handleServerFrame(frame));
     },

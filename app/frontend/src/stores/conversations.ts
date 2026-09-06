@@ -19,13 +19,12 @@ import { loadMessageExpanded, persistMessageExpanded } from '../composables/mess
 import { ensureArray } from './util.js';
 
 /** Module-scoped (not store state — this is transient request bookkeeping, not data the app ever
- *  needs to serialize/inspect) in-flight-request de-dupe for `loadDetail` below (bug fix: a
- *  conversation that's simultaneously mounted as both a canvas box (`ConversationThreadBox.vue`)
- *  and a focused detail panel (`ConversationView.vue`) — exactly the scenario `expandedByMessage`
- *  above this file now has to handle too — used to fire two independent, redundant
- *  `GET /conversations/:id` requests if both mounted in the same tick; callers sharing the one
- *  in-flight promise for the same id fixes that without needing either caller to coordinate with
- *  the other. */
+ *  needs to serialize/inspect) in-flight-request de-dupe for `loadDetail` below: a conversation
+ *  that's simultaneously mounted as both a canvas box (`ConversationThreadBox.vue`) and a focused
+ *  detail panel (`ConversationView.vue`) — exactly the scenario `expandedByMessage` below now has
+ *  to handle too — can fire two independent, redundant `GET /conversations/:id` requests if both
+ *  mount in the same tick; sharing one in-flight promise per id avoids that without needing either
+ *  caller to coordinate with the other. */
 const inFlightDetailLoads = new Map<string, Promise<void>>();
 
 export interface ConversationMessageState {
@@ -68,24 +67,23 @@ export interface ConversationsState {
    *  conversation's focus panel closes and that component is about to unmount. A conversation with
    *  no entry (or only whitespace) here counts as having no draft. */
   drafts: Record<string, string>;
-  /** Bug fix (lifted out of `ConversationThreadBox.vue`/`ConversationView.vue`'s own local
-   *  per-component refs): per-message expand/collapse state, keyed by conversationId then
-   *  messageId. Both components can be mounted simultaneously for the same focused conversation
-   *  (the box always renders on the canvas; the detail view renders separately once focused) — a
-   *  local ref per component let the two silently diverge (the same bug class already patched
-   *  twice for the shared status badges/actions). `localStorage` (`messageDisplayState.ts`) stays
-   *  purely the persistence layer underneath this shared, single source of truth — see
+  /** Per-message expand/collapse state, keyed by conversationId then messageId, shared across
+   *  `ConversationThreadBox.vue` and `ConversationView.vue`. Both components can be mounted
+   *  simultaneously for the same focused conversation (the box always renders on the canvas; the
+   *  detail view renders separately once focused), so a local ref per component would let the two
+   *  silently diverge. `localStorage` (`messageDisplayState.ts`) stays purely the persistence layer
+   *  underneath this shared, single source of truth — see
    *  `ensureMessageExpandedSeeded`/`setMessageExpanded`/`setMessagesExpanded` below. */
   expandedByMessage: Record<string, Record<string, boolean>>;
-  /** Bug fix (store race): per-conversation generation counter guarding `refreshConversationMeta`
-   *  against an older in-flight GET resolving after a newer one and overwriting fresher state — see
-   *  that action's own doc comment. */
+  /** Per-conversation generation counter guarding `refreshConversationMeta` against an older
+   *  in-flight GET resolving after a newer one and overwriting fresher state — see that action's
+   *  own doc comment. */
   refreshGeneration: Record<string, number>;
-  /** Bug fix (event-sequence gap detection): the last persisted (non-null) `event.sequence` this
-   *  store has observed on the current document's WS stream — see `handleServerFrame`'s gap check
-   *  below. `sequence` is a single per-*document* counter (shared across every conversation and
-   *  every document-level event, not per-conversation), so one field is all that's needed; `null`
-   *  until the first `subscribed`/`event` frame arrives. */
+  /** The last persisted (non-null) `event.sequence` this store has observed on the current
+   *  document's WS stream — see `handleServerFrame`'s gap check below. `sequence` is a single
+   *  per-*document* counter (shared across every conversation and every document-level event, not
+   *  per-conversation), so one field is all that's needed; `null` until the first
+   *  `subscribed`/`event` frame arrives. */
   lastEventSequence: number | null;
   loaded: boolean;
 }
@@ -116,11 +114,11 @@ export const useConversationsStore = defineStore('conversations', {
       this.loaded = true;
     },
 
-    /** Perf/correctness fix: a conversation simultaneously mounted as both a canvas box
-     *  (`ConversationThreadBox.vue`, unconditional-on-cache) and a focused detail panel
-     *  (`ConversationView.vue`, unconditional every time) can trigger two concurrent
-     *  `GET /conversations/:id` requests for the same id — `inFlightDetailLoads` (module scope,
-     *  above) coalesces any overlapping calls for the same id into the one in-flight request. */
+    /** A conversation simultaneously mounted as both a canvas box (`ConversationThreadBox.vue`,
+     *  unconditional-on-cache) and a focused detail panel (`ConversationView.vue`, unconditional
+     *  every time) can trigger two concurrent `GET /conversations/:id` requests for the same id —
+     *  `inFlightDetailLoads` (module scope, above) coalesces any overlapping calls for the same id
+     *  into the one in-flight request. */
     async loadDetail(conversationId: string): Promise<void> {
       const existing = inFlightDetailLoads.get(conversationId);
       if (existing) return existing;
@@ -149,14 +147,13 @@ export const useConversationsStore = defineStore('conversations', {
      *  touching `messagesByConversation` — unlike `loadDetail`, safe to call while a turn is still
      *  streaming (a `staged_edit_*` event can arrive mid-turn, e.g. from `propose_document_edit`).
      *
-     *  Bug fix (store race): both the `conversation_started` and every `staged_edit_*` handler
-     *  below call this unawaited (`void this.refreshConversationMeta(...)`) with no de-duplication
-     *  or response-ordering guard — if two fire in quick succession for the same conversation, an
-     *  older GET can resolve *after* a newer one and clobber fresher state with stale data. A
-     *  per-conversation generation counter fixes that: each call stamps the current generation
-     *  before awaiting, and only applies its response if it's still the most recent call issued for
-     *  this id by the time the response comes back — an older, since-superseded response is
-     *  discarded instead. */
+     *  Both the `conversation_started` and every `staged_edit_*` handler below call this unawaited
+     *  (`void this.refreshConversationMeta(...)`) — if two fire in quick succession for the same
+     *  conversation, an older GET could resolve *after* a newer one and clobber fresher state with
+     *  stale data. A per-conversation generation counter guards against that: each call stamps the
+     *  current generation before awaiting, and only applies its response if it's still the most
+     *  recent call issued for this id by the time the response comes back — an older,
+     *  since-superseded response is discarded instead. */
     async refreshConversationMeta(conversationId: string): Promise<void> {
       const generation = (this.refreshGeneration[conversationId] ?? 0) + 1;
       this.refreshGeneration[conversationId] = generation;
@@ -231,14 +228,11 @@ export const useConversationsStore = defineStore('conversations', {
       return this.messagesByConversation[conversationId] ?? [];
     },
 
-    /** Bug fix: seeds `expandedByMessage[conversationId]` for every message not already present
-     *  there, from `localStorage` (an assistant reply defaults to expanded, a user message keeps
-     *  the pre-existing collapsed-by-default behaviour — same defaults `ConversationThreadBox.vue`'s
-     *  and `ConversationView.vue`'s own watchers used before this state moved here). Both call
-     *  sites invoke this from a `watch(messages, …, { immediate: true })`, same as before — it's
-     *  idempotent (only ever fills in *missing* keys), so both components calling it for the same
-     *  conversation is harmless, unlike the previous bug where each held its own separate copy of
-     *  the resulting state. */
+    /** Seeds `expandedByMessage[conversationId]` for every message not already present there, from
+     *  `localStorage` (an assistant reply defaults to expanded, a user message defaults to
+     *  collapsed). Both `ConversationThreadBox.vue` and `ConversationView.vue` invoke this from a
+     *  `watch(messages, …, { immediate: true })`; it's idempotent (only ever fills in *missing*
+     *  keys), so both components calling it for the same conversation is harmless. */
     ensureMessageExpandedSeeded(conversationId: string): void {
       const forConv = (this.expandedByMessage[conversationId] ??= {});
       for (const message of this.messagesFor(conversationId)) {
@@ -315,16 +309,15 @@ export const useConversationsStore = defineStore('conversations', {
       if (frame.kind !== 'event') return;
       const event = frame.frame;
 
-      // Bug fix (event-sequence gap detection): every persisted event carries a non-null,
-      // per-document, monotonically increasing `sequence` (ephemeral `text_delta`/`thinking_delta`/
-      // `tool_output_delta` frames carry `sequence: null` and are exempt — they're broadcast live
-      // only, never persisted/replayed, so there's no ordering guarantee to check). Any mismatch
-      // from exactly one past the last one seen here — a forward jump (at least one persisted event
-      // was never received: a dropped/lost message, or a WS ordering bug) or a duplicate/backward
-      // sequence — means this store's context may now be inconsistent, so rather than silently keep
-      // applying this (and any subsequent) event, discard it and pull a fully consistent resync
-      // instead. Matches `document.ts`'s stricter `!==` check on the same shared per-document
-      // sequence counter.
+      // Every persisted event carries a non-null, per-document, monotonically increasing
+      // `sequence` (ephemeral `text_delta`/`thinking_delta`/`tool_output_delta` frames carry
+      // `sequence: null` and are exempt — they're broadcast live only, never persisted/replayed, so
+      // there's no ordering guarantee to check). Any mismatch from exactly one past the last one
+      // seen here — a forward jump (at least one persisted event was never received: a
+      // dropped/lost message, or a WS ordering bug) or a duplicate/backward sequence — means this
+      // store's context may now be inconsistent, so rather than silently keep applying this (and
+      // any subsequent) event, discard it and pull a fully consistent resync instead. Matches
+      // `document.ts`'s stricter `!==` check on the same shared per-document sequence counter.
       if (event.sequence !== null) {
         if (this.lastEventSequence !== null && event.sequence !== this.lastEventSequence + 1) {
           this.lastEventSequence = event.sequence;
@@ -541,13 +534,13 @@ export const useConversationsStore = defineStore('conversations', {
       }
     },
 
-    /** Bug fix (event-sequence gap detection): a full resync once a gap is detected in
-     *  `handleServerFrame` above — re-fetches the conversation list wholesale (recovers any
-     *  `conversation_started`/`conversation_closed`/etc. this store might have missed) plus the
-     *  message detail of every conversation this store already has messages loaded for (recovers
-     *  any missed `message_*`/`staged_edit_*` events for whichever conversations are actually being
-     *  looked at right now — refetching every conversation's detail unconditionally would be far
-     *  more requests than necessary for conversations nothing is currently rendering). */
+    /** A full resync once a gap is detected in `handleServerFrame` above — re-fetches the
+     *  conversation list wholesale (recovers any `conversation_started`/`conversation_closed`/etc.
+     *  this store might have missed) plus the message detail of every conversation this store
+     *  already has messages loaded for (recovers any missed `message_*`/`staged_edit_*` events for
+     *  whichever conversations are actually being looked at right now — refetching every
+     *  conversation's detail unconditionally would be far more requests than necessary for
+     *  conversations nothing is currently rendering). */
     async resyncAfterGap(): Promise<void> {
       await this.load();
       const conversationIds = Object.keys(this.messagesByConversation);
@@ -568,10 +561,7 @@ export const useConversationsStore = defineStore('conversations', {
       else this.conversations[index] = dto;
     },
 
-    // Fix (WS-fanout): lets `App.vue` wire this store into a WS client's frame stream by calling
-    // this method rather than hand-listing `conversationsStore.handleServerFrame` alongside every
-    // other store's own call — see the sibling `subscribeToFrames` methods on the other stores
-    // App.vue fans frames out to.
+    // Registered by App.vue's connectWs — see there for why every store owns this.
     subscribeToFrames(wsClient: WsClient): () => void {
       return wsClient.onFrame((frame) => this.handleServerFrame(frame));
     },
