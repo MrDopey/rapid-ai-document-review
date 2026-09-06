@@ -2,7 +2,6 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue';
 import { useConversationsStore } from '../stores/conversations.js';
 import { ApiError } from '../transport/http-client.js';
 import { focusCapBranchTooltip } from './focusConfig.js';
-import { persistMessageExpanded } from './messageDisplayState.js';
 
 /**
  * One rendered action button, consumed by `ConversationActionButtons.vue`'s dumb `v-for` renderer.
@@ -124,18 +123,17 @@ export interface ConversationBulkToggleAction {
 
 /**
  * Shared "Expand all"/"Collapse all" bulk-toggle action descriptor, extracted from
- * `ConversationThreadBox.vue` and `ConversationView.vue`. Takes the host's own per-message
- * `expandedByMessage` ref (not just `conversationId`) rather than owning a second, disconnected copy
- * of that state — that same ref also drives each `MessageBubble`'s own `:expanded` binding in the
- * host's template, so this composable has to mutate the exact ref the host renders from, not a
- * separate one that could drift out of sync with what's actually on screen.
+ * `ConversationThreadBox.vue` and `ConversationView.vue`. Bug fix: this used to take the host's own
+ * local `expandedByMessage` ref and mutate it directly — now that per-message expand state lives in
+ * `conversationsStore.expandedByMessage` (see that store's own doc comment: both components can be
+ * mounted at once for the same conversation, and two separate local refs could silently diverge),
+ * this composable reads/writes that same shared store slice via `conversationId` alone, so both
+ * hosts' bulk toggle acts on the exact one state both of them render from.
  */
-export function useBulkToggleAction(
-  conversationId: () => string,
-  expandedByMessage: Ref<Record<string, boolean>>,
-): ConversationBulkToggleAction {
+export function useBulkToggleAction(conversationId: () => string): ConversationBulkToggleAction {
   const store = useConversationsStore();
   const messages = computed(() => store.messagesFor(conversationId()));
+  const expandedByMessage = computed(() => store.expandedByMessage[conversationId()] ?? {});
   const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
   const label = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
   const visible = computed(() => messages.value.length > 1);
@@ -144,10 +142,9 @@ export function useBulkToggleAction(
     const nextExpanded = anyCollapsed.value;
     const entries: Record<string, boolean> = {};
     for (const message of messages.value) {
-      expandedByMessage.value[message.id] = nextExpanded;
       entries[message.id] = nextExpanded;
     }
-    persistMessageExpanded(entries);
+    store.setMessagesExpanded(conversationId(), entries);
   }
 
   const action = computed<ActionDescriptor>(() => ({
