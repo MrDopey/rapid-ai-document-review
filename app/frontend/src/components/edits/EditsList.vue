@@ -39,6 +39,9 @@ async function onAccept(editId: string): Promise<void> {
 }
 
 async function onDrop(editId: string): Promise<void> {
+  // Same fix as DropAllButton.vue: dropping is destructive with no undo, unlike Accept, so this
+  // per-row drop is gated behind an explicit confirmation before it fires.
+  if (!window.confirm('Drop this proposed edit? This cannot be undone.')) return;
   await runBusy(editId, () => store.drop(editId, props.conversationId));
 }
 
@@ -92,6 +95,7 @@ function closePreview(): void {
             </button>
             <button
               type="button"
+              class="drop-button"
               :aria-label="`Drop: ${edit.summary}`"
               :disabled="busyEditId === edit.id"
               @click="onDrop(edit.id)"
@@ -190,6 +194,16 @@ function closePreview(): void {
   display: flex;
   gap: 0.4rem;
   margin-top: 0.25rem;
+}
+/* Fix: same danger/lower-emphasis treatment as DropAllButton.vue's ".drop-all-button", so the
+   per-row Drop button doesn't look identical to the adjacent (non-destructive) Accept button. */
+.drop-button {
+  background: transparent;
+  border-color: var(--danger-color, #b3261e);
+  color: var(--danger-color, #b3261e);
+}
+.drop-button:hover:not(:disabled) {
+  background: var(--danger-bg, #fee2e2);
 }
 /* Fix 4: color-code proposal status, layered on top of the (unchanged) text label — never
    relying on color alone (FR-043c). */
