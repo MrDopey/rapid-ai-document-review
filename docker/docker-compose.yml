@@ -1,13 +1,15 @@
 services:
   app:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/mrdopey/rapid-ai-document-review:latest
     ports:
-      - '127.0.0.1:${RADR_BE_PORT:-3000}:${RADR_BE_PORT:-3000}'
+      - '127.0.0.1:5000:${RADR_BE_PORT:-3000}'
+      - '127.0.0.1:5001:${RADR_FE_PORT:-3001}'
     environment:
+      RADR_FE_HOST: '0.0.0.0'
+      RADR_FE_BACKEND_PORT: '5001' # The host port
+
       RADR_BE_PORT: '${RADR_BE_PORT:-3000}'
-      RADR_BE_HOST: '${RADR_BE_HOST:-127.0.0.1}'
+      RADR_BE_HOST: '0.0.0.0'
       RADR_BE_DATABASE_PATH: '${RADR_BE_DATABASE_PATH:-/data/document-review.sqlite}'
       RADR_BE_PI_SESSION_STORAGE_PATH: '${RADR_BE_PI_SESSION_STORAGE_PATH:-/data/pi-sessions}'
       RADR_BE_PI_CODING_AGENT_DIR: '${RADR_BE_PI_CODING_AGENT_DIR:-/data/pi-agent}'
