@@ -158,6 +158,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Security hardening
 - [ ] TXXX Review comments added/changed in this feature's diff for constitution compliance
 - [ ] TXXX Run quickstart.md validation
+- [ ] TXXX Run `./scripts/verify.sh` and fix any failures until it exits green
 
 ---
 
