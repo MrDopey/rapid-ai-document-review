@@ -114,10 +114,32 @@ function buildHunks(operations: EditOperation[], currentText: string): EditHunk[
   });
 }
 
+/** Builds one "intent hunk" per operation from raw old_string/new_string without requiring a
+ * document anchor — used when reconciliation fails so the frontend can show what the AI intended
+ * even though old_string is absent or ambiguous in the current document. Context is empty. */
+function buildIntentHunks(operations: EditOperation[]): EditHunk[] {
+  return operations.map((op, index) => ({
+    operationIndex: index,
+    contextBefore: '',
+    removed: op.old_string,
+    added: op.new_string,
+    contextAfter: '',
+  }));
+}
+
 /** Read-only reconciliation preview (FR-022): never applies anything, mirrors `EditService.apply`'s
- * reconciliation exactly so what the user previews is what `apply()` would actually do. */
-export function previewStagedEdit(edit: StagedEditRow, currentText: string): PreviewEditResponse {
-  const result = reconcile(edit.operations, currentText);
+ * reconciliation exactly so what the user previews is what `apply()` would actually do.
+ *
+ * Pass `sourceText` (the document at `edit.sourceRevision`) for applied edits — the function will
+ * reconcile against that snapshot and set `alreadyApplied: true` on the response so the frontend
+ * can show an informational banner rather than a conflict error. */
+export function previewStagedEdit(
+  edit: StagedEditRow,
+  currentText: string,
+  sourceText?: string,
+): PreviewEditResponse {
+  const textToReconcile = sourceText ?? currentText;
+  const result = reconcile(edit.operations, textToReconcile);
 
   if (result.outcome === 'conflict') {
     return {
@@ -126,14 +148,16 @@ export function previewStagedEdit(edit: StagedEditRow, currentText: string): Pre
       fullPreview: null,
       hunks: [],
       conflictDetail: result.detail,
+      intentHunks: buildIntentHunks(edit.operations),
     };
   }
 
   return {
     stagedEditId: edit.id,
     reconcilable: true,
-    fullPreview: applyPatches(currentText, result.patches),
-    hunks: buildHunks(edit.operations, currentText),
+    fullPreview: applyPatches(textToReconcile, result.patches),
+    hunks: buildHunks(edit.operations, textToReconcile),
     conflictDetail: null,
+    ...(sourceText !== undefined ? { alreadyApplied: true } : {}),
   };
 }

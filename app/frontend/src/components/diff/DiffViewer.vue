@@ -61,6 +61,10 @@ const wordDiffs = computed(() =>
   (preview.value?.hunks ?? []).map((hunk) => diffWords(hunk.removed, hunk.added)),
 );
 
+const intentWordDiffs = computed(() =>
+  (preview.value?.intentHunks ?? []).map((hunk) => diffWords(hunk.removed, hunk.added)),
+);
+
 const fullDocHasNoDiff = computed(
   () =>
     fullDocDiff.value.length === 1 && !fullDocDiff.value[0].added && !fullDocDiff.value[0].removed,
@@ -129,6 +133,10 @@ const fullDocHasNoDiff = computed(
     </p>
 
     <template v-else-if="preview">
+      <div v-if="preview.alreadyApplied" class="applied-banner" role="status">
+        This edit has already been applied. Showing the original proposed change.
+      </div>
+
       <div v-if="!preview.reconcilable" class="conflict-banner" role="alert">
         <strong>This proposal no longer applies cleanly.</strong>
         <ul>
@@ -143,6 +151,23 @@ const fullDocHasNoDiff = computed(
             }}
           </li>
         </ul>
+      </div>
+
+      <div
+        v-if="!preview.reconcilable && (preview.intentHunks?.length ?? 0) > 0"
+        class="intent-hunks"
+      >
+        <p class="intent-hunks-heading">What the AI was trying to change</p>
+        <div
+          v-for="(hunk, i) in preview.intentHunks"
+          :key="hunk.operationIndex"
+          class="hunk intent-hunk"
+        >
+          <p class="hunk-context operation-label">Operation {{ hunk.operationIndex + 1 }}</p>
+          <p class="hunk-diff text-wrap-safe-pre">
+            <DiffText :parts="intentWordDiffs[i]" side="unified" />
+          </p>
+        </div>
       </div>
 
       <!-- Both tabpanels stay mounted (toggled via the native `hidden` attribute, not v-if/v-else)
@@ -252,11 +277,35 @@ class="collapsed-marker"
    `.focus-toggle`, `.collapsed-marker`, `.collapsed-marker--full-row`, `.side-by-side-columns`,
    and `.diff-column-left`/`.diff-column-right` (below) are shared with RevisionDiffViewer.vue and
    now live in style.css. */
+.applied-banner {
+  padding: 0.5rem 0.75rem;
+  background: var(--info-bg, #eff6ff);
+  color: var(--info-color, #1e40af);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
 .conflict-banner {
   padding: 0.5rem 0.75rem;
   background: var(--danger-bg, #fee2e2);
   color: var(--danger-color, #991b1b);
   border-radius: 4px;
+}
+.intent-hunks {
+  margin-top: 1rem;
+}
+.intent-hunks-heading {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  opacity: 0.85;
+}
+.operation-label {
+  font-size: 0.8rem;
+  font-style: italic;
+  margin: 0 0 0.2rem;
+}
+.intent-hunk {
+  border-style: dashed;
 }
 .hunk {
   margin-bottom: 1rem;

@@ -346,7 +346,16 @@ export class EditService {
 
   preview(editId: string) {
     const edit = this.getOrThrow(editId);
-    return previewStagedEdit(edit, this.automerge.get().getContent());
+    const currentText = this.automerge.get().getContent();
+    if (edit.status === 'applied') {
+      const revRow = this.storage.getRevision(edit.documentId, edit.sourceRevision);
+      if (revRow) {
+        const heads = JSON.parse(revRow.heads) as string[];
+        const sourceText = this.automerge.get().view(heads);
+        return previewStagedEdit(edit, currentText, sourceText);
+      }
+    }
+    return previewStagedEdit(edit, currentText);
   }
 
   /**

@@ -426,6 +426,8 @@ export const PreviewEditResponse = z.object({
   fullPreview: z.string().nullable(),
   hunks: z.array(EditHunk),
   conflictDetail: ConflictDetail.nullable(),
+  intentHunks: z.array(EditHunk).optional(),
+  alreadyApplied: z.boolean().optional(),
 });
 export type PreviewEditResponse = z.infer<typeof PreviewEditResponse>;
 

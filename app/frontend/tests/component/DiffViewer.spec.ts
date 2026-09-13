@@ -321,4 +321,82 @@ describe('DiffViewer', () => {
     expect(wrapper.find('#diff-tab-side-by-side').exists()).toBe(false);
     expect(wrapper.find('.conflict-banner').exists()).toBe(true);
   });
+
+  it('shows intent hunks below the conflict banner when intentHunks is present', async () => {
+    const store = useDocumentStore();
+    store.content = 'Line one.\nLine two.\nLine three.';
+    vi.mocked(httpClient.previewEdit).mockResolvedValue(
+      preview({
+        reconcilable: false,
+        fullPreview: null,
+        hunks: [],
+        conflictDetail: { operations: [{ index: 0, reason: 'not_found', occurrences: 0 }] },
+        intentHunks: [
+          {
+            operationIndex: 0,
+            contextBefore: '',
+            removed: 'Old intended text',
+            added: 'New intended text',
+            contextAfter: '',
+          },
+        ],
+      }),
+    );
+
+    const wrapper = mountViewer(pinia);
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('.conflict-banner').exists()).toBe(true);
+    expect(wrapper.find('.intent-hunks').exists()).toBe(true);
+    const intentHunk = wrapper.find('.intent-hunk');
+    expect(intentHunk.exists()).toBe(true);
+    expect(intentHunk.find('.removed').exists()).toBe(true);
+    expect(intentHunk.find('.added').exists()).toBe(true);
+  });
+
+  it('does not render intent-hunks section when intentHunks is absent', async () => {
+    const store = useDocumentStore();
+    store.content = 'Line one.\nLine two.\nLine three.';
+    vi.mocked(httpClient.previewEdit).mockResolvedValue(
+      preview({
+        reconcilable: false,
+        fullPreview: null,
+        hunks: [],
+        conflictDetail: { operations: [{ index: 0, reason: 'not_found', occurrences: 0 }] },
+      }),
+    );
+
+    const wrapper = mountViewer(pinia);
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('.conflict-banner').exists()).toBe(true);
+    expect(wrapper.find('.intent-hunks').exists()).toBe(false);
+  });
+
+  it('shows applied banner when alreadyApplied is true', async () => {
+    const store = useDocumentStore();
+    store.content = 'Line one.\nLine nine.\nLine three.';
+    vi.mocked(httpClient.previewEdit).mockResolvedValue(preview({ alreadyApplied: true }));
+
+    const wrapper = mountViewer(pinia);
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('.applied-banner').exists()).toBe(true);
+    expect(wrapper.find('.conflict-banner').exists()).toBe(false);
+  });
+
+  it('does not show applied banner when alreadyApplied is absent', async () => {
+    const store = useDocumentStore();
+    store.content = 'Line one.\nLine two.\nLine three.';
+    vi.mocked(httpClient.previewEdit).mockResolvedValue(preview());
+
+    const wrapper = mountViewer(pinia);
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('.applied-banner').exists()).toBe(false);
+  });
 });

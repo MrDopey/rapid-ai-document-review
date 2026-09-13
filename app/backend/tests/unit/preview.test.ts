@@ -154,4 +154,53 @@ describe('preview.ts line-based hunk context', () => {
     expect(result.hunks[0]!.contextBefore).toBe('l0\nl1\n');
     expect(result.hunks[0]!.contextAfter).toBe('');
   });
+
+  it('returns intentHunks with empty context when reconciliation fails', async () => {
+    const { previewStagedEdit } = await import('../../src/edit/preview.js');
+    const doc = 'Something completely different.';
+
+    const result = previewStagedEdit(
+      makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
+      doc,
+    );
+
+    expect(result.reconcilable).toBe(false);
+    expect(result.intentHunks).toHaveLength(1);
+    expect(result.intentHunks![0]!.operationIndex).toBe(0);
+    expect(result.intentHunks![0]!.removed).toBe('TARGET');
+    expect(result.intentHunks![0]!.added).toBe('REPLACED');
+    expect(result.intentHunks![0]!.contextBefore).toBe('');
+    expect(result.intentHunks![0]!.contextAfter).toBe('');
+  });
+
+  it('reconciles against sourceText when provided and sets alreadyApplied: true', async () => {
+    const { previewStagedEdit } = await import('../../src/edit/preview.js');
+    const sourceText = 'l0\nl1\nl2\nTARGET\nl4\nl5\nl6\nl7\nl8';
+    const currentText = 'l0\nl1\nl2\nREPLACED\nl4\nl5\nl6\nl7\nl8'; // after apply
+
+    const result = previewStagedEdit(
+      makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
+      currentText,
+      sourceText,
+    );
+
+    expect(result.reconcilable).toBe(true);
+    expect(result.alreadyApplied).toBe(true);
+    expect(result.hunks).toHaveLength(1);
+    expect(result.hunks[0]!.removed).toBe('TARGET');
+    expect(result.hunks[0]!.added).toBe('REPLACED');
+  });
+
+  it('does not set alreadyApplied when sourceText is not provided', async () => {
+    const { previewStagedEdit } = await import('../../src/edit/preview.js');
+    const doc = 'l0\nl1\nTARGET\nl3';
+
+    const result = previewStagedEdit(
+      makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
+      doc,
+    );
+
+    expect(result.reconcilable).toBe(true);
+    expect(result.alreadyApplied).toBeUndefined();
+  });
 });
