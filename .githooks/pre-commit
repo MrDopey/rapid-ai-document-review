@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Runs the same checks as CI (see .github/workflows/publish.yml) before allowing a commit.
+# Installed via `git config core.hooksPath .githooks` (set automatically by `npm install`'s
+# "prepare" script — see package.json).
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+./scripts/verify.sh

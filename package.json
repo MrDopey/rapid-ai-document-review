@@ -11,6 +11,7 @@
     "app/frontend"
   ],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "npm run build --workspace=app/shared && npm run build --workspace=app/backend && npm run build --workspace=app/frontend",
     "dev": "npm run dev --workspace=app/backend",
     "dev:frontend": "npm run dev --workspace=app/frontend",
