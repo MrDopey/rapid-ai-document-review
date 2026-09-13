@@ -27,7 +27,9 @@ const jsFiles = files.filter((f) => f.endsWith('.js'));
 
 const entryFiles = jsFiles.filter((f) => /^index-.*\.js$/.test(f));
 if (entryFiles.length !== 1) {
-  console.error(`Expected exactly one entry chunk matching index-*.js, found: ${entryFiles.join(', ') || '(none)'}`);
+  console.error(
+    `Expected exactly one entry chunk matching index-*.js, found: ${entryFiles.join(', ') || '(none)'}`,
+  );
   process.exit(1);
 }
 const [entryFile] = entryFiles;
@@ -53,4 +55,6 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-console.log(`Bundle size check passed: entry chunk ${entryFile} is ${entrySize} bytes (limit ${ENTRY_MAX_BYTES}).`);
+console.log(
+  `Bundle size check passed: entry chunk ${entryFile} is ${entrySize} bytes (limit ${ENTRY_MAX_BYTES}).`,
+);
