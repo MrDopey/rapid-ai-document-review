@@ -68,3 +68,6 @@ if needed), but it's worth knowing before you try to edit those files as your ow
   pass through a provider credential like `ANTHROPIC_API_KEY`. Live agent conversations need one
   (see the repo-root README's Configuration section) — add it to both `docker/.env` and the
   `environment:` block yourself if you need live model calls from the containerized deployment.
+- **SearXNG's bundled secret key is a placeholder.** `docker/searxng/settings.yml`'s
+  `server.secret_key` ships as `CHANGE-ME-...` — generate a real one (`openssl rand -hex 32`)
+  before a real deployment. SearXNG only reads this from `settings.yml`, never an env var.

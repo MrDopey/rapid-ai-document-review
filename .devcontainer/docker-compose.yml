@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        USER_ID: ${DEV_CONTAINER_USER_ID}
+        GROUP_ID: ${DEV_CONTAINER_GROUP_ID}
+        USERNAME: ${USER}
+    environment:
+      CLAUDE_CONFIG_DIR: /opt/dot-agent/dot-claude
+      # Matches config.ts's own default for RADR_BE_SEARXNG_URL — set explicitly here so the
+      # devcontainer's wiring to the searxng service (below) is visible in one place rather than
+      # relying on both sides independently agreeing on the same default.
+      RADR_BE_SEARXNG_URL: http://searxng:8080
+    volumes:
+      - ..:/workspaces/rapid-ai-document-review:cached
+      - ${AGENT_HOME}:/opt/dot-agent
+    ports:
+      - '3000:3000'
+      - '3001:3001'
+      - '4000:4000'
+      - '4001:4001'
+    # Keeps the container running for the devcontainer CLI/VS Code to attach to — compose services
+    # aren't auto-kept-alive the way a plain `build:` devcontainer is.
+    command: sleep infinity
+    depends_on:
+      - searxng
+
+  searxng:
+    image: searxng/searxng:2026.9.13-32f2da4ef
+    # Shares the same settings.yml as docker/docker-compose.yml (production) rather than
+    # duplicating it — see docker/searxng/settings.yml for why secret_key lives there and not in
+    # an env var.
+    volumes:
+      - ../docker/searxng/settings.yml:/etc/searxng/settings.yml:ro

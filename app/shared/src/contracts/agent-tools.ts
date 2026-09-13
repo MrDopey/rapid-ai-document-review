@@ -45,3 +45,13 @@ export const proposeDocumentEditParams = z.object({
     ),
 });
 export type ProposeDocumentEditParams = z.infer<typeof proposeDocumentEditParams>;
+
+export const webSearchParams = z.object({
+  query: z.string().min(1).describe('The search query.'),
+});
+export type WebSearchParams = z.infer<typeof webSearchParams>;
+
+export const webFetchParams = z.object({
+  url: z.string().min(1).describe('The URL to fetch.'),
+});
+export type WebFetchParams = z.infer<typeof webFetchParams>;

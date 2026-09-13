@@ -1,0 +1,14 @@
+# Shared by both docker-compose.yml (production) and .devcontainer/docker-compose.yml (dev) —
+# SearXNG only reads server.secret_key from settings.yml, never an env var
+# (docs.searxng.org/admin/settings/settings.html), and never rewrites this file once it exists.
+# CHANGE THE KEY BELOW before a real deployment (e.g. `openssl rand -hex 32`) — fine as-is for
+# local/dev use.
+use_default_settings: true
+
+server:
+  secret_key: 'CHANGE-ME-generate-your-own-with-openssl-rand-hex-32'
+
+search:
+  formats:
+    - html
+    - json

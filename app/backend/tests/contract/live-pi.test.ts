@@ -22,7 +22,9 @@ import { EditService } from '../../src/edit/edit-service.js';
 import {
   createProposeDocumentEditTool,
   createReadDocumentTool,
-} from '../../src/pi/document-tools.js';
+  createWebFetchTool,
+  createWebSearchTool,
+} from '../../src/pi/tools/index.js';
 import { buildSystemPrompt } from '../../src/pi/system-prompt.js';
 import { newId } from '../../src/ids.js';
 import type { ConversationRow } from '../../src/storage/storage-adapter.js';
@@ -160,6 +162,8 @@ async function createRealSession(
       primaryMutex: new PrimaryMutex(),
       conversationId: conversation.id,
     }) as unknown as ToolDefinition,
+    createWebSearchTool({ searxngUrl: config.searxngUrl }) as unknown as ToolDefinition,
+    createWebFetchTool({}) as unknown as ToolDefinition,
   ];
 
   const resourceLoader = new DefaultResourceLoader({
@@ -200,9 +204,16 @@ describe.skipIf(!LIVE)(
         for (const builtin of ['read', 'bash', 'edit', 'write']) {
           expect(active).not.toContain(builtin);
         }
-        // Only the two custom tools registered above should be present.
-        expect(active).toEqual(expect.arrayContaining(['read_document', 'propose_document_edit']));
-        expect(active).toHaveLength(2);
+        // Only the four custom tools registered above should be present.
+        expect(active).toEqual(
+          expect.arrayContaining([
+            'read_document',
+            'propose_document_edit',
+            'web_search',
+            'web_fetch',
+          ]),
+        );
+        expect(active).toHaveLength(4);
       } finally {
         session.dispose();
       }

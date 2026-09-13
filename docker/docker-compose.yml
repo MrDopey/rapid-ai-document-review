@@ -13,6 +13,17 @@ services:
       RADR_BE_PI_CODING_AGENT_DIR: '${RADR_BE_PI_CODING_AGENT_DIR:-/data/pi-agent}'
       RADR_BE_PI_AGENT_MODEL: '${RADR_BE_PI_AGENT_MODEL:?RADR_BE_PI_AGENT_MODEL is required}'
       RADR_BE_LOG_LEVEL: '${RADR_BE_LOG_LEVEL:-info}'
+      # Matches the bundled searxng service below and config.ts's own default — override via
+      # docker/.env to point at a different instance instead.
+      RADR_BE_SEARXNG_URL: '${RADR_BE_SEARXNG_URL:-http://searxng:8080}'
     volumes:
       - ../app/backend/data:/data
+    restart: unless-stopped
+    depends_on:
+      - searxng
+
+  searxng:
+    image: searxng/searxng:2026.9.13-32f2da4ef
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: unless-stopped

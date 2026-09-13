@@ -2,14 +2,12 @@
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.154.0/containers/python-3
 {
   "name": "rapid-ai-document-review",
-  "build": {
-    "dockerfile": "./Dockerfile",
-    "args": {
-      "USER_ID": "${localEnv:DEV_CONTAINER_USER_ID}",
-      "GROUP_ID": "${localEnv:DEV_CONTAINER_GROUP_ID}",
-      "USERNAME": "${localEnv:USER}"
-    }
-  },
+  // Compose-based devcontainer (research.md R1, specs/008-searxng-web-search): adds a sibling
+  // `searxng` service (docker-compose.yml) on the same Docker network as `app`, reachable at
+  // `http://searxng:8080` — no Docker-in-Docker required inside the dev container itself.
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspaces/rapid-ai-document-review",
   // Set *default* container specific settings.json values on container create.
   "customizations": {
     "vscode": {
@@ -19,16 +17,9 @@
       "extensions": []
     }
   },
-  "containerEnv": {
-    "CLAUDE_CONFIG_DIR": "/opt/dot-agent/dot-claude"
-  },
-  "mounts": ["source=${localEnv:AGENT_HOME},target=/opt/dot-agent,type=bind"],
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   "forwardPorts": [3000, 3001],
-  // 'appPort' actually publishes these via Docker's -p so the bare devcontainer CLI
-  // (not just VS Code/Codespaces' forwarding proxy) exposes them to the host.
-  "appPort": [3000, 3001, 4000, 4001],
 
   // Use 'postCreateCommand' to run commands after the container is created.
   // "postCreateCommand": "pip3 install --user -r requirements.txt",

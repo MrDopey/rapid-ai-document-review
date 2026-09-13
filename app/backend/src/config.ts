@@ -21,6 +21,10 @@ export interface Config {
    * (research.md R3), the only module that constructs `ModelRuntime`.
    */
   piAgentModel: string;
+  /** SearXNG instance `web_search` queries (specs/008-searxng-web-search). Defaults to the
+   *  devcontainer/production-compose service address — override for an externally-provided
+   *  SearXNG-compatible instance. */
+  searxngUrl: string;
 }
 
 /** Reads `name`, trims it, and throws if it is unset, empty, or whitespace-only — for a
@@ -64,4 +68,5 @@ export const config: Config = {
       : process.env.RADR_BE_LOG_PRETTY === '1',
   piFakeSessions: process.env.RADR_BE_PI_FAKE_SESSIONS === '1',
   piAgentModel: readRequiredTrimmed('RADR_BE_PI_AGENT_MODEL'),
+  searxngUrl: readEnv('RADR_BE_SEARXNG_URL', 'http://searxng:8080'),
 };

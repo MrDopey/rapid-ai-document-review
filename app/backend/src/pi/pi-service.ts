@@ -13,7 +13,12 @@ import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts
 import type { EditService } from '../edit/edit-service.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionLike } from './agent-session-port.ts';
-import { createProposeDocumentEditTool, createReadDocumentTool } from './document-tools.ts';
+import {
+  createProposeDocumentEditTool,
+  createReadDocumentTool,
+  createWebFetchTool,
+  createWebSearchTool,
+} from './tools/index.ts';
 import type { EventBridge } from './event-bridge.ts';
 import { FakeAgentSession } from './fake-agent-session.ts';
 import type { PrimaryMutex } from './primary-mutex.ts';
@@ -165,9 +170,12 @@ export class PiService {
   }
 
   /** Builds this conversation's registered tool list. `propose_document_edit` is omitted entirely
-   * for a too-deep conversation (FR-026's primary defense layer — see document-tools.ts for the
-   * execution-time backstop). Shared by both the real SDK path and `FakeAgentSession`, which
-   * invokes these same tool objects directly instead of a real model deciding to call them. */
+   * for a too-deep conversation (FR-026's primary defense layer — see tools/propose-document-edit.ts
+   * for the execution-time backstop). `web_search`/`web_fetch` are read-only and registered
+   * unconditionally, regardless of branch/editing depth (Principle III N/A — neither can touch the
+   * document, specs/008-searxng-web-search). Shared by both the real SDK path and
+   * `FakeAgentSession`, which invokes these same tool objects directly instead of a real model
+   * deciding to call them. */
   private buildTools(conversation: ConversationRow): RegisteredToolLike[] {
     const tools: RegisteredToolLike[] = [
       createReadDocumentTool({
@@ -175,6 +183,8 @@ export class PiService {
         automerge: this.automerge,
         conversationId: conversation.id,
       }),
+      createWebSearchTool({ searxngUrl: config.searxngUrl }),
+      createWebFetchTool({}),
     ];
 
     const settings = this.storage.getSettings();

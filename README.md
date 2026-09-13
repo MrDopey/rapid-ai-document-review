@@ -94,6 +94,7 @@ The backend reads the following environment variables (`app/backend/src/config.t
 | `RADR_BE_LOG_LEVEL`               | No                      | `info`                          | Pino log level.                                                                                                                                                                                                                                                                     |
 | `RADR_BE_PI_FAKE_SESSIONS`        | No                      | unset (disabled)                | Set to `1` to use a fake, credential-free agent session instead of a live Pi session — useful for local development and required for the default test suite.                                                                                                                        |
 | `RADR_BE_HUNK_CONTEXT_LINES`      | No                      | `3`                             | Lines of surrounding document context shown around a proposed-edit hunk in the diff preview.                                                                                                                                                                                        |
+| `RADR_BE_SEARXNG_URL`             | No                      | `http://searxng:8080`           | SearXNG instance the agent's `web_search` tool queries. Defaults to the devcontainer's own `searxng` compose service; override to point at any other reachable SearXNG-compatible instance in production.                                                                           |
 | `RADR_FE_BACKEND_PORT`            | No                      | `3000`                          | Vite dev-server proxy target — must match `RADR_BE_PORT`.                                                                                                                                                                                                                           |
 | `RADR_FE_HOST`                    | No                      | `127.0.0.1`                     | Vite dev-server bind host.                                                                                                                                                                                                                                                          |
 | `RADR_FE_PORT`                    | No                      | `3001`                          | Vite dev-server port.                                                                                                                                                                                                                                                               |
@@ -111,7 +112,7 @@ The backend reads the following environment variables (`app/backend/src/config.t
 
 ## Running Locally
 
-The devcontainer at `.devcontainer/` provisions Node 26.1.0, the GitHub CLI, and the `claude`, `uv`, and `pi` CLIs, and is the primary way to get a consistent environment. Open the repository in the devcontainer, then run the commands below inside it.
+The devcontainer at `.devcontainer/` provisions Node 26.1.0, the GitHub CLI, and the `claude`, `uv`, and `pi` CLIs, and is the primary way to get a consistent environment. Open the repository in the devcontainer, then run the commands below inside it. It also runs a self-hosted `searxng` service (via `.devcontainer/docker-compose.yml`) reachable at `http://searxng:8080` with no manual setup — the address the agent's `web_search` tool uses by default (`RADR_BE_SEARXNG_URL` above).
 
 Without the devcontainer, ensure Node 26.1.0 is installed locally instead.
 
@@ -172,7 +173,9 @@ npm run test:unit
 npm run test:integration
 npm run test:contract
 
-# Contract tests against a real Pi session (needs a provider credential)
+# Contract tests against a real Pi session (needs a provider credential) and against the real
+# web_search/web_fetch tools (needs a reachable SearXNG instance + internet access — the
+# devcontainer's `searxng` service satisfies this)
 npm run test:contract:live
 
 # End-to-end tests (Playwright; installs its own backend + frontend dev servers)

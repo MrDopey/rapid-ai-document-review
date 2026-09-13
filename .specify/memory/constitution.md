@@ -1,12 +1,16 @@
 <!--
 Sync Impact Report
-Version change: 2.0.0 → 2.1.0
-Rationale: MINOR — added a new Core Principle (VIII. Comments Are Durable, Not Historical)
-governing when and how code comments should be written. This is new, materially expanded
-guidance rather than a redefinition of an existing principle, so it is versioned as MINOR per the
-policy below.
+Version change: 2.1.0 → 2.2.0
+Rationale: MINOR — narrowed the "additional agent tools beyond document read/edit" v1 non-goal
+(Technology & Platform Constraints) to explicitly carve out two new read-only agent tools,
+`web_search` and `web_fetch`, being introduced by specs/008-searxng-web-search. This loosens an
+existing scope boundary rather than removing or redefining a Core Principle, and does not make any
+previously-compliant plan non-compliant, so it is versioned as MINOR (materially expanded
+guidance) rather than MAJOR.
 Modified principles: n/a (no existing Core Principle redefined)
-Added sections: Core Principles → VIII. Comments Are Durable, Not Historical
+Modified sections: Technology & Platform Constraints → v1 non-goals bullet (narrowed, rationale
+added)
+Added sections: none
 Removed sections: none
 Deferred items: none
 -->
@@ -106,10 +110,16 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
   and service boundaries MUST NOT preclude multiple documents or multiple accounts in a later
   version, even though v1 implements only one document.
 * Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): multiple
-  documents, storage backends beyond SQLite, additional agent tools beyond document read/edit,
-  additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
-  integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi export viewing, and
-  importable contextual reference material.
+  documents, storage backends beyond SQLite, additional agent tools beyond document read/edit/
+  web-search/web-fetch, additional Markdown rendering extensions beyond Mermaid/SVG, real Git
+  history/repository integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi
+  export viewing, and importable contextual reference material.
+  **Rationale**: `web_search` and `web_fetch` are carved out of the "no additional agent tools"
+  non-goal because both are read-only, information-gathering tools registered as ordinary
+  `customTools` — the same mechanism as `read_document` — so they neither require a Pi extension
+  (Principle VII stays satisfied) nor touch the edit-proposal pipeline (Principle III stays
+  satisfied: they cannot modify the document). Any other new agent tool remains out of scope until
+  it earns its own carve-out the same way.
 * Environment variable naming: every application-defined environment variable (backend or frontend)
   MUST be prefixed with `RADR_` (the project's acronym, AI Document Review). Exempt: variables that
   are not application-defined, namely third-party SDK/provider credential variables (e.g.
@@ -197,4 +207,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.1.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-06
+**Version**: 2.2.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-13
