@@ -61,6 +61,23 @@ function parseReadDirective(text: string): { from_line?: number; to_line?: numbe
 }
 
 /**
+ * Same protocol as `READ_DOCUMENT_DIRECTIVE`, for `web_search` — lets a test exercise a
+ * `tool_started`/`tool_completed` pair carrying `args`/`resultText` without a real model or a live
+ * SearXNG instance in the loop. A message beginning with this prefix, followed by a JSON
+ * `{ query }` payload, invokes the real `web_search` tool object.
+ */
+export const WEB_SEARCH_DIRECTIVE = '__WEB_SEARCH__';
+
+function parseWebSearchDirective(text: string): { query: string } | null {
+  if (!text.startsWith(WEB_SEARCH_DIRECTIVE)) return null;
+  try {
+    return JSON.parse(text.slice(WEB_SEARCH_DIRECTIVE.length));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A message beginning with this prefix causes the fake session to fail the turn deterministically
  * (`agent_error` instead of `agent_settled`) rather than answer — US5's FR-029a scenario needs a
  * conversation to become `errored` on cue, to prove a pending "switch when idle" designation is
@@ -240,6 +257,23 @@ export class FakeAgentSession implements AgentSessionLike {
     for (const listener of this.listeners) listener(event);
   }
 
+  /** Emits an empty-text/no-reasoning `message_start`/`message_end` pair immediately before a
+   * scripted tool call, mirroring the real SDK's "tool-call-only carrier" message segment
+   * (event-bridge.test.ts's "real-SDK tool-call-carrier message segments") — this is what gives
+   * `EventBridge` a current message id to attribute the following `tool_execution_start`/`_end`
+   * pair to. */
+  private emitToolCallCarrier(): void {
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    this.emit({
+      type: 'message_end',
+      messageId,
+      role: 'assistant',
+      text: '',
+      reasoning: undefined,
+    });
+  }
+
   /**
    * Runs one scripted turn to completion, guaranteeing `streaming` resets to `false` and exactly
    * one of `agent_settled`/`agent_error` fires — regardless of whether `runScript` resolves
@@ -295,10 +329,14 @@ export class FakeAgentSession implements AgentSessionLike {
 
     const proposeDirective = parseDirective(userText);
     const readDirective = proposeDirective ? null : parseReadDirective(userText);
+    const webSearchDirective =
+      proposeDirective || readDirective ? null : parseWebSearchDirective(userText);
     if (proposeDirective) {
       await this.runProposeEditDirective(proposeDirective);
     } else if (readDirective) {
       await this.runReadDocumentDirective(readDirective);
+    } else if (webSearchDirective) {
+      await this.runWebSearchDirective(webSearchDirective);
     } else {
       await this.runPlainAnswer(userText);
     }
@@ -351,7 +389,13 @@ export class FakeAgentSession implements AgentSessionLike {
       return text;
     }
 
-    this.emit({ type: 'tool_execution_start', toolCallId, toolName: 'propose_document_edit' });
+    this.emitToolCallCarrier();
+    this.emit({
+      type: 'tool_execution_start',
+      toolCallId,
+      toolName: 'propose_document_edit',
+      args: directive,
+    });
     const result = (await tool.execute(toolCallId, directive, undefined, undefined, undefined)) as {
       content?: { type: string; text?: string }[];
     };
@@ -392,7 +436,13 @@ export class FakeAgentSession implements AgentSessionLike {
       return text;
     }
 
-    this.emit({ type: 'tool_execution_start', toolCallId, toolName: 'read_document' });
+    this.emitToolCallCarrier();
+    this.emit({
+      type: 'tool_execution_start',
+      toolCallId,
+      toolName: 'read_document',
+      args: params,
+    });
     const result = (await tool.execute(toolCallId, params, undefined, undefined, undefined)) as {
       content?: { type: string; text?: string }[];
     };
@@ -405,6 +455,45 @@ export class FakeAgentSession implements AgentSessionLike {
     });
 
     const text = result.content?.[0]?.text ?? 'No content.';
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    for (const delta of chunk(text, 12)) {
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
+      await sleep(this.chunkDelayMs);
+    }
+    this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+    return text;
+  }
+
+  /** Actually invokes the real `web_search` tool object (tools/web-search.ts) and echoes its text
+   * result as the assistant's answer — see `WEB_SEARCH_DIRECTIVE` above. */
+  private async runWebSearchDirective(params: { query: string }): Promise<string> {
+    const toolCallId = `fake_tool_${randomUUID()}`;
+    const tool = this.tools.find((t) => t.name === 'web_search');
+
+    if (!tool) {
+      const text = 'web_search is not available in this conversation.';
+      const messageId = `fake_msg_${randomUUID()}`;
+      this.emit({ type: 'message_start', messageId, role: 'assistant' });
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta: text } });
+      this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+      return text;
+    }
+
+    this.emitToolCallCarrier();
+    this.emit({ type: 'tool_execution_start', toolCallId, toolName: 'web_search', args: params });
+    const result = (await tool.execute(toolCallId, params, undefined, undefined, undefined)) as {
+      content?: { type: string; text?: string }[];
+    };
+    this.emit({
+      type: 'tool_execution_end',
+      toolCallId,
+      toolName: 'web_search',
+      isError: false,
+      result,
+    });
+
+    const text = result.content?.[0]?.text ?? 'No results.';
     const messageId = `fake_msg_${randomUUID()}`;
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
     for (const delta of chunk(text, 12)) {

@@ -6,6 +6,7 @@ import type { EventService } from '../events/event-service.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
 import type { ConversationStatus, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionEventLike } from './agent-session-port.ts';
+import { clampWithNote } from './tools/common.ts';
 
 /**
  * The real `@earendil-works/pi-coding-agent` `AgentSession` emits `message_start`/`message_update`/
@@ -76,6 +77,34 @@ function extractStagedEditId(result: unknown): string | null {
   return null;
 }
 
+/** Fixed bound on a tool call's persisted result/failure text (research.md Decision 3) — not
+ *  user- or per-call-configurable, matching `tools/web-fetch.ts`'s `MAX_CONTENT_CHARS` convention. */
+const MAX_TOOL_RESULT_LOG_CHARS = 20_000;
+
+/**
+ * Extracts and bounds the text content of an `AgentToolResult` (`{ content: [{ type: 'text',
+ * text }], details }`) — used for both a successful call's `resultText` and a failed call's
+ * `failureReason`, since either case is just "the text the tool reported," truncated the same way.
+ */
+function extractResultText(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter(
+      (block): block is { type: string; text?: string } =>
+        Boolean(block) &&
+        typeof block === 'object' &&
+        (block as { type?: unknown }).type === 'text',
+    )
+    .map((block) => block.text ?? '')
+    .join('');
+  if (!text) return null;
+  const clamp = clampWithNote(text.length, 0, MAX_TOOL_RESULT_LOG_CHARS, 'result length');
+  const truncated = text.slice(0, clamp.value);
+  return clamp.note ? `${truncated}\n\n(${clamp.note})` : truncated;
+}
+
 /**
  * Translates one Pi `AgentSession`'s event stream into the application event stream, per
  * contracts/agent-tools.md §Event bridge contract — the only place Pi event types cross into the
@@ -92,6 +121,12 @@ export class EventBridge {
   private settled = false;
   private errored = false;
   private realAssistantMessageId: string | null = null;
+  /** The most recently started assistant message segment's id — stays set across that segment's
+   * `message_end` (not cleared there) because a tool call's `tool_execution_start`/`_end` pair
+   * always arrives after the tool-call-carrier segment's own `message_end` (see
+   * `event-bridge.test.ts`'s "real-SDK tool-call-carrier message segments" tests), so this is the
+   * only reliable way to attribute a tool call back to the message segment that requested it. */
+  private currentMessageId: string | null = null;
   private readonly cleanupFns: Array<() => void> = [];
   private readonly storage: StorageAdapter;
   private readonly eventService: EventService;
@@ -172,6 +207,7 @@ export class EventBridge {
         break;
 
       case 'message_start':
+        this.currentMessageId = event.messageId;
         this.publish({
           type: 'message_started',
           sequence: null,
@@ -203,7 +239,6 @@ export class EventBridge {
             data: { messageId: event.messageId, delta: event.update.delta },
           });
         } else if (event.update.type === 'thinking_delta') {
-          if (!this.thinkingVisible()) break;
           this.runBuffer.append(this.reasoningBufferKey(event.messageId), event.update.delta);
           this.broadcastEphemeral({
             type: 'thinking_delta',
@@ -237,7 +272,7 @@ export class EventBridge {
             messageId: event.messageId,
             role: event.role,
             text: event.text,
-            reasoning: this.thinkingVisible() ? (event.reasoning ?? null) : null,
+            reasoning: event.reasoning ?? null,
           },
         });
         this.runBuffer.clear(this.textBufferKey(event.messageId));
@@ -253,7 +288,12 @@ export class EventBridge {
           documentId: this.ctx.documentId,
           conversationId: this.ctx.conversationId,
           at: new Date().toISOString(),
-          data: { toolCallId: event.toolCallId, toolName: event.toolName },
+          data: {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            messageId: this.currentMessageId ?? '',
+            args: event.args,
+          },
         });
         break;
 
@@ -268,7 +308,8 @@ export class EventBridge {
         });
         break;
 
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
+        const resultText = extractResultText(event.result);
         this.publish({
           type: 'tool_completed',
           sequence: null,
@@ -278,11 +319,15 @@ export class EventBridge {
           data: {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
+            messageId: this.currentMessageId ?? '',
             isError: event.isError,
+            resultText: event.isError ? null : resultText,
+            failureReason: event.isError ? (resultText ?? 'Tool call failed.') : null,
             stagedEditId: extractStagedEditId(event.result),
           },
         });
         break;
+      }
 
       case 'agent_settled':
         this.setStatus('idle');
@@ -395,10 +440,6 @@ export class EventBridge {
     }
 
     return rawEvent;
-  }
-
-  private thinkingVisible(): boolean {
-    return this.storage.getSettings().thinkingVisible;
   }
 
   private textBufferKey(messageId: string): string {

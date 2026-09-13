@@ -24,31 +24,111 @@ const settings = useSettingsStore();
 
 /** research.md: "comfortably show a few lines of text" — a fixed pixel value (not an ideal-lines
  *  count) so the JS overflow check below and the CSS clamp applied in the template agree on
- *  exactly the same number, with a single source of truth. */
+ *  exactly the same number, with a single source of truth. Shared by every clampable block in this
+ *  bubble (the message text and each tool call) via `useClampToggle` below, so they all clamp/
+ *  expand identically. */
 const CLAMP_HEIGHT_PX = 160;
 
-const textEl = ref<HTMLElement | null>(null);
-// Whether this message's content is actually taller than the clamp — the expand/collapse button
-// only appears when there's something to expand/collapse; a short message never gets a toggle it
-// doesn't need. `scrollHeight` reports the true, unclipped content height regardless of whether
-// `overflow: hidden`/`max-height` happens to be applied at the time it's read, so this is accurate
-// whether the message is currently expanded or collapsed.
-const overflowing = ref(false);
-function checkOverflow(): void {
-  overflowing.value = (textEl.value?.scrollHeight ?? 0) > CLAMP_HEIGHT_PX;
+/**
+ * One clamp/expand/collapse controller, shared by the message text (the "primary" id) and every
+ * tool-call block in this bubble (each a "secondary" id, keyed by `toolCallId`) — every clampable
+ * region registers its element under its own id rather than getting its own separate set of
+ * refs/computeds, so "is this block tall enough to need a toggle" and "clamp to CLAMP_HEIGHT_PX
+ * until expanded" are implemented exactly once.
+ *
+ * The primary id's expanded flag is owned by the caller (here, the message text defers to the
+ * `expanded` prop/`update:expanded` emit, since that's owned by the parent per data-model.md); every
+ * secondary id gets its own independently-toggleable, local/unpersisted flag instead — EXCEPT that
+ * whenever the primary's expanded value actually changes, for *any* reason (its own toggle here, or
+ * a parent's bulk "Expand all"/"Collapse all", FR-009, changing the `expanded` prop directly), every
+ * currently-registered secondary id snaps to match it. This cascade rule lives here, in the shared
+ * controller, rather than as separate wiring in the component, so any future secondary clampable
+ * block gets it automatically just by registering under this same controller — a bulk collapse can
+ * never leave one individually-expanded block stuck open.
+ */
+function useClampToggle(
+  primaryId: string,
+  getPrimaryExpanded: () => boolean,
+  setPrimaryExpanded: (value: boolean) => void,
+) {
+  const els = new Map<string, HTMLElement>();
+  // Whether a given id's content is actually taller than the clamp — the expand/collapse button
+  // only appears when there's something to expand/collapse. `scrollHeight` reports the true,
+  // unclipped content height regardless of whether `overflow: hidden`/`max-height` happens to be
+  // applied at the time it's read, so this is accurate whether currently expanded or collapsed.
+  const overflowing = ref<Record<string, boolean>>({});
+  const secondaryExpanded = ref<Record<string, boolean>>({});
+
+  watch(getPrimaryExpanded, (value) => {
+    for (const id of els.keys()) {
+      if (id !== primaryId) secondaryExpanded.value[id] = value;
+    }
+  });
+
+  function isExpanded(id: string): boolean {
+    return id === primaryId ? getPrimaryExpanded() : (secondaryExpanded.value[id] ?? false);
+  }
+
+  function setExpanded(id: string, value: boolean): void {
+    if (id === primaryId) {
+      setPrimaryExpanded(value);
+    } else {
+      secondaryExpanded.value[id] = value;
+    }
+  }
+
+  function setEl(id: string, el: Element | null): void {
+    if (el instanceof HTMLElement) {
+      els.set(id, el);
+    } else {
+      els.delete(id);
+    }
+  }
+
+  function recompute(): void {
+    for (const [id, el] of els) {
+      overflowing.value[id] = el.scrollHeight > CLAMP_HEIGHT_PX;
+    }
+  }
+
+  function isOverflowing(id: string): boolean {
+    return overflowing.value[id] ?? false;
+  }
+
+  function clampStyle(id: string): { maxHeight: string; overflow: string } | undefined {
+    return !isExpanded(id) && isOverflowing(id)
+      ? { maxHeight: `${CLAMP_HEIGHT_PX}px`, overflow: 'hidden' }
+      : undefined;
+  }
+
+  function label(id: string): string {
+    return isExpanded(id) ? 'Show less' : 'Show more';
+  }
+
+  function toggle(id: string): void {
+    setExpanded(id, !isExpanded(id));
+  }
+
+  return { setEl, recompute, isOverflowing, isExpanded, toggle, clampStyle, label };
 }
-watch(
-  () => props.message.text,
-  () => void nextTick(checkOverflow),
-  { immediate: true, flush: 'post' },
+
+const TEXT_ID = '__text__';
+const clamp = useClampToggle(
+  TEXT_ID,
+  () => props.expanded,
+  (value) => emit('update:expanded', value),
 );
 
-const clampStyle = computed(() =>
-  !props.expanded && overflowing.value
-    ? { maxHeight: `${CLAMP_HEIGHT_PX}px`, overflow: 'hidden' }
-    : undefined,
+watch(
+  () => props.message.text,
+  () => void nextTick(clamp.recompute),
+  { immediate: true, flush: 'post' },
 );
-const toggleLabel = computed(() => (props.expanded ? 'Show less' : 'Show more'));
+watch(
+  () => props.message.toolCalls,
+  () => void nextTick(clamp.recompute),
+  { immediate: true, flush: 'post', deep: true },
+);
 
 // All agent-produced (and, defensively, user-authored) content passes the sanitizer before
 // touching the DOM (FR-008a, Constitution Principle VI) — same pipeline as document Markdown.
@@ -63,6 +143,12 @@ const safeReasoning = computed(() =>
     ? domPurifySanitizer.sanitize(render(props.message.reasoning, { html: false }))
     : '',
 );
+
+// contracts/frontend-display.md: `args`/`resultText` are stored raw/compact — pretty-printing is
+// purely a render-time concern, never done before persistence.
+function formatToolArgs(args: unknown): string {
+  return JSON.stringify(args, null, 2) ?? String(args);
+}
 </script>
 
 <template>
@@ -77,9 +163,14 @@ const safeReasoning = computed(() =>
        internal artifact of the model calling a tool, not a reply. Gated on the same "Show
        reasoning" toggle reasoning content already uses (`settings.thinkingVisible`): hidden by
        default so it never renders as a blank "Assistant" bubble, shown (as a small note, below)
-       when the toggle is on so the underlying event is still inspectable. -->
+       when the toggle is on so the underlying event is still inspectable — UNLESS this carrier
+       segment actually has tool-call detail to show, in which case it renders regardless of the
+       toggle (Research Decision 5: tool-call detail is a factual record, not gated by "Show
+       reasoning"). -->
   <article
-    v-if="!message.isToolCallCarrier || settings.thinkingVisible"
+    v-if="
+      !message.isToolCallCarrier || settings.thinkingVisible || (message.toolCalls?.length ?? 0) > 0
+    "
     class="message-bubble"
     :class="{ 'seed-card': seed, 'tool-call-carrier': message.isToolCallCarrier }"
     :data-role="message.role"
@@ -94,17 +185,17 @@ const safeReasoning = computed(() =>
       </span>
 
       <!-- FR-008/research.md §4: a real <button>, minimum 24x24px hit area, only rendered when
-           there's actually more to show/hide (see `overflowing` above). Placed next to the role
-           label — not after the message content — so it's reachable without scrolling past a
-           long, still-collapsed message to find it. -->
+           there's actually more to show/hide. Placed next to the role label — not after the
+           message content — so it's reachable without scrolling past a long, still-collapsed
+           message to find it. -->
       <button
-        v-if="overflowing"
+        v-if="clamp.isOverflowing(TEXT_ID)"
         type="button"
         class="expand-toggle-button"
-        :aria-label="`${toggleLabel} of this message`"
-        @click="emit('update:expanded', !expanded)"
+        :aria-label="`${clamp.label(TEXT_ID)} of this message`"
+        @click="clamp.toggle(TEXT_ID)"
       >
-        {{ toggleLabel }}
+        {{ clamp.label(TEXT_ID) }}
       </button>
     </header>
 
@@ -114,12 +205,52 @@ const safeReasoning = computed(() =>
       <div class="reasoning-content" v-html="safeReasoning" />
     </details>
 
-    <p v-if="message.isToolCallCarrier" class="tool-call-carrier-note">
-      Tool call — no reply text (visible because "Show reasoning" is on).
+    <p v-if="message.isToolCallCarrier && settings.thinkingVisible" class="tool-call-carrier-note">
+      Tool call — this segment carries no reply text of its own.
     </p>
 
-    <!-- eslint-disable-next-line vue/no-v-html -- safeText is DOMPurify-sanitized, see render/sanitizer.ts -->
-    <div ref="textEl" class="message-text text-wrap-safe" :style="clampStyle" v-html="safeText" />
+    <!-- Tool-call detail (contracts/frontend-display.md): a factual record of what the agent did,
+         not gated by "Show reasoning" at all (Research Decision 5) — renders whenever this message
+         has any `toolCalls`, regardless of the toggle. Plain text interpolation only (no v-html):
+         `args`/`resultText`/`failureReason` may contain untrusted content from a fetched page or
+         search snippet (Constitution Principle VI). Expand/collapse per call, same `clamp`
+         controller (and CLAMP_HEIGHT_PX) the message text below uses. -->
+    <div
+      v-for="call in message.toolCalls ?? []"
+      :key="call.toolCallId"
+      class="tool-call"
+      :class="{ 'tool-call-error': call.failureReason }"
+    >
+      <div class="tool-call-header">
+        <div class="tool-call-name">{{ call.name }}</div>
+        <button
+          v-if="clamp.isOverflowing(call.toolCallId)"
+          type="button"
+          class="expand-toggle-button"
+          :aria-label="`${clamp.label(call.toolCallId)} of this tool call`"
+          @click="clamp.toggle(call.toolCallId)"
+        >
+          {{ clamp.label(call.toolCallId) }}
+        </button>
+      </div>
+      <div
+        :ref="(el) => clamp.setEl(call.toolCallId, el as Element | null)"
+        class="tool-call-body"
+        :style="clamp.clampStyle(call.toolCallId)"
+      >
+        <pre class="tool-call-args">{{ formatToolArgs(call.args) }}</pre>
+        <pre class="tool-call-result">{{ call.failureReason ?? call.resultText }}</pre>
+      </div>
+    </div>
+
+    <!-- eslint-disable vue/no-v-html -- safeText is DOMPurify-sanitized, see render/sanitizer.ts -->
+    <div
+      :ref="(el) => clamp.setEl(TEXT_ID, el as Element | null)"
+      class="message-text text-wrap-safe"
+      :style="clamp.clampStyle(TEXT_ID)"
+      v-html="safeText"
+    />
+    <!-- eslint-enable vue/no-v-html -->
   </article>
 </template>
 
@@ -201,6 +332,44 @@ const safeReasoning = computed(() =>
   font-size: 0.85rem;
   font-style: italic;
   opacity: 0.7;
+}
+/* contracts/frontend-display.md: informational/read-only agent activity gets its own dedicated
+   token pair (`--info-*`), distinct from `--status-active-*`/`--queue-*`; a failed call reuses the
+   existing `--danger-*` pair rather than introducing a second error color. */
+.tool-call {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  background: var(--info-bg, #eff6ff);
+  border: 1px solid var(--info-border, #bfdbfe);
+  color: var(--info-color, #1e3a8a);
+}
+.tool-call.tool-call-error {
+  background: var(--danger-bg, #fee2e2);
+  border-color: var(--danger-color, #b3261e);
+  color: var(--danger-color, #b3261e);
+}
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.tool-call-name {
+  font-weight: 600;
+}
+.tool-call-args,
+.tool-call-result {
+  margin: 0 0 0.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+.tool-call-result:last-child,
+.tool-call-args:last-child {
+  margin-bottom: 0;
 }
 .message-text :deep(p:first-child) {
   margin-top: 0;

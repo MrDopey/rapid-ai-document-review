@@ -96,6 +96,23 @@ interface UserMessageEventData {
   isSeed?: boolean;
 }
 
+interface ToolStartedEventData {
+  toolCallId: string;
+  toolName: string;
+  messageId: string;
+  args: unknown;
+}
+
+interface ToolCompletedEventData {
+  toolCallId: string;
+  toolName: string;
+  messageId: string;
+  isError: boolean;
+  resultText: string | null;
+  failureReason: string | null;
+  stagedEditId: string | null;
+}
+
 /**
  * Conversation lifecycle for US2: ensuring Main exists, sending messages through the
  * concurrency limiter and PiService, retrying a failed turn, and reading conversation lists/
@@ -873,9 +890,34 @@ export class ConversationService {
   }
 
   private buildMessages(conversationId: string): MessageDto[] {
+    const rows = this.storage.listEventsByConversation(conversationId);
+
+    const toolStartedByCallId = new Map<string, ToolStartedEventData>();
+    for (const row of rows) {
+      if (row.eventType !== 'tool_started') continue;
+      const data = row.data as ToolStartedEventData;
+      toolStartedByCallId.set(data.toolCallId, data);
+    }
+    const toolCallsByMessageId = new Map<string, MessageDto['toolCalls']>();
+    for (const row of rows) {
+      if (row.eventType !== 'tool_completed') continue;
+      const data = row.data as ToolCompletedEventData;
+      const started = toolStartedByCallId.get(data.toolCallId);
+      const entry = {
+        toolCallId: data.toolCallId,
+        name: data.toolName,
+        args: started?.args,
+        resultText: data.resultText,
+        failureReason: data.failureReason,
+        stagedEditId: data.stagedEditId,
+      };
+      const existing = toolCallsByMessageId.get(data.messageId) ?? [];
+      existing.push(entry);
+      toolCallsByMessageId.set(data.messageId, existing);
+    }
+
     return (
-      this.storage
-        .listEventsByConversation(conversationId)
+      rows
         .filter((row) => row.eventType === 'message_completed')
         .map((row) => {
           const data = row.data as UserMessageEventData;
@@ -885,7 +927,7 @@ export class ConversationService {
             text: data.text,
             reasoning: data.reasoning,
             isToolCallCarrier: computeIsToolCallCarrier(data),
-            toolCalls: [],
+            toolCalls: toolCallsByMessageId.get(data.messageId) ?? [],
             createdAt: row.createdAt,
           };
         })

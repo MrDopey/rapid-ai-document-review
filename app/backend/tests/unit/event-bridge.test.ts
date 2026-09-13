@@ -206,3 +206,173 @@ describe('EventBridge: real-SDK tool-call-carrier message segments', () => {
     expect(completed[0]!.data).toMatchObject({ text: 'hi' });
   });
 });
+
+describe('EventBridge: reasoning and tool-call detail are always captured (009-agent-activity-logging)', () => {
+  it('persists message_completed.data.reasoning even when thinkingVisible is off', () => {
+    const h = buildHarness();
+    h.storage.updateSettings({ thinkingVisible: false }, new Date().toISOString());
+
+    h.bridge.handle(real({ type: 'agent_start' }));
+    h.bridge.handle(real({ type: 'message_start', message: { role: 'assistant' } }));
+    h.bridge.handle(
+      real({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Mulling it over.' },
+            { type: 'text', text: 'Here you go.' },
+          ],
+        },
+      }),
+    );
+    h.bridge.handle(real({ type: 'agent_settled' }));
+
+    const completed = messageCompletedEvents(h);
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.data).toMatchObject({
+      text: 'Here you go.',
+      reasoning: 'Mulling it over.',
+    });
+  });
+
+  it('tool_started carries messageId/args, and tool_completed carries messageId/resultText for a successful call', () => {
+    const h = buildHarness();
+
+    h.bridge.handle(real({ type: 'agent_start' }));
+    h.bridge.handle(real({ type: 'message_start', message: { role: 'assistant' } }));
+    h.bridge.handle(
+      real({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', toolCallId: 'tc_1', toolName: 'web_search' }],
+        },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_start',
+        toolCallId: 'tc_1',
+        toolName: 'web_search',
+        args: { query: 'rapid ai document review' },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_end',
+        toolCallId: 'tc_1',
+        toolName: 'web_search',
+        isError: false,
+        result: { content: [{ type: 'text', text: 'Web search: 1 result' }] },
+      }),
+    );
+    h.bridge.handle(real({ type: 'agent_settled' }));
+
+    const started = h.storage
+      .listEventsSince(h.documentId, null)
+      .find((row) => row.eventType === 'tool_started');
+    const completed = h.storage
+      .listEventsSince(h.documentId, null)
+      .find((row) => row.eventType === 'tool_completed');
+
+    expect(started!.data).toMatchObject({
+      toolCallId: 'tc_1',
+      args: { query: 'rapid ai document review' },
+    });
+    expect((started!.data as { messageId: string }).messageId).toBeTruthy();
+    expect((started!.data as { messageId: string }).messageId).toEqual(
+      (completed!.data as { messageId: string }).messageId,
+    );
+    expect(completed!.data).toMatchObject({
+      resultText: 'Web search: 1 result',
+      failureReason: null,
+    });
+  });
+
+  it('tool_completed carries failureReason (not resultText) when a tool call errors', () => {
+    const h = buildHarness();
+
+    h.bridge.handle(real({ type: 'agent_start' }));
+    h.bridge.handle(real({ type: 'message_start', message: { role: 'assistant' } }));
+    h.bridge.handle(
+      real({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', toolCallId: 'tc_2', toolName: 'web_fetch' }],
+        },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_start',
+        toolCallId: 'tc_2',
+        toolName: 'web_fetch',
+        args: { url: 'https://example.invalid' },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_end',
+        toolCallId: 'tc_2',
+        toolName: 'web_fetch',
+        isError: true,
+        result: { content: [{ type: 'text', text: 'Could not fetch: timed out' }] },
+      }),
+    );
+    h.bridge.handle(real({ type: 'agent_settled' }));
+
+    const completed = h.storage
+      .listEventsSince(h.documentId, null)
+      .find((row) => row.eventType === 'tool_completed');
+
+    expect(completed!.data).toMatchObject({
+      resultText: null,
+      failureReason: 'Could not fetch: timed out',
+    });
+  });
+
+  it('bounds resultText at a fixed size, ending with a truncation marker (FR-007/SC-004)', () => {
+    const h = buildHarness();
+    const hugeText = 'x'.repeat(25_000);
+
+    h.bridge.handle(real({ type: 'agent_start' }));
+    h.bridge.handle(real({ type: 'message_start', message: { role: 'assistant' } }));
+    h.bridge.handle(
+      real({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', toolCallId: 'tc_3', toolName: 'web_fetch' }],
+        },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_start',
+        toolCallId: 'tc_3',
+        toolName: 'web_fetch',
+        args: { url: 'https://example.com/huge' },
+      }),
+    );
+    h.bridge.handle(
+      real({
+        type: 'tool_execution_end',
+        toolCallId: 'tc_3',
+        toolName: 'web_fetch',
+        isError: false,
+        result: { content: [{ type: 'text', text: hugeText }] },
+      }),
+    );
+    h.bridge.handle(real({ type: 'agent_settled' }));
+
+    const completed = h.storage
+      .listEventsSince(h.documentId, null)
+      .find((row) => row.eventType === 'tool_completed');
+    const resultText = (completed!.data as { resultText: string }).resultText;
+
+    expect(resultText.length).toBeLessThan(hugeText.length);
+    expect(resultText).toMatch(/clamped/);
+  });
+});

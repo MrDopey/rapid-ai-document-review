@@ -310,6 +310,9 @@ export const MessageDto = z.object({
       z.object({
         toolCallId: z.string(),
         name: z.string(),
+        args: z.unknown(),
+        resultText: z.string().nullable(),
+        failureReason: z.string().nullable(),
         stagedEditId: z.string().nullable().optional(),
       }),
     )

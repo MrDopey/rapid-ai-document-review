@@ -3,6 +3,7 @@ import type {
   ConversationDto,
   CreateConversationRequest,
   DesignatePrimaryResponse,
+  MessageDto,
   PrimaryWhenBusy,
   ReviewConversationResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -37,6 +38,11 @@ export interface ConversationMessageState {
    *  `MessageBubble.vue` gates its visibility on the "Show reasoning" toggle, same as reasoning
    *  content, instead of always rendering it as a blank "Assistant" bubble. */
   isToolCallCarrier: boolean;
+  /** Populated from `MessageDto.toolCalls` (loadDetail's GET response) — a read-time projection
+   *  over the full stored event log, so it's already complete as soon as the conversation is
+   *  (re)loaded, with no separate live-streaming path for it (event-bridge.ts's
+   *  `tool_started`/`tool_completed` are not otherwise surfaced to this store). */
+  toolCalls: NonNullable<MessageDto['toolCalls']>;
   streaming: boolean;
   createdAt: string;
 }
@@ -131,6 +137,7 @@ export const useConversationsStore = defineStore('conversations', {
           text: m.text,
           reasoning: m.reasoning ?? null,
           isToolCallCarrier: m.isToolCallCarrier ?? false,
+          toolCalls: m.toolCalls ?? [],
           streaming: false,
           createdAt: m.createdAt,
         }));
@@ -452,6 +459,7 @@ export const useConversationsStore = defineStore('conversations', {
             text: '',
             reasoning: null,
             isToolCallCarrier: false,
+            toolCalls: [],
             streaming: true,
             createdAt: event.at,
           });
@@ -471,6 +479,7 @@ export const useConversationsStore = defineStore('conversations', {
               text: event.data.delta,
               reasoning: null,
               isToolCallCarrier: false,
+              toolCalls: [],
               streaming: true,
               createdAt: event.at,
             });
@@ -491,6 +500,7 @@ export const useConversationsStore = defineStore('conversations', {
               text: '',
               reasoning: event.data.delta,
               isToolCallCarrier: false,
+              toolCalls: [],
               streaming: true,
               createdAt: event.at,
             });
@@ -520,6 +530,7 @@ export const useConversationsStore = defineStore('conversations', {
               text: event.data.text,
               reasoning: event.data.reasoning,
               isToolCallCarrier,
+              toolCalls: [],
               streaming: false,
               createdAt: event.at,
             });

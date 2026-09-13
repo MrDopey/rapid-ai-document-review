@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { FakeAgentSession, HANG_DIRECTIVE } from '../../src/pi/fake-agent-session.js';
+import {
+  FakeAgentSession,
+  HANG_DIRECTIVE,
+  WEB_SEARCH_DIRECTIVE,
+} from '../../src/pi/fake-agent-session.js';
 import type { AgentSessionEventLike } from '../../src/pi/agent-session-port.js';
+import type { RegisteredToolLike } from '../../src/pi/pi-service.js';
 
 /**
  * FIX 1 (a/b): previously `FakeAgentSession.prompt()` fired `runScript()` via a bare `void` with
@@ -72,5 +77,32 @@ describe('FakeAgentSession: a hung turn always settles (FIX 1a/1b)', () => {
     const types = events.map((e) => e.type);
     expect(types).toContain('agent_settled');
     expect(types).not.toContain('agent_error');
+  });
+});
+
+describe('FakeAgentSession: tool_execution_start carries args (009-agent-activity-logging)', () => {
+  function collectEvents(session: FakeAgentSession): AgentSessionEventLike[] {
+    const events: AgentSessionEventLike[] = [];
+    session.subscribe((event) => events.push(event));
+    return events;
+  }
+
+  it("a simulated web_search call's tool_execution_start event includes the args object passed to it", async () => {
+    const webSearchTool: RegisteredToolLike = {
+      name: 'web_search',
+      execute: async (_toolCallId, params) => ({
+        content: [{ type: 'text', text: `Web search: "${(params as { query: string }).query}"` }],
+      }),
+    };
+    const session = new FakeAgentSession(undefined, [webSearchTool], 5000);
+    const events = collectEvents(session);
+
+    await session.prompt(WEB_SEARCH_DIRECTIVE + JSON.stringify({ query: 'test query' }));
+    await session.waitForIdle();
+
+    const started = events.find((e) => e.type === 'tool_execution_start');
+    expect(started && 'args' in started ? started.args : undefined).toEqual({
+      query: 'test query',
+    });
   });
 });

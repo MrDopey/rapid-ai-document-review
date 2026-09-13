@@ -179,3 +179,65 @@ describe('ConversationService.getOne: isToolCallCarrier is derived at read time'
     expect(reasoningOnly?.isToolCallCarrier).toBe(false);
   });
 });
+
+describe('ConversationService.getOne: toolCalls is populated at read time (009-agent-activity-logging)', () => {
+  it('joins tool_started/tool_completed events sharing a messageId into the carrier message toolCalls', () => {
+    const h = buildHarness();
+    const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
+    const documentId = created.document.id;
+    const mainId = created.mainConversation.id;
+
+    appendMessageCompleted(h, documentId, mainId, {
+      messageId: 'msg_carrier',
+      role: 'assistant',
+      text: '',
+      reasoning: null,
+    });
+    h.eventService.append(documentId, mainId, 'tool_started', {
+      toolCallId: 'tc_1',
+      toolName: 'web_search',
+      messageId: 'msg_carrier',
+      args: { query: 'rapid ai document review' },
+    });
+    h.eventService.append(documentId, mainId, 'tool_completed', {
+      toolCallId: 'tc_1',
+      toolName: 'web_search',
+      messageId: 'msg_carrier',
+      isError: false,
+      resultText: 'Web search: 1 result',
+      failureReason: null,
+      stagedEditId: null,
+    });
+
+    const { messages } = h.conversationService.getOne(mainId);
+    const carrier = messages.find((m) => m.id === 'msg_carrier');
+    expect(carrier?.toolCalls).toEqual([
+      {
+        toolCallId: 'tc_1',
+        name: 'web_search',
+        args: { query: 'rapid ai document review' },
+        resultText: 'Web search: 1 result',
+        failureReason: null,
+        stagedEditId: null,
+      },
+    ]);
+  });
+
+  it('leaves toolCalls empty for a message with no associated tool call events', () => {
+    const h = buildHarness();
+    const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
+    const documentId = created.document.id;
+    const mainId = created.mainConversation.id;
+
+    appendMessageCompleted(h, documentId, mainId, {
+      messageId: 'msg_reply',
+      role: 'assistant',
+      text: 'Here is the answer.',
+      reasoning: null,
+    });
+
+    const { messages } = h.conversationService.getOne(mainId);
+    const reply = messages.find((m) => m.id === 'msg_reply');
+    expect(reply?.toolCalls).toEqual([]);
+  });
+});

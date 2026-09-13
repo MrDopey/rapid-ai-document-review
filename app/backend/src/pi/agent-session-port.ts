@@ -47,6 +47,7 @@ export interface PiToolExecutionStartEvent {
   type: 'tool_execution_start';
   toolCallId: string;
   toolName: string;
+  args?: unknown;
 }
 
 export interface PiToolExecutionUpdateEvent {

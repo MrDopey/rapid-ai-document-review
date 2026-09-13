@@ -6,6 +6,7 @@ import {
   EPHEMERAL_EVENT_TYPES,
   SubscribedFrame,
 } from '@rapid-ai-document-review/shared/contracts/events';
+import { GetConversationResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { createTestApp, listenForWs, waitFor } from './test-app.js';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
 import type { DocumentSnapshot, SocketLike } from '../../src/events/event-hub.js';
@@ -536,42 +537,55 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     }
   });
 
-  it("thinkingVisible toggle affects only subsequent frames, not an in-flight run's already-emitted deltas", async () => {
+  it('thinking_delta frames are emitted identically whether thinkingVisible is true or false (009-agent-activity-logging: capture is no longer gated by display setting)', async () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
-    await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
+    await call(app, 'PATCH', '/api/settings', { thinkingVisible: false });
     const { ws, frames } = await openSocket(baseUrl, null);
     try {
       await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
         message: 'Please answer so reasoning deltas stream for a moment.',
       });
       await waitFor(() => frames.some((f) => f.type === 'thinking_delta'));
-
-      // Flip the setting off as soon as we've seen the first thinking_delta. The HTTP call
-      // resolving only means the broadcast was made in-process; wait for the frame to actually
-      // arrive over the socket before reasoning about its position in `frames`.
-      await call(app, 'PATCH', '/api/settings', { thinkingVisible: false });
-      await waitFor(() => frames.some((f) => f.type === 'settings_changed'));
-      const toggleIdx = frames.findIndex((f) => f.type === 'settings_changed');
-      expect(toggleIdx).toBeGreaterThanOrEqual(0);
-
       await waitFor(() => storage.getConversation(created.mainConversation.id)?.status === 'idle');
 
-      // No thinking_delta may appear after the settings_changed frame — the check happens fresh
-      // on every emission (event-bridge.ts), and storage was already updated before that frame
-      // went out.
-      const thinkingAfterToggle = frames
-        .slice(toggleIdx + 1)
-        .filter((f) => f.type === 'thinking_delta');
-      expect(thinkingAfterToggle).toHaveLength(0);
-      const thinkingBeforeToggle = frames
-        .slice(0, toggleIdx)
-        .filter((f) => f.type === 'thinking_delta');
-      expect(thinkingBeforeToggle.length).toBeGreaterThanOrEqual(1);
+      const thinkingWhileOff = frames.filter((f) => f.type === 'thinking_delta');
+      expect(thinkingWhileOff.length).toBeGreaterThanOrEqual(1);
     } finally {
       await closeSocket(ws);
       await app.close();
     }
+  });
+
+  it("toggling thinkingVisible on retroactively reveals a past turn's reasoning with no re-run (FR-006/SC-002, 009-agent-activity-logging)", async () => {
+    const { app, storage } = await setup();
+    const created = await createDoc(app);
+    await call(app, 'PATCH', '/api/settings', { thinkingVisible: false });
+
+    await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
+      message: 'Please answer so reasoning is produced.',
+    });
+    await waitFor(() => storage.getConversation(created.mainConversation.id)?.status === 'idle');
+
+    const beforeToggle = GetConversationResponse.parse(
+      (await call(app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
+    );
+    const assistantMessage = beforeToggle.messages.find(
+      (m) => m.role === 'assistant' && !m.isToolCallCarrier,
+    );
+    // Reasoning is captured regardless of the display setting (FR-001) — already present in the
+    // GET response even while `thinkingVisible` is off.
+    expect(assistantMessage?.reasoning).toBeTruthy();
+
+    await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
+
+    const afterToggle = GetConversationResponse.parse(
+      (await call(app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
+    );
+    const sameMessage = afterToggle.messages.find((m) => m.id === assistantMessage?.id);
+    expect(sameMessage?.reasoning).toBe(assistantMessage?.reasoning);
+
+    await app.close();
   });
 
   it('ephemeral event types never appear in persisted conversation_event rows', async () => {

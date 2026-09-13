@@ -200,7 +200,12 @@ export const MessageCompletedEvent = base(
 
 export const ToolStartedEvent = base(
   'tool_started',
-  z.object({ toolCallId: z.string(), toolName: z.string() }),
+  z.object({
+    toolCallId: z.string(),
+    toolName: z.string(),
+    messageId: z.string(),
+    args: z.unknown(),
+  }),
 );
 
 export const ToolOutputDeltaEvent = base(
@@ -213,7 +218,10 @@ export const ToolCompletedEvent = base(
   z.object({
     toolCallId: z.string(),
     toolName: z.string(),
+    messageId: z.string(),
     isError: z.boolean(),
+    resultText: z.string().nullable(),
+    failureReason: z.string().nullable(),
     stagedEditId: z.string().nullable(),
   }),
 );
