@@ -5,3 +5,12 @@
 // unset/blank/override behavior (config.test.ts, pi-model-config.test.ts) still fully control this
 // var themselves via `delete`/assignment in their own `beforeEach` before their dynamic re-imports.
 process.env.RADR_BE_PI_AGENT_MODEL ??= 'anthropic/claude-opus-4-5';
+
+// FakeAgentSession streams deltas with a real per-chunk delay by default (fake-agent-session.ts),
+// to mirror a real model's incremental output — needed by Playwright e2e specs (e.g. us5.spec.ts's
+// "act while active" step) that depend on a turn staying `streaming` for a measurable window.
+// Vitest runs (unit/integration/contract) never assert on that window, only on the turn's final
+// outcome — usually via `waitFor` polling — so collapsing the delay to 0 here makes every fake
+// turn settle within a tick, with no behavior change, just faster tests. Playwright's own
+// webServer `env` (playwright.config.ts) doesn't source this file, so e2e keeps the real delay.
+process.env.PI_FAKE_CHUNK_DELAY_MS ??= '0';

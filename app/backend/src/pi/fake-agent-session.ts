@@ -113,6 +113,17 @@ function resolveTurnTimeoutMs(): number {
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_TURN_TIMEOUT_MS;
 }
 
+/** Per-chunk delay between streamed `message_update`/`thinking_delta` events (default 5ms,
+ *  mirroring a real model's incremental output — see DEFAULT_TURN_TIMEOUT_MS's note on
+ *  `us5.spec.ts`'s "act while active" step, which depends on this being nonzero real time).
+ *  `PI_FAKE_CHUNK_DELAY_MS=0` (set by `tests/setup/env-defaults.ts` for vitest runs, which don't
+ *  need to observe a streaming window) collapses every turn to settle within a tick, so contract
+ *  tests' `waitFor` polling has nothing to wait out. */
+function resolveChunkDelayMs(): number {
+  const override = Number(process.env.PI_FAKE_CHUNK_DELAY_MS);
+  return Number.isFinite(override) && override >= 0 ? override : 5;
+}
+
 /**
  * A deterministic, credential-free stand-in for a real Pi `AgentSession`, used only when
  * `RADR_BE_PI_FAKE_SESSIONS=1` (config.ts). Exists so `npm run test:e2e -- --grep "US2"` can exercise the
@@ -145,11 +156,18 @@ export class FakeAgentSession implements AgentSessionLike {
    *  reached this session's own context rather than only the app's event log. */
   private readonly seededHistory: string[] = [];
   private readonly turnTimeoutMs: number;
+  private readonly chunkDelayMs: number;
 
-  constructor(sessionFile?: string, tools: RegisteredToolLike[] = [], turnTimeoutMs?: number) {
+  constructor(
+    sessionFile?: string,
+    tools: RegisteredToolLike[] = [],
+    turnTimeoutMs?: number,
+    chunkDelayMs?: number,
+  ) {
     this.sessionFile = sessionFile;
     this.tools = tools;
     this.turnTimeoutMs = turnTimeoutMs ?? resolveTurnTimeoutMs();
+    this.chunkDelayMs = chunkDelayMs ?? resolveChunkDelayMs();
   }
 
   get isStreaming(): boolean {
@@ -264,7 +282,7 @@ export class FakeAgentSession implements AgentSessionLike {
   private async runScript(userText: string): Promise<void> {
     const errorDirective = parseErrorDirective(userText);
     if (errorDirective) {
-      await sleep(20);
+      await sleep(this.chunkDelayMs);
       throw new Error(errorDirective.message ?? 'Simulated agent failure (test directive).');
     }
 
@@ -293,7 +311,7 @@ export class FakeAgentSession implements AgentSessionLike {
     const reasoning = 'Considering the document and the question before answering.';
     for (const delta of chunk(reasoning, 10)) {
       this.emit({ type: 'message_update', messageId, update: { type: 'thinking_delta', delta } });
-      await sleep(5);
+      await sleep(this.chunkDelayMs);
     }
 
     // Echo back any fold summaries delivered via `sendCustomMessage` since the last turn
@@ -307,7 +325,7 @@ export class FakeAgentSession implements AgentSessionLike {
     const text = `Here is a fake deterministic answer to: "${userText}".${noted}`;
     for (const delta of chunk(text, 6)) {
       this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
-      await sleep(5);
+      await sleep(this.chunkDelayMs);
     }
 
     this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning });
@@ -350,7 +368,7 @@ export class FakeAgentSession implements AgentSessionLike {
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
     for (const delta of chunk(text, 12)) {
       this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
-      await sleep(5);
+      await sleep(this.chunkDelayMs);
     }
     this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
     return text;
@@ -391,7 +409,7 @@ export class FakeAgentSession implements AgentSessionLike {
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
     for (const delta of chunk(text, 12)) {
       this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
-      await sleep(5);
+      await sleep(this.chunkDelayMs);
     }
     this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
     return text;
