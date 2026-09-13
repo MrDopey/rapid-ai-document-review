@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 COPY app/shared/package.json app/shared/package.json
 COPY app/backend/package.json app/backend/package.json
 COPY app/frontend/package.json app/frontend/package.json
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY tsconfig.base.json ./
 COPY app ./app
 RUN npm run build
@@ -17,7 +17,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY app/shared/package.json app/shared/package.json
 COPY app/backend/package.json app/backend/package.json
-RUN npm ci --omit=dev --workspace=app/shared --workspace=app/backend
+RUN npm ci --omit=dev --workspace=app/shared --workspace=app/backend --ignore-scripts
 COPY --from=build /app/app/shared/dist app/shared/dist
 COPY --from=build /app/app/backend/dist app/backend/dist
 COPY --from=build /app/app/frontend/dist app/backend/dist/public
