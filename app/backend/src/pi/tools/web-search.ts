@@ -40,7 +40,9 @@ export function createWebSearchTool(deps: WebSearchToolDeps) {
   return defineTool({
     name: 'web_search',
     label: 'Web search',
-    description: 'Search the web and return a bounded list of results (title, URL, snippet).',
+    description:
+      'Search the web and return a bounded list of results (title, URL, snippet).' +
+      'cite the URLs of any results you rely on directly in your response.',
     promptSnippet: 'web_search(query) — search the web',
     parameters: WebSearchToolParams,
     execute: async (_toolCallId, rawParams) => {

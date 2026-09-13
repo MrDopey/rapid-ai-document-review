@@ -23,7 +23,9 @@ export function createWebFetchTool(_deps: WebFetchToolDeps) {
   return defineTool({
     name: 'web_fetch',
     label: 'Web fetch',
-    description: 'Fetch a URL and return its page content as plain text.',
+    description:
+      'Fetch a URL and return its page content as plain text.' +
+      'Cite the URL directly in your visible response if you rely on its content.',
     promptSnippet: 'web_fetch(url) — fetch a web page as plain text',
     parameters: WebFetchToolParams,
     execute: async (_toolCallId, rawParams) => {
