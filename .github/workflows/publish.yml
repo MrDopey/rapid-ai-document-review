@@ -161,7 +161,9 @@ jobs:
           file: docker/Dockerfile
           push: true
           # Must match the architectures published by the node base image in docker/Dockerfile.
-          platforms: linux/amd64,linux/arm64/v8,linux/ppc64le,linux/s390x
+          # Limited to amd64/arm64: lightningcss (Vite's CSS minifier) has no prebuilt native
+          # binary for ppc64le/s390x, so the frontend build fails on those platforms.
+          platforms: linux/amd64,linux/arm64/v8
           tags: |
             ${{ steps.image.outputs.image }}:${{ needs.prepare.outputs.version }}
             ${{ steps.image.outputs.image }}:latest
