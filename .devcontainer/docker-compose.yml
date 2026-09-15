@@ -33,4 +33,4 @@ services:
     # duplicating it — see docker/searxng/settings.yml for why secret_key lives there and not in
     # an env var.
     volumes:
-      - ../docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
