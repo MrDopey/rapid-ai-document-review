@@ -874,6 +874,29 @@ describe('Contract: HTTP API (http-api.md)', () => {
       );
       expect(closedDetail.conversation.readOnly).toBe(true);
     });
+
+    it("404s when the id belongs to a different document than the URL's :documentId", async () => {
+      const docA = await createDoc(ctx, 'Doc A content');
+      const docAId = ctx.documentId!;
+      await createDoc(ctx, 'Doc B content');
+
+      const res = await call(
+        ctx.app,
+        'GET',
+        `/api/documents/${ctx.documentId}/conversations/${docA.mainConversation.id}`,
+      );
+      expect(res.status).toBe(404);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('CONVERSATION_NOT_FOUND');
+
+      // Sanity: the same id under its own document's URL still resolves.
+      ctx.documentId = docAId;
+      const ownRes = await call(
+        ctx.app,
+        'GET',
+        `/api/documents/${docAId}/conversations/${docA.mainConversation.id}`,
+      );
+      expect(ownRes.status).toBe(200);
+    });
   });
 
   describe('PATCH /api/conversations/:id (rename)', () => {

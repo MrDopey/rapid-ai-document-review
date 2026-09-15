@@ -127,6 +127,29 @@ export const useConversationsStore = defineStore('conversations', {
       const page = await httpClient.listConversations(activeDocumentId());
       this.conversations = page.conversations;
       this.loaded = true;
+      this.pruneStaleConversationState();
+    },
+
+    /** Drops every per-conversation-id entry (`messagesByConversation` and its siblings below) not
+     *  present in the just-loaded `conversations` list — otherwise an id only ever seen under a
+     *  previously active document survives in these maps indefinitely and can resurface (e.g. via
+     *  `resyncAfterGap`'s `Object.keys(messagesByConversation)` refetch) as a bogus entry pushed
+     *  into `conversations` by `upsertConversation`, even though it belongs to a document that is
+     *  no longer active. */
+    pruneStaleConversationState(): void {
+      const liveIds = new Set(this.conversations.map((c) => c.id));
+      for (const map of [
+        this.messagesByConversation,
+        this.queueInfo,
+        this.foldedSummaries,
+        this.drafts,
+        this.expandedByMessage,
+        this.refreshGeneration,
+      ]) {
+        for (const id of Object.keys(map)) {
+          if (!liveIds.has(id)) delete map[id];
+        }
+      }
     },
 
     /** A conversation simultaneously mounted as both a canvas box (`ConversationThreadBox.vue`,

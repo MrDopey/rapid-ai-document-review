@@ -195,7 +195,7 @@ export function buildApp() {
     registerDocumentRoutes(instance, { documentService, revisionService });
     registerRevisionRoutes(instance, { storage, revisionService });
     registerConversationRoutes(instance, { conversationService, primaryService, storage });
-    registerEditRoutes(instance, { editService });
+    registerEditRoutes(instance, { editService, storage });
     registerSettingsRoutes(instance, { storage, eventService, eventHub });
     registerSystemPromptRoutes(instance);
     registerWsRoutes(instance, { eventHub, storage });

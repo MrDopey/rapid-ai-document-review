@@ -156,6 +156,7 @@ export class EventHub {
       }
     }
 
+    this.unsubscribe(socket);
     this.subscriptions.add({ socket, documentId });
   }
 

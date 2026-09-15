@@ -105,6 +105,22 @@ async function withConversationErrors(
   }
 }
 
+/** Every `:id`-scoped route below identifies its conversation purely by `conversationId` (globally
+ *  unique), so without this check a valid id from a different document than the URL's
+ *  `:documentId` would resolve as if it belonged there — surfacing another document's data (and,
+ *  via the frontend's per-document event-sequence tracking, corrupting its own state) rather than
+ *  404ing like a genuinely unknown id does. */
+function requireConversationInDocument(
+  storage: StorageAdapter,
+  documentId: string,
+  conversationId: string,
+): void {
+  const conversation = storage.getConversation(conversationId);
+  if (!conversation || conversation.documentId !== documentId) {
+    throw new ConversationNotFoundError(`Conversation not found: ${conversationId}`);
+  }
+}
+
 export function registerConversationRoutes(
   app: FastifyInstance,
   deps: {
@@ -141,109 +157,119 @@ export function registerConversationRoutes(
   // messages, no children — see `ConversationService.discardIfEmpty`'s doc comment) outright,
   // rather than leaving it soft-closed forever. Distinct from `POST /:id/close` (FR-033), which
   // stays untouched by this addition.
-  app.delete<{ Params: { id: string } }>(
+  app.delete<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id',
     async (request, reply) => {
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = conversationService.discardIfEmpty(request.params.id);
         return reply.send(result);
       });
     },
   );
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id',
     async (request, reply) => {
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         return reply.send(conversationService.getOne(request.params.id));
       });
     },
   );
 
-  app.patch<{ Params: { id: string } }>(
+  app.patch<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id',
     async (request, reply) => {
       const data = parseOrFail(reply, RenameConversationRequest, request.body);
       if (!data) return;
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const conversation = conversationService.rename(request.params.id, data.name);
         return reply.send(conversation);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/send',
     async (request, reply) => {
       const data = parseOrFail(reply, SendMessageRequest, request.body);
       if (!data) return;
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = await conversationService.send(request.params.id, data.message);
         return reply.status(202).send(result);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/refresh-send',
     async (request, reply) => {
       const data = parseOrFail(reply, SendMessageRequest, request.body);
       if (!data) return;
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = await conversationService.refreshAndSend(request.params.id, data.message);
         return reply.status(202).send(result);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/retry',
     async (request, reply) => {
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = await conversationService.retry(request.params.id);
         return reply.status(202).send(result);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/close',
     async (request, reply) => {
       const data = parseOrFail(reply, CloseConversationRequest, request.body ?? {});
       if (!data) return;
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = conversationService.close(request.params.id, data.foldSummaryIntoParent);
         return reply.send(result);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/review',
     async (request, reply) => {
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = conversationService.review(request.params.id);
         return reply.status(201).send(result);
       });
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/primary',
     async (request, reply) => {
       const data = parseOrFail(reply, DesignatePrimaryRequest, request.body ?? {});
       if (!data) return;
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = await primaryService.designate(request.params.id, data.whenBusy);
         return reply.send(result);
       });
     },
   );
 
-  app.delete<{ Params: { id: string } }>(
+  app.delete<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/primary',
     async (request, reply) => {
       return withConversationErrors(reply, async () => {
+        requireConversationInDocument(storage, request.params.documentId, request.params.id);
         const result = await primaryService.clear(request.params.id);
         return reply.send(result);
       });
