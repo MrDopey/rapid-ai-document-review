@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import type { PendingProposalReconciliationEntry } from '@rapid-ai-document-review/shared/contracts/http';
 import { useDocumentStore } from '../../stores/document.js';
 import { useConversationsStore } from '../../stores/conversations.js';
@@ -41,6 +41,19 @@ onMounted(() => {
     void store.loadRevisions();
   }
 });
+
+// The panel is a reserved grid column, not remounted on every document switch (App.vue: `v-if
+//="historyOpen"` toggles only on open/close) — without this, switching documents while the drawer
+// stays open would leave it showing whatever revisions/cursor `switchTo()` just reset to empty,
+// with no `onMounted` re-fire to load the new document's own history.
+watch(
+  () => store.activeDocumentId,
+  () => {
+    restoreReconciliation.value = null;
+    diffingRevision.value = null;
+    void store.loadRevisions();
+  },
+);
 
 function openRestoreDialog(revision: number): void {
   restoreTarget.value = revision;

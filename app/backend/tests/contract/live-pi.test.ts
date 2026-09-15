@@ -196,7 +196,7 @@ describe.skipIf(!LIVE)(
   () => {
     it('noTools: "builtin" leaves session.getActiveToolNames() with the custom tools but no Pi built-in tool', async () => {
       const h = buildLiveHarness();
-      const doc = h.storage.getDocument()!;
+      const doc = h.storage.listDocuments()[0]!;
       const conversation = createConversationRow(h.storage, doc.id);
       const session = await createRealSession(h, conversation);
       try {
@@ -221,7 +221,7 @@ describe.skipIf(!LIVE)(
 
     it('a real turn emits every Pi event type the event-bridge mapping table depends on', async () => {
       const h = buildLiveHarness();
-      const doc = h.storage.getDocument()!;
+      const doc = h.storage.listDocuments()[0]!;
       const conversation = createConversationRow(h.storage, doc.id);
       const session = await createRealSession(h, conversation);
       const observed = new Set<string>();
@@ -290,7 +290,7 @@ describe.skipIf(!LIVE)(
     // override — not whatever SDK auto-resolution would otherwise have picked.
     'RADR_BE_PI_AGENT_MODEL override: the resulting session reports the overridden model', async () => {
       const h = buildLiveHarness();
-      const doc = h.storage.getDocument()!;
+      const doc = h.storage.listDocuments()[0]!;
       const conversation = createConversationRow(h.storage, doc.id);
 
       // Resolve an arbitrary real, available model from this environment's own ModelRuntime

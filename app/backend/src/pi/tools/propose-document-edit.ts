@@ -70,7 +70,7 @@ export function createProposeDocumentEditTool(deps: ProposeDocumentEditToolDeps)
     execute: async (toolCallId, rawParams) => {
       const params = proposeDocumentEditParams.parse(rawParams);
       const conversation = deps.storage.getConversation(deps.conversationId);
-      const document = deps.storage.getDocument();
+      const document = conversation ? deps.storage.getDocument(conversation.documentId) : null;
       if (!conversation || !document) {
         return textResult('No document is available to propose an edit against.');
       }

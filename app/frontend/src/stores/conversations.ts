@@ -10,6 +10,7 @@ import type {
 import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
+import { useDocumentStore } from './document.js';
 import {
   announceAgentError,
   announceAgentStarted,
@@ -27,6 +28,14 @@ import { ensureArray } from './util.js';
  *  mount in the same tick; sharing one in-flight promise per id avoids that without needing either
  *  caller to coordinate with the other. */
 const inFlightDetailLoads = new Map<string, Promise<void>>();
+
+/** Every conversation route is now nested under its document (`/api/documents/:documentId/...`) —
+ *  this store's own actions stay scoped by conversationId only (their existing public shape,
+ *  unchanged), resolving the currently active document from `useDocumentStore()` internally
+ *  rather than requiring every caller across the app to thread a `documentId` through as well. */
+function activeDocumentId(): string {
+  return useDocumentStore().activeDocumentId!;
+}
 
 export interface ConversationMessageState {
   id: string;
@@ -115,7 +124,7 @@ export const useConversationsStore = defineStore('conversations', {
 
   actions: {
     async load(): Promise<void> {
-      const page = await httpClient.listConversations();
+      const page = await httpClient.listConversations(activeDocumentId());
       this.conversations = page.conversations;
       this.loaded = true;
     },
@@ -129,7 +138,7 @@ export const useConversationsStore = defineStore('conversations', {
       const existing = inFlightDetailLoads.get(conversationId);
       if (existing) return existing;
       const promise = (async () => {
-        const detail = await httpClient.getConversation(conversationId);
+        const detail = await httpClient.getConversation(activeDocumentId(), conversationId);
         this.upsertConversation(detail.conversation);
         this.messagesByConversation[conversationId] = detail.messages.map((m) => ({
           id: m.id,
@@ -164,29 +173,29 @@ export const useConversationsStore = defineStore('conversations', {
     async refreshConversationMeta(conversationId: string): Promise<void> {
       const generation = (this.refreshGeneration[conversationId] ?? 0) + 1;
       this.refreshGeneration[conversationId] = generation;
-      const detail = await httpClient.getConversation(conversationId);
+      const detail = await httpClient.getConversation(activeDocumentId(), conversationId);
       if (this.refreshGeneration[conversationId] !== generation) return;
       this.upsertConversation(detail.conversation);
     },
 
     async send(conversationId: string, message: string): Promise<void> {
-      await httpClient.sendMessage(conversationId, message);
+      await httpClient.sendMessage(activeDocumentId(), conversationId, message);
     },
 
     /** FR-018: refresh this conversation's context to the current document revision, then send —
      *  `contextRevision`/`isStale` update here from the `conversation_context_refreshed` WS event
      *  (handleServerFrame below), same as every other server-computed field in this store. */
     async refreshAndSend(conversationId: string, message: string): Promise<void> {
-      await httpClient.refreshAndSend(conversationId, message);
+      await httpClient.refreshAndSend(activeDocumentId(), conversationId, message);
     },
 
     async retry(conversationId: string): Promise<void> {
-      await httpClient.retryConversation(conversationId);
+      await httpClient.retryConversation(activeDocumentId(), conversationId);
     },
 
     /** FR-011: branch a new conversation from a document selection, or plainly from a parent. */
     async branch(request: CreateConversationRequest): Promise<ConversationDto> {
-      const conversation = await httpClient.branchConversation(request);
+      const conversation = await httpClient.branchConversation(activeDocumentId(), request);
       this.upsertConversation(conversation);
       return conversation;
     },
@@ -199,25 +208,29 @@ export const useConversationsStore = defineStore('conversations', {
       conversationId: string,
       whenBusy?: PrimaryWhenBusy,
     ): Promise<DesignatePrimaryResponse> {
-      return httpClient.designatePrimary(conversationId, whenBusy);
+      return httpClient.designatePrimary(activeDocumentId(), conversationId, whenBusy);
     },
 
     /** FR-027a: clears the Primary designation without nominating a replacement. */
     async clearPrimary(conversationId: string): Promise<void> {
-      await httpClient.clearPrimary(conversationId);
+      await httpClient.clearPrimary(activeDocumentId(), conversationId);
     },
 
     /** Renames a conversation's title. The updated DTO comes straight back from the PATCH
      *  response (same convention as `branch()`/`review()` above) — `handleServerFrame`'s
      *  `conversation_renamed` case below only matters for a second, already-connected client. */
     async rename(conversationId: string, name: string): Promise<ConversationDto> {
-      const conversation = await httpClient.renameConversation(conversationId, name);
+      const conversation = await httpClient.renameConversation(
+        activeDocumentId(),
+        conversationId,
+        name,
+      );
       this.upsertConversation(conversation);
       return conversation;
     },
 
     async close(conversationId: string, foldSummaryIntoParent = false): Promise<void> {
-      await httpClient.closeConversation(conversationId, foldSummaryIntoParent);
+      await httpClient.closeConversation(activeDocumentId(), conversationId, foldSummaryIntoParent);
       const conv = this.findConversation(conversationId);
       if (conv) {
         conv.status = 'closed';
@@ -229,7 +242,7 @@ export const useConversationsStore = defineStore('conversations', {
     /** FR-036: request an independent review of a closed conversation and its branches. Returns
      *  the newly created `kind: 'review'` conversation so the caller can navigate to it. */
     async review(conversationId: string): Promise<ReviewConversationResponse> {
-      const result = await httpClient.reviewConversation(conversationId);
+      const result = await httpClient.reviewConversation(activeDocumentId(), conversationId);
       this.upsertConversation(result.conversation);
       return result;
     },
@@ -294,7 +307,7 @@ export const useConversationsStore = defineStore('conversations', {
       if ((this.drafts[conversationId] ?? '').trim().length > 0) return false;
 
       try {
-        await httpClient.discardConversation(conversationId);
+        await httpClient.discardConversation(activeDocumentId(), conversationId);
       } catch {
         return false;
       }

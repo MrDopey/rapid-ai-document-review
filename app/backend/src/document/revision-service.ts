@@ -103,10 +103,10 @@ export class RevisionService {
   }
 
   createRevision(documentId: string, options: CreateRevisionOptions): RevisionRow {
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(documentId);
     if (!document) throw new Error('Document not found');
 
-    const store = this.automerge.get();
+    const store = this.automerge.get(documentId);
     const revisionNumber = document.currentRevision + 1;
     const heads = JSON.stringify(store.getHeads());
     const createdAt = new Date().toISOString();
@@ -169,7 +169,7 @@ export class RevisionService {
       if (!target) {
         throw new Error(`Revision not found: ${revisionNumber}`);
       }
-      const store = this.automerge.get();
+      const store = this.automerge.get(documentId);
       const heads = JSON.parse(target.heads) as string[];
       const restoredContent = store.view(heads);
 
@@ -219,7 +219,7 @@ export class RevisionService {
   }
 
   export(documentId: string, revisionNumber?: number): string | null {
-    const store = this.automerge.get();
+    const store = this.automerge.get(documentId);
     if (revisionNumber === undefined) {
       return store.getContent();
     }

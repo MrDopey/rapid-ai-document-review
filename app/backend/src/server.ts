@@ -49,8 +49,10 @@ export function buildApp() {
   const eventService = new EventService(storage);
 
   const getSnapshot = (documentId: string): DocumentSnapshot => {
-    const doc = storage.getDocument();
-    const content = automergeHolder.isSet() ? automergeHolder.get().getContent() : '';
+    const doc = storage.getDocument(documentId);
+    const content = automergeHolder.isSet(documentId)
+      ? automergeHolder.get(documentId).getContent()
+      : '';
     const conversations = toConversationDtos(
       storage,
       storage.listAllConversations(documentId),
@@ -99,7 +101,7 @@ export function buildApp() {
 
   // Restart recovery (FR-039/FR-039a): load existing Automerge state now; interrupted "working"
   // conversations are recovered further below, once ConversationService exists.
-  documentService.loadIfExists();
+  documentService.loadAllExisting();
 
   const runBuffer = new RunBuffer();
   const piService = new PiService(storage, automergeHolder, primaryMutex);
@@ -174,15 +176,14 @@ export function buildApp() {
 
   // Defensive idempotency: Main is normally created as part of document creation
   // (DocumentService.create); this only fills a gap if that invariant were ever violated.
-  const existingDocument = storage.getDocument();
-  if (existingDocument) {
-    conversationService.ensureMain(existingDocument.id);
+  for (const doc of storage.listDocuments()) {
+    conversationService.ensureMain(doc.id);
 
     // Restart recovery (FR-039a): any conversation still `working` when the process last stopped
     // was interrupted mid-run, not gracefully idled — it is never resumed, only marked errored so
-    // the user can retry it (FR-038). Run after `documentService.loadIfExists()` above, which is
+    // the user can retry it (FR-038). Run after `documentService.loadAllExisting()` above, which is
     // where the document/currentRevision-vs-latest-revision-row consistency check lives.
-    conversationService.recoverInterruptedRuns(existingDocument.id);
+    conversationService.recoverInterruptedRuns(doc.id);
   }
 
   const app = Fastify({ loggerInstance: logger });

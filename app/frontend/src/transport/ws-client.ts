@@ -30,10 +30,12 @@ export class WsClient {
   private readonly handlers = new Set<FrameHandler>();
   private closedByCaller = false;
   private readonly url: string;
+  private readonly getDocumentId: () => string;
   private readonly getSinceSequence: () => number | null;
 
-  constructor(url: string, getSinceSequence: () => number | null) {
+  constructor(url: string, getDocumentId: () => string, getSinceSequence: () => number | null) {
     this.url = url;
+    this.getDocumentId = getDocumentId;
     this.getSinceSequence = getSinceSequence;
   }
 
@@ -59,12 +61,26 @@ export class WsClient {
     }
   }
 
+  /** Re-subscribes the existing connection to whatever `getDocumentId()` now returns, instead of
+   *  opening a second socket (contracts/http-and-ws.md) — used when the active document changes.
+   *  A no-op while disconnected: the next `open` handler's own subscribe already picks up the
+   *  latest `getDocumentId()`/`getSinceSequence()`. */
+  resubscribe(): void {
+    this.send({ type: 'subscribe', documentId: this.getDocumentId(), sinceSequence: null });
+  }
+
   private openSocket(): void {
     const socket = new WebSocket(this.url);
     this.socket = socket;
 
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: 'subscribe', sinceSequence: this.getSinceSequence() }));
+      socket.send(
+        JSON.stringify({
+          type: 'subscribe',
+          documentId: this.getDocumentId(),
+          sinceSequence: this.getSinceSequence(),
+        }),
+      );
       this.startHeartbeat();
     });
 

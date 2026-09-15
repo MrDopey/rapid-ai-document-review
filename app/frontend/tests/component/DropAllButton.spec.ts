@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import DropAllButton from '../../src/components/edits/DropAllButton.vue';
 import { httpClient } from '../../src/transport/http-client.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 
 // Bug fix (61d7e3d): dropping every remaining proposed edit in one click is destructive with no
 // undo, so it's gated behind a window.confirm before it fires.
@@ -20,6 +21,7 @@ describe('DropAllButton — confirmation gate', () => {
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    useDocumentStore().activeDocumentId = 'doc-1';
     vi.mocked(httpClient.listEdits).mockReset();
     vi.mocked(httpClient.dropRemaining).mockReset();
     vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
@@ -44,7 +46,7 @@ describe('DropAllButton — confirmation gate', () => {
     expect(confirmSpy).toHaveBeenCalledWith(
       'Drop all remaining proposed edits in this conversation? This cannot be undone.',
     );
-    expect(httpClient.dropRemaining).toHaveBeenCalledWith('conv-1');
+    expect(httpClient.dropRemaining).toHaveBeenCalledWith('doc-1', 'conv-1');
   });
 
   it('cancelling the dialog is a no-op', async () => {

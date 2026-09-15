@@ -1,15 +1,15 @@
 <!--
 Sync Impact Report
-Version change: 2.1.0 → 2.2.0
-Rationale: MINOR — narrowed the "additional agent tools beyond document read/edit" v1 non-goal
-(Technology & Platform Constraints) to explicitly carve out two new read-only agent tools,
-`web_search` and `web_fetch`, being introduced by specs/008-searxng-web-search. This loosens an
-existing scope boundary rather than removing or redefining a Core Principle, and does not make any
-previously-compliant plan non-compliant, so it is versioned as MINOR (materially expanded
-guidance) rather than MAJOR.
+Version change: 2.2.0 → 2.3.0
+Rationale: MINOR — removed "multiple documents" from the v1 non-goals list (Technology & Platform
+Constraints) because specs/010-multi-document-support now implements it. The schema/service-
+boundary guarantee that previously kept this open ("MUST NOT preclude multiple documents") is now
+exercised rather than merely reserved. This loosens an existing scope boundary rather than removing
+or redefining a Core Principle, and does not make any previously-compliant plan non-compliant, so it
+is versioned as MINOR (materially expanded guidance) rather than MAJOR.
 Modified principles: n/a (no existing Core Principle redefined)
 Modified sections: Technology & Platform Constraints → v1 non-goals bullet (narrowed, rationale
-added)
+added); Deployment/Users bullet (updated to reflect multi-document support landing)
 Added sections: none
 Removed sections: none
 Deferred items: none
@@ -107,19 +107,21 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
 * Document CRDT: Automerge is the only authoritative document CRDT. Agent/session infrastructure:
   Pi, accessed only via the Pi SDK (Principle II).
 * Deployment: self-hosted, Dockerized. Users: v1 supports a single local user/account; the schema
-  and service boundaries MUST NOT preclude multiple documents or multiple accounts in a later
-  version, even though v1 implements only one document.
-* Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): multiple
-  documents, storage backends beyond SQLite, additional agent tools beyond document read/edit/
-  web-search/web-fetch, additional Markdown rendering extensions beyond Mermaid/SVG, real Git
-  history/repository integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi
-  export viewing, and importable contextual reference material.
+  and service boundaries MUST NOT preclude multiple accounts in a later version. Multiple documents
+  per the single local user/account are supported per specs/010-multi-document-support.
+* Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): storage
+  backends beyond SQLite, additional agent tools beyond document read/edit/web-search/web-fetch,
+  additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
+  integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi export viewing,
+  importable contextual reference material, and multi-user/multi-account support.
   **Rationale**: `web_search` and `web_fetch` are carved out of the "no additional agent tools"
   non-goal because both are read-only, information-gathering tools registered as ordinary
   `customTools` — the same mechanism as `read_document` — so they neither require a Pi extension
   (Principle VII stays satisfied) nor touch the edit-proposal pipeline (Principle III stays
   satisfied: they cannot modify the document). Any other new agent tool remains out of scope until
-  it earns its own carve-out the same way.
+  it earns its own carve-out the same way. "Multiple documents" is removed from this list entirely,
+  rather than merely narrowed, because specs/010-multi-document-support implements it for the
+  single local user; multi-user/multi-account support remains a distinct, still-excluded non-goal.
 * Environment variable naming: every application-defined environment variable (backend or frontend)
   MUST be prefixed with `RADR_` (the project's acronym, AI Document Review). Exempt: variables that
   are not application-defined, namely third-party SDK/provider credential variables (e.g.
@@ -207,4 +209,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.2.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-13
+**Version**: 2.3.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-15

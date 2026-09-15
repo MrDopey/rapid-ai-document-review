@@ -32,6 +32,7 @@ export interface DocumentRow {
   piSessionDir: string;
   createdAt: string;
   updatedAt: string;
+  lastActiveAt: string;
 }
 
 export interface RevisionRow {
@@ -148,12 +149,16 @@ export interface ConversationListOptions {
 
 export interface StorageAdapter {
   // document
-  getDocument(): DocumentRow | null;
+  getDocument(documentId: string): DocumentRow | null;
+  listDocuments(): DocumentRow[];
   createDocument(
     row: Omit<DocumentRow, 'currentRevision'> & { currentRevision?: number },
   ): DocumentRow;
   updateDocumentRevision(id: string, currentRevision: number, updatedAt: string): void;
   updateDocumentTitle(id: string, title: string, updatedAt: string): void;
+  renameDocument(documentId: string, title: string): DocumentRow;
+  deleteDocument(documentId: string): void;
+  touchLastActive(documentId: string): void;
 
   // revision
   createRevision(row: Omit<RevisionRow, 'id'>): RevisionRow;

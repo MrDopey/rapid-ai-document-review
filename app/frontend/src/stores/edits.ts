@@ -4,7 +4,14 @@ import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 import { announceStagedEditCreated } from '../a11y/live-regions.js';
 import { useConversationsStore } from './conversations.js';
+import { useDocumentStore } from './document.js';
 import { ensureArray } from './util.js';
+
+/** See `stores/conversations.ts`'s identical helper's doc comment — every edit route is now
+ *  nested under its document too. */
+function activeDocumentId(): string {
+  return useDocumentStore().activeDocumentId!;
+}
 
 export interface EditsState {
   /** Per-conversation staged edits, newest first (matches GET /conversations/:id/edits). */
@@ -31,7 +38,7 @@ export const useEditsStore = defineStore('edits', {
 
   actions: {
     async load(conversationId: string): Promise<void> {
-      const response = await httpClient.listEdits(conversationId);
+      const response = await httpClient.listEdits(activeDocumentId(), conversationId);
       this.byConversation[conversationId] = response.stagedEdits;
     },
 
@@ -40,22 +47,22 @@ export const useEditsStore = defineStore('edits', {
     },
 
     async apply(editId: string, conversationId: string): Promise<void> {
-      await httpClient.applyEdit(editId);
+      await httpClient.applyEdit(activeDocumentId(), editId);
       await this.load(conversationId);
     },
 
     async drop(editId: string, conversationId: string): Promise<void> {
-      await httpClient.dropEdit(editId);
+      await httpClient.dropEdit(activeDocumentId(), editId);
       await this.load(conversationId);
     },
 
     async acceptRemaining(conversationId: string): Promise<void> {
-      await httpClient.acceptRemaining(conversationId);
+      await httpClient.acceptRemaining(activeDocumentId(), conversationId);
       await this.load(conversationId);
     },
 
     async dropRemaining(conversationId: string): Promise<void> {
-      await httpClient.dropRemaining(conversationId);
+      await httpClient.dropRemaining(activeDocumentId(), conversationId);
       await this.load(conversationId);
     },
 

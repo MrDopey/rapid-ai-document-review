@@ -90,7 +90,7 @@ describe('main-archive (specs/006-archivable-main-conversation, US1)', () => {
     const databasePath = join(tmpDir, 'document-review.sqlite');
     const { app, storage } = await bootApp(databasePath);
 
-    const createRes = await call(app, 'POST', '/api/document', {
+    const createRes = await call(app, 'POST', '/api/documents', {
       title: 'Main Archive Fixture',
       content: DOC_CONTENT,
     });
@@ -108,7 +108,12 @@ describe('main-archive (specs/006-archivable-main-conversation, US1)', () => {
     expect(beforeCurrentMains[0]!.id).toBe(oldMainId);
 
     // ---- Archive: closing the current Main is the archive-and-replace operation (US1). ----
-    const closeRes = await call(app, 'POST', `/api/conversations/${oldMainId}/close`, {});
+    const closeRes = await call(
+      app,
+      'POST',
+      `/api/documents/${documentId}/conversations/${oldMainId}/close`,
+      {},
+    );
     expect(closeRes.status).toBe(200);
     expect(CloseConversationResponse.parse(closeRes.json).status).toBe('closed');
 
@@ -142,7 +147,11 @@ describe('main-archive (specs/006-archivable-main-conversation, US1)', () => {
           .some((e) => e.conversationId === newMain.id && e.eventType === 'message_completed'),
       { message: "expected the new Main's seed message to be recorded" },
     );
-    const detailRes = await call(app, 'GET', `/api/conversations/${newMain.id}`);
+    const detailRes = await call(
+      app,
+      'GET',
+      `/api/documents/${documentId}/conversations/${newMain.id}`,
+    );
     expect(detailRes.status).toBe(200);
     const detail = GetConversationResponse.parse(detailRes.json);
     expect(detail.messages.length).toBeGreaterThan(0);
@@ -187,7 +196,7 @@ describe('main-archive — revision attribution survives archiving (specs/006-ar
     const databasePath = join(tmpDir, 'document-review.sqlite');
     const { app, storage } = await bootApp(databasePath);
 
-    const createRes = await call(app, 'POST', '/api/document', {
+    const createRes = await call(app, 'POST', '/api/documents', {
       title: 'Main Archive Fixture',
       content: DOC_CONTENT,
     });
@@ -199,21 +208,28 @@ describe('main-archive — revision attribution survives archiving (specs/006-ar
     // ---- Main is Primary by default, so this proposal auto-applies immediately rather than
     // staying pending, producing a revision attributed to Main (conversationId = oldMainId). ----
     const beforeRevision = created.document.currentRevision;
-    await call(app, 'POST', `/api/conversations/${oldMainId}/send`, {
-      message: proposeDirective('auto-apply for attribution test', [
-        {
-          old_string: 'The opening paragraph anchors everything else.',
-          new_string: 'Edited paragraph.',
-        },
-      ]),
-    });
+    await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${oldMainId}/send`,
+      {
+        message: proposeDirective('auto-apply for attribution test', [
+          {
+            old_string: 'The opening paragraph anchors everything else.',
+            new_string: 'Edited paragraph.',
+          },
+        ]),
+      },
+    );
     const afterAutoApplyRevision = beforeRevision + 1;
-    await waitFor(() => storage.getDocument()?.currentRevision === afterAutoApplyRevision);
+    await waitFor(
+      () => storage.getDocument(created.document.id)?.currentRevision === afterAutoApplyRevision,
+    );
     await waitFor(() => storage.getConversation(oldMainId)?.status === 'idle');
 
     // ---- Before archiving: the auto-applied edit's revision is attributed to (still-current)
     // Main, by id and by resolved name. ----
-    const beforeRes = await call(app, 'GET', '/api/revisions');
+    const beforeRes = await call(app, 'GET', `/api/documents/${created.document.id}/revisions`);
     expect(beforeRes.status).toBe(200);
     const beforeRevisions = ListRevisionsResponse.parse(beforeRes.json).revisions;
     const autoAppliedBefore = beforeRevisions.find((r) => r.revision === afterAutoApplyRevision)!;
@@ -223,7 +239,12 @@ describe('main-archive — revision attribution survives archiving (specs/006-ar
     expect(autoAppliedBefore.conversationName).toBe('Main');
 
     // ---- Archive Main (close it) — this replaces it with a fresh current Main in the same slot. ----
-    const closeRes = await call(app, 'POST', `/api/conversations/${oldMainId}/close`, {});
+    const closeRes = await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${oldMainId}/close`,
+      {},
+    );
     expect(closeRes.status).toBe(200);
     expect(CloseConversationResponse.parse(closeRes.json).status).toBe('closed');
     expect(storage.getConversation(oldMainId)!.status).toBe('closed');
@@ -233,7 +254,7 @@ describe('main-archive — revision attribution survives archiving (specs/006-ar
     // conversationId, and the name still resolves (both old and new Main are named "Main", so this
     // also proves the lookup is genuinely keyed by conversationId, not by an "is this the current
     // Main" special case). ----
-    const afterRes = await call(app, 'GET', '/api/revisions');
+    const afterRes = await call(app, 'GET', `/api/documents/${created.document.id}/revisions`);
     expect(afterRes.status).toBe(200);
     const afterRevisions = ListRevisionsResponse.parse(afterRes.json).revisions;
     const autoAppliedAfter = afterRevisions.find((r) => r.revision === afterAutoApplyRevision)!;
@@ -263,7 +284,7 @@ describe('main-archive (specs/006-archivable-main-conversation, US2 — branch s
     const databasePath = join(tmpDir, 'document-review.sqlite');
     const { app, storage } = await bootApp(databasePath);
 
-    const createRes = await call(app, 'POST', '/api/document', {
+    const createRes = await call(app, 'POST', '/api/documents', {
       title: 'Branch Survival Fixture',
       content: DOC_CONTENT,
     });
@@ -276,9 +297,14 @@ describe('main-archive (specs/006-archivable-main-conversation, US2 — branch s
     // seed message is sent on this path, so the branch is already `idle` right after creation,
     // same as the plain-branch contract-test convention (`branch()`/`branchAndSettle` in
     // http.test.ts) minus the wait these don't need here. ----
-    const branchRes = await call(app, 'POST', '/api/conversations', {
-      parentConversationId: mainId,
-    });
+    const branchRes = await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations`,
+      {
+        parentConversationId: mainId,
+      },
+    );
     expect(branchRes.status).toBe(201);
     const branch = ConversationDto.parse(branchRes.json);
     expect(branch.parentId).toBe(mainId);
@@ -287,7 +313,12 @@ describe('main-archive (specs/006-archivable-main-conversation, US2 — branch s
     const statusBeforeArchive = storage.getConversation(branch.id)!.status;
 
     // ---- Archive Main (US1's close-and-replace). ----
-    const closeRes = await call(app, 'POST', `/api/conversations/${mainId}/close`, {});
+    const closeRes = await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${mainId}/close`,
+      {},
+    );
     expect(closeRes.status).toBe(200);
     expect(CloseConversationResponse.parse(closeRes.json).status).toBe('closed');
     const archivedMain = storage.getConversation(mainId)!;
@@ -302,9 +333,14 @@ describe('main-archive (specs/006-archivable-main-conversation, US2 — branch s
 
     // ---- The branch still accepts a new message (doesn't throw/reject due to its parent being
     // archived — same 202/accepted shape as the plain-Main case in http.test.ts). ----
-    const sendRes = await call(app, 'POST', `/api/conversations/${branch.id}/send`, {
-      message: 'Still alive after Main archived?',
-    });
+    const sendRes = await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${branch.id}/send`,
+      {
+        message: 'Still alive after Main archived?',
+      },
+    );
     expect(sendRes.status).toBe(202);
     const sendParsed = SendMessageResponse.parse(sendRes.json);
     expect(sendParsed.accepted).toBe(true);
@@ -313,9 +349,14 @@ describe('main-archive (specs/006-archivable-main-conversation, US2 — branch s
     // ---- The branch can still be branched from again, subject to `maxConversationDepth` (default
     // 3 — data-model.md/settings default in `app/shared/src/domain/index.ts`). One more level
     // (branchDepth 1 -> 2) stays comfortably under that limit. ----
-    const subBranchRes = await call(app, 'POST', '/api/conversations', {
-      parentConversationId: branch.id,
-    });
+    const subBranchRes = await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations`,
+      {
+        parentConversationId: branch.id,
+      },
+    );
     expect(subBranchRes.status).toBe(201);
     const subBranch = ConversationDto.parse(subBranchRes.json);
     expect(subBranch.parentId).toBe(branch.id);

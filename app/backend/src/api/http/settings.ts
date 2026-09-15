@@ -43,8 +43,9 @@ export function registerSettingsRoutes(
     const updated = storage.updateSettings(data, new Date().toISOString());
     const dto = toDto(updated);
 
-    const doc = storage.getDocument();
-    if (doc) {
+    // `user_settings` is global (research.md R5), but each document has its own event stream, so
+    // every open document's subscribers need this event, not just one.
+    for (const doc of storage.listDocuments()) {
       publisher.publish(doc.id, null, 'settings_changed', dto);
     }
 

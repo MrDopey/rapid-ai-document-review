@@ -10,7 +10,8 @@ const STATEMENTS: string[] = [
     current_revision  INTEGER NOT NULL DEFAULT 0,
     pi_session_dir    TEXT NOT NULL,
     created_at        TEXT NOT NULL,
-    updated_at        TEXT NOT NULL
+    updated_at        TEXT NOT NULL,
+    last_active_at    TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE TABLE IF NOT EXISTS revision (
     id               INTEGER PRIMARY KEY,
@@ -192,6 +193,13 @@ const MIGRATIONS: Migration[] = [
       );
       db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_current_main
         ON conversation (document_id) WHERE is_current_main = 1`);
+    },
+  },
+  {
+    version: 3,
+    apply: (db) => {
+      addColumnIfMissing(db, 'document', 'last_active_at', `TEXT NOT NULL DEFAULT ''`);
+      db.exec(`UPDATE document SET last_active_at = updated_at WHERE last_active_at = ''`);
     },
   },
 ];

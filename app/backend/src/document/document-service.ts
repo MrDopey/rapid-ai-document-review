@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import type { DocumentDto, ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  DocumentDto,
+  ConversationDto,
+  DocumentSummaryDto,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import type { ApplicationEvent } from '@rapid-ai-document-review/shared/contracts/events';
 import { config } from '../config.ts';
 import { logger } from '../logging.ts';
@@ -22,8 +26,8 @@ export interface DocumentChangeSpec {
   insert: string;
 }
 
-export class DocumentAlreadyExistsError extends Error {}
 export class DocumentNotFoundError extends Error {}
+export class LastDocumentError extends Error {}
 
 /**
  * Thrown by `applyChanges` when the client's `baseRevision` no longer matches
@@ -36,7 +40,7 @@ export class DocumentNotFoundError extends Error {}
  * current document and let the user redo their edit.
  *
  * No route currently has a dedicated `instanceof` catch clause for this error (unlike
- * `DocumentAlreadyExistsError`/`DocumentNotFoundError` in `api/http/document.ts`), so it propagates
+ * `DocumentNotFoundError`/`LastDocumentError` in `api/http/document.ts`), so it propagates
  * to Fastify's default error handler. That handler reads a thrown error's own `status`/`statusCode`
  * property (see `fastify/lib/error-handler.js`'s `setErrorHeaders`) to pick the response status even
  * with no custom handler registered, so the `statusCode` below is enough on its own to surface this
@@ -140,37 +144,69 @@ export class DocumentService {
   }
 
   /**
-   * Loads Automerge state from storage at startup, if a document already exists (FR-039).
+   * Loads Automerge state from storage at startup, for every existing document (FR-039).
    * `documents.current_revision` is expected to always match its latest `revision` row — kept in
    * sync by `RevisionService.createRevision`'s own write to that column — but a mismatch here
    * would mean a prior crash left the two out of step. This is verified defensively (log-warn, not
    * a thrown error): the application still starts and serves whatever state is actually on disk
    * (Principle I) rather than refusing to boot over a consistency check.
    */
-  loadIfExists(): void {
-    const doc = this.storage.getDocument();
-    if (!doc) return;
+  loadAllExisting(): void {
+    for (const doc of this.storage.listDocuments()) {
+      this.automerge.set(doc.id, AutomergeStore.load(this.storage, doc.id));
 
-    this.automerge.set(AutomergeStore.load(this.storage, doc.id));
-
-    const latestRevision = this.storage.getLatestRevision(doc.id);
-    const latestRevisionNumber = latestRevision?.revision ?? 0;
-    if (latestRevisionNumber !== doc.currentRevision) {
-      logger.warn(
-        {
-          documentId: doc.id,
-          currentRevision: doc.currentRevision,
-          latestRevisionRow: latestRevisionNumber,
-        },
-        'document.currentRevision does not match its latest revision row at startup',
-      );
+      const latestRevision = this.storage.getLatestRevision(doc.id);
+      const latestRevisionNumber = latestRevision?.revision ?? 0;
+      if (latestRevisionNumber !== doc.currentRevision) {
+        logger.warn(
+          {
+            documentId: doc.id,
+            currentRevision: doc.currentRevision,
+            latestRevisionRow: latestRevisionNumber,
+          },
+          'document.currentRevision does not match its latest revision row at startup',
+        );
+      }
     }
   }
 
-  create(content: string, title?: string): CreateDocumentResult {
-    if (this.storage.getDocument()) {
-      throw new DocumentAlreadyExistsError('Document already exists');
+  /** Ordered most-recently-active first (`StorageAdapter.listDocuments`); the head of that order
+   *  is, by construction, the document `setActive` was most recently called for — i.e. the one
+   *  currently open in the UI — so `isActive` needs no separate session-tracked state to derive. */
+  listDocuments(): DocumentSummaryDto[] {
+    const docs = this.storage.listDocuments();
+    return docs.map((doc, index) => ({
+      id: doc.id,
+      title: doc.title,
+      isActive: index === 0,
+      lastActiveAt: doc.lastActiveAt,
+    }));
+  }
+
+  setActive(documentId: string): void {
+    this.storage.touchLastActive(documentId);
+  }
+
+  renameDocument(documentId: string, title: string): DocumentDto {
+    if (!this.storage.getDocument(documentId)) {
+      throw new DocumentNotFoundError('Document not found');
     }
+    const row = this.storage.renameDocument(documentId, title);
+    return toDocumentDto(row);
+  }
+
+  deleteDocument(documentId: string): void {
+    if (!this.storage.getDocument(documentId)) {
+      throw new DocumentNotFoundError('Document not found');
+    }
+    if (this.storage.listDocuments().length === 1) {
+      throw new LastDocumentError('Cannot delete the last remaining document');
+    }
+    this.storage.deleteDocument(documentId);
+    this.automerge.delete(documentId);
+  }
+
+  create(content: string, title?: string): CreateDocumentResult {
     const documentId = newId('doc');
     const now = new Date().toISOString();
     const resolvedTitle = deriveTitle(content, title);
@@ -182,10 +218,11 @@ export class DocumentService {
       piSessionDir,
       createdAt: now,
       updatedAt: now,
+      lastActiveAt: now,
     });
 
     const store = AutomergeStore.create(this.storage, documentId, content);
-    this.automerge.set(store);
+    this.automerge.set(documentId, store);
 
     this.publish(documentId, {
       type: 'document_created',
@@ -245,21 +282,21 @@ export class DocumentService {
     };
   }
 
-  get(): GetDocumentResult | null {
-    const doc = this.storage.getDocument();
+  get(documentId: string): GetDocumentResult | null {
+    const doc = this.storage.getDocument(documentId);
     if (!doc) return null;
-    if (!this.automerge.isSet()) {
-      this.automerge.set(AutomergeStore.load(this.storage, doc.id));
+    if (!this.automerge.isSet(documentId)) {
+      this.automerge.set(documentId, AutomergeStore.load(this.storage, doc.id));
     }
     return {
       document: toDocumentDto(doc),
-      content: this.automerge.get().getContent(),
+      content: this.automerge.get(documentId).getContent(),
       eventSequence: this.eventService.getLatestSequence(doc.id),
     };
   }
 
-  renameTitle(title: string): void {
-    const doc = this.storage.getDocument();
+  renameTitle(documentId: string, title: string): void {
+    const doc = this.storage.getDocument(documentId);
     if (!doc) throw new DocumentNotFoundError('Document not found');
     this.storage.updateDocumentTitle(doc.id, title, new Date().toISOString());
   }
@@ -305,15 +342,16 @@ export class DocumentService {
    * `document_content_changed` event-log write commit atomically.
    */
   async applyChanges(
+    documentId: string,
     baseRevision: number | undefined,
     changes: DocumentChangeSpec[] | undefined,
     title: string | undefined,
   ): Promise<ApplyChangesResult> {
-    const doc = this.storage.getDocument();
+    const doc = this.storage.getDocument(documentId);
     if (!doc) throw new DocumentNotFoundError('Document not found');
 
     if (title !== undefined) {
-      this.renameTitle(title);
+      this.renameTitle(documentId, title);
     }
 
     if (changes && changes.length > 0) {
@@ -359,9 +397,9 @@ export class DocumentService {
 
       await this.primaryMutex.withLock(doc.id, () => {
         this.storage.transaction(() => {
-          this.automerge.get().splice(ordered);
+          this.automerge.get(documentId).splice(ordered);
 
-          const content = this.automerge.get().getContent();
+          const content = this.automerge.get(documentId).getContent();
           const contentHash = createHash('sha256').update(content).digest('hex');
 
           this.publish(doc.id, {

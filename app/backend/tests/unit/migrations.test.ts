@@ -75,9 +75,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
 
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
+    // Latest migration version as of specs/010-multi-document-support (adds last_active_at).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      2,
+      3,
     );
 
     // The pre-existing row survived the upgrade untouched, and the newly-added column on it reads
@@ -129,9 +129,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/006-archivable-main-conversation (adds is_current_main).
+    // Latest migration version as of specs/010-multi-document-support (adds last_active_at).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      2,
+      3,
     );
     db.close();
   });
@@ -155,7 +155,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      2,
+      3,
     );
     db.close();
   });
@@ -169,7 +169,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      2,
+      3,
     );
 
     const conversation = db
@@ -190,5 +190,50 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
       .prepare('SELECT * FROM conversation WHERE id = ?')
       .get('conv_old') as Record<string, unknown>;
     expect(conversation.is_current_main).toBe(0);
+  });
+});
+
+/**
+ * Migration version 3 (specs/010-multi-document-support): `document.last_active_at`, backfilled
+ * from `updated_at` for any pre-existing row so a single-document install gets one correctly-
+ * ordered dropdown entry (data-model.md's Document.lastActiveAt).
+ */
+describe('migration version 3: last_active_at (specs/010-multi-document-support)', () => {
+  it('a fresh install gets the column at the latest user_version', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db);
+    expect(tableColumns(db, 'document')).toContain('last_active_at');
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      3,
+    );
+    db.close();
+  });
+
+  it('an existing document row missing the column gets it backfilled from updated_at', () => {
+    const db = createPreMigration1Database();
+    db.exec(`CREATE TABLE document (
+      id                TEXT PRIMARY KEY,
+      title             TEXT NOT NULL,
+      current_revision  INTEGER NOT NULL DEFAULT 0,
+      pi_session_dir    TEXT NOT NULL,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    )`);
+    db.prepare(
+      `INSERT INTO document (id, title, pi_session_dir, created_at, updated_at)
+       VALUES ('doc_old', 'Old Doc', '/tmp/pi', '2025-01-01T00:00:00.000Z', '2025-06-01T00:00:00.000Z')`,
+    ).run();
+    expect(tableColumns(db, 'document')).not.toContain('last_active_at');
+
+    migrate(db);
+
+    expect(tableColumns(db, 'document')).toContain('last_active_at');
+    const document = db.prepare('SELECT * FROM document WHERE id = ?').get('doc_old') as Record<
+      string,
+      unknown
+    >;
+    expect(document.last_active_at).toBe('2025-06-01T00:00:00.000Z');
+
+    db.close();
   });
 });

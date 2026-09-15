@@ -58,6 +58,7 @@ async function call(
  *  `subscribed` reply — mirroring the handshake in websocket-events.md §Handshake and replay. */
 async function openSocket(
   baseUrl: string,
+  documentId: string,
   sinceSequence: number | null,
 ): Promise<{ ws: WebSocket; frames: Frame[] }> {
   const ws = new WebSocket(`${baseUrl}/events`);
@@ -69,7 +70,7 @@ async function openSocket(
     ws.addEventListener('open', () => resolve(), { once: true });
     ws.addEventListener('error', (e) => reject(e), { once: true });
   });
-  ws.send(JSON.stringify({ type: 'subscribe', sinceSequence }));
+  ws.send(JSON.stringify({ type: 'subscribe', documentId, sinceSequence }));
   await waitFor(() => frames.some((f) => f.type === 'subscribed'), {
     message: 'never received "subscribed"',
   });
@@ -98,7 +99,7 @@ const DOC_WITH_HEADING = [
 ].join('\n');
 
 async function createDoc(app: FastifyInstance, content: string = DOC_WITH_HEADING) {
-  const res = await call(app, 'POST', '/api/document', { content });
+  const res = await call(app, 'POST', '/api/documents', { content });
   expect(res.status).toBe(201);
   return res.json as { document: { id: string }; mainConversation: { id: string } };
 }
@@ -106,9 +107,12 @@ async function createDoc(app: FastifyInstance, content: string = DOC_WITH_HEADIN
 async function branchAndSettle(
   app: FastifyInstance,
   storage: StorageAdapter,
+  documentId: string,
   parentConversationId: string,
 ): Promise<string> {
-  const res = await call(app, 'POST', '/api/conversations', { parentConversationId });
+  const res = await call(app, 'POST', `/api/documents/${documentId}/conversations`, {
+    parentConversationId,
+  });
   expect(res.status).toBe(201);
   const id = (res.json as { id: string }).id;
   await waitFor(() => storage.getConversation(id)?.status === 'idle');
@@ -129,7 +133,7 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     // persisted event rows directly rather than via live socket delivery.
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
-    const { ws, frames } = await openSocket(baseUrl, null);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, null);
     try {
       const subscribed = SubscribedFrame.parse(frames.find((f) => f.type === 'subscribed'));
       expect(subscribed.replayCount).toBe(0); // sinceSequence: null requests no replay
@@ -181,28 +185,38 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
     const mainId = created.mainConversation.id;
-    const { ws, frames } = await openSocket(baseUrl, null);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, null);
     try {
       // thinkingVisible on, to also exercise thinking_delta.
       await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
       await waitFor(() => frames.some((f) => f.type === 'settings_changed'));
 
       // --- Non-Primary staged proposal, applied cleanly ---
-      const branchId = await branchAndSettle(app, storage, mainId);
-      await call(app, 'POST', `/api/conversations/${branchId}/send`, {
-        message: proposeDirective('tweak', [
-          {
-            old_string: 'Trailing unique tail xyz123.',
-            new_string: 'Trailing unique tail changed.',
-          },
-        ]),
-      });
+      const branchId = await branchAndSettle(app, storage, created.document.id, mainId);
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${branchId}/send`,
+        {
+          message: proposeDirective('tweak', [
+            {
+              old_string: 'Trailing unique tail xyz123.',
+              new_string: 'Trailing unique tail changed.',
+            },
+          ]),
+        },
+      );
       await waitFor(() => storage.listStagedEditsByConversation(branchId).length === 1);
       await waitFor(() => storage.getConversation(branchId)?.status === 'idle');
       const stagedNonPrimary = storage.listStagedEditsByConversation(branchId)[0]!;
       await waitFor(() => frames.some((f) => f.type === 'staged_edit_created'));
 
-      const applyRes = await call(app, 'POST', `/api/edits/${stagedNonPrimary.id}/apply`, {});
+      const applyRes = await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/edits/${stagedNonPrimary.id}/apply`,
+        {},
+      );
       expect((applyRes.json as { outcome: string }).outcome).toBe('applied');
       await waitFor(() => frames.some((f) => f.type === 'staged_edit_applied'));
       await waitFor(() => frames.some((f) => f.type === 'document_content_changed'));
@@ -227,14 +241,19 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
       expect(contentChangedIdx).toBeGreaterThan(appliedIdxNonPrimary);
 
       // --- Primary auto-apply path (Main is Primary by default) ---
-      await call(app, 'POST', `/api/conversations/${mainId}/send`, {
-        message: proposeDirective('primary tweak', [
-          {
-            old_string: 'A second paragraph stays constant across scenarios.',
-            new_string: 'A second paragraph now differs.',
-          },
-        ]),
-      });
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${mainId}/send`,
+        {
+          message: proposeDirective('primary tweak', [
+            {
+              old_string: 'A second paragraph stays constant across scenarios.',
+              new_string: 'A second paragraph now differs.',
+            },
+          ]),
+        },
+      );
       await waitFor(() => storage.listStagedEditsByConversation(mainId).length === 1);
       await waitFor(() => storage.getConversation(mainId)?.status === 'idle');
       const stagedPrimary = storage.listStagedEditsByConversation(mainId)[0]!;
@@ -281,19 +300,24 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
       // --- Conflict, budget exhausted on first conflict (maxReplacementAttempts: 0) ---
       await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 0 });
-      const branch2Id = await branchAndSettle(app, storage, mainId);
-      await call(app, 'POST', `/api/conversations/${branch2Id}/send`, {
-        message: proposeDirective('conflict target', [
-          {
-            old_string: 'The opening paragraph anchors everything else.',
-            new_string: 'Something new.',
-          },
-        ]),
-      });
+      const branch2Id = await branchAndSettle(app, storage, created.document.id, mainId);
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${branch2Id}/send`,
+        {
+          message: proposeDirective('conflict target', [
+            {
+              old_string: 'The opening paragraph anchors everything else.',
+              new_string: 'Something new.',
+            },
+          ]),
+        },
+      );
       await waitFor(() => storage.listStagedEditsByConversation(branch2Id).length === 1);
       await waitFor(() => storage.getConversation(branch2Id)?.status === 'idle');
       const edit1 = storage.listStagedEditsByConversation(branch2Id)[0]!;
-      await call(app, 'PATCH', '/api/document', {
+      await call(app, 'PATCH', `/api/documents/${created.document.id}`, {
         changes: [
           {
             from: 0,
@@ -305,7 +329,12 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
           },
         ],
       });
-      const exhaustedRes = await call(app, 'POST', `/api/edits/${edit1.id}/apply`, {});
+      const exhaustedRes = await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/edits/${edit1.id}/apply`,
+        {},
+      );
       expect((exhaustedRes.json as { outcome: string }).outcome).toBe('conflict_exhausted');
       await waitFor(() =>
         frames.some(
@@ -333,23 +362,32 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
       // --- Conflict, then an agent-produced replacement (default budget) ---
       await call(app, 'PATCH', '/api/settings', { maxReplacementAttempts: 2 });
-      const branch3Id = await branchAndSettle(app, storage, mainId);
-      await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
-        message: proposeDirective('conflict target 2', [
-          {
-            old_string: 'Trailing unique tail changed.',
-            new_string: 'Trailing unique tail from branch3.',
-          },
-        ]),
-      });
+      const branch3Id = await branchAndSettle(app, storage, created.document.id, mainId);
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${branch3Id}/send`,
+        {
+          message: proposeDirective('conflict target 2', [
+            {
+              old_string: 'Trailing unique tail changed.',
+              new_string: 'Trailing unique tail from branch3.',
+            },
+          ]),
+        },
+      );
       await waitFor(() => storage.listStagedEditsByConversation(branch3Id).length === 1);
       await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
       const edit2 = storage.listStagedEditsByConversation(branch3Id)[0]!;
-      const liveContent = (await call(app, 'GET', '/api/document')) as unknown as {
+      const liveContent = (await call(
+        app,
+        'GET',
+        `/api/documents/${created.document.id}`,
+      )) as unknown as {
         json: { content: string };
       };
       const currentContent = (liveContent.json as { content: string }).content;
-      await call(app, 'PATCH', '/api/document', {
+      await call(app, 'PATCH', `/api/documents/${created.document.id}`, {
         changes: [
           {
             from: 0,
@@ -358,16 +396,26 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
           },
         ],
       });
-      const conflictRes = await call(app, 'POST', `/api/edits/${edit2.id}/apply`, {});
+      const conflictRes = await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/edits/${edit2.id}/apply`,
+        {},
+      );
       expect((conflictRes.json as { outcome: string }).outcome).toBe('conflict');
       await waitFor(() => storage.getConversation(branch3Id)?.status === 'idle');
 
       // The conversation's next proposal automatically becomes edit2's replacement.
-      await call(app, 'POST', `/api/conversations/${branch3Id}/send`, {
-        message: proposeDirective('replacement', [
-          { old_string: 'Drifted again.', new_string: 'Drifted again, fixed.' },
-        ]),
-      });
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${branch3Id}/send`,
+        {
+          message: proposeDirective('replacement', [
+            { old_string: 'Drifted again.', new_string: 'Drifted again, fixed.' },
+          ]),
+        },
+      );
       await waitFor(() =>
         frames.some(
           (f) =>
@@ -432,13 +480,15 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
   it('document_content_changed.contentHash matches SHA-256 of the resulting content', async () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
-    const { ws, frames } = await openSocket(baseUrl, null);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, null);
     try {
-      await call(app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 0, insert: '## ' }] });
+      await call(app, 'PATCH', `/api/documents/${created.document.id}`, {
+        changes: [{ from: 0, to: 0, insert: '## ' }],
+      });
       await waitFor(() => frames.some((f) => f.type === 'document_content_changed'));
 
       const frame = frames.find((f) => f.type === 'document_content_changed')!;
-      const doc = await call(app, 'GET', '/api/document');
+      const doc = await call(app, 'GET', `/api/documents/${created.document.id}`);
       const content = (doc.json as { content: string }).content;
       const expectedHash = createHash('sha256').update(content).digest('hex');
       expect((frame.data as { contentHash: string }).contentHash).toBe(expectedHash);
@@ -453,7 +503,7 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
   it('reconnect replay is gap-free and non-duplicating (FR-037)', async () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
-    const first = await openSocket(baseUrl, null);
+    const first = await openSocket(baseUrl, created.document.id, null);
     const subscribedFirst = SubscribedFrame.parse(
       first.frames.find((f) => f.type === 'subscribed'),
     );
@@ -461,12 +511,22 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
     // Generate more persisted events while "disconnected" (socket #1 is closed first).
     await closeSocket(first.ws);
-    const branchId = await branchAndSettle(app, storage, created.mainConversation.id);
-    await call(app, 'POST', `/api/conversations/${branchId}/close`, {});
+    const branchId = await branchAndSettle(
+      app,
+      storage,
+      created.document.id,
+      created.mainConversation.id,
+    );
+    await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${branchId}/close`,
+      {},
+    );
     const afterSequence = storage.getLatestSequence(created.document.id);
     expect(afterSequence).toBeGreaterThan(lastSeenSequence);
 
-    const second = await openSocket(baseUrl, lastSeenSequence);
+    const second = await openSocket(baseUrl, created.document.id, lastSeenSequence);
     const subscribedSecond = SubscribedFrame.parse(
       second.frames.find((f) => f.type === 'subscribed'),
     );
@@ -489,8 +549,8 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
   it('reconnect with sinceSequence ahead of currentSequence converges via the snapshot (replayCount 0)', async () => {
     const { app, baseUrl } = await setup();
-    await createDoc(app);
-    const { ws, frames } = await openSocket(baseUrl, 999_999);
+    const created = await createDoc(app);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, 999_999);
     try {
       const subscribed = SubscribedFrame.parse(frames.find((f) => f.type === 'subscribed'));
       expect(subscribed.replayCount).toBe(0);
@@ -506,18 +566,24 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const created = await createDoc(app);
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
 
-    const first = await openSocket(baseUrl, null);
+    const first = await openSocket(baseUrl, created.document.id, null);
     // Kick off a plain (non-directive) send, which streams thinking + text deltas with small
     // artificial delays (fake-agent-session.ts) — giving us a real window to reconnect mid-run.
-    await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-      message: 'Please write a fairly long answer so streaming has time to be observed mid-flight.',
-    });
+    await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}/send`,
+      {
+        message:
+          'Please write a fairly long answer so streaming has time to be observed mid-flight.',
+      },
+    );
     await waitFor(() => first.frames.some((f) => f.type === 'text_delta'));
     await closeSocket(first.ws);
 
     // Reconnect while the run is still in progress.
     expect(storage.getConversation(created.mainConversation.id)?.status).toBe('working');
-    const second = await openSocket(baseUrl, null);
+    const second = await openSocket(baseUrl, created.document.id, null);
     try {
       // The synthesized catch-up frame(s) must appear immediately after "subscribed", before any
       // further live delta this new socket receives.
@@ -541,11 +607,16 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: false });
-    const { ws, frames } = await openSocket(baseUrl, null);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, null);
     try {
-      await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-        message: 'Please answer so reasoning deltas stream for a moment.',
-      });
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}/send`,
+        {
+          message: 'Please answer so reasoning deltas stream for a moment.',
+        },
+      );
       await waitFor(() => frames.some((f) => f.type === 'thinking_delta'));
       await waitFor(() => storage.getConversation(created.mainConversation.id)?.status === 'idle');
 
@@ -562,13 +633,24 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const created = await createDoc(app);
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: false });
 
-    await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-      message: 'Please answer so reasoning is produced.',
-    });
+    await call(
+      app,
+      'POST',
+      `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}/send`,
+      {
+        message: 'Please answer so reasoning is produced.',
+      },
+    );
     await waitFor(() => storage.getConversation(created.mainConversation.id)?.status === 'idle');
 
     const beforeToggle = GetConversationResponse.parse(
-      (await call(app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
+      (
+        await call(
+          app,
+          'GET',
+          `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}`,
+        )
+      ).json,
     );
     const assistantMessage = beforeToggle.messages.find(
       (m) => m.role === 'assistant' && !m.isToolCallCarrier,
@@ -580,7 +662,13 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
 
     const afterToggle = GetConversationResponse.parse(
-      (await call(app, 'GET', `/api/conversations/${created.mainConversation.id}`)).json,
+      (
+        await call(
+          app,
+          'GET',
+          `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}`,
+        )
+      ).json,
     );
     const sameMessage = afterToggle.messages.find((m) => m.id === assistantMessage?.id);
     expect(sameMessage?.reasoning).toBe(assistantMessage?.reasoning);
@@ -592,11 +680,16 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
     const { app, storage, baseUrl } = await setup();
     const created = await createDoc(app);
     await call(app, 'PATCH', '/api/settings', { thinkingVisible: true });
-    const { ws, frames } = await openSocket(baseUrl, null);
+    const { ws, frames } = await openSocket(baseUrl, created.document.id, null);
     try {
-      await call(app, 'POST', `/api/conversations/${created.mainConversation.id}/send`, {
-        message: 'A message that streams both thinking and text deltas.',
-      });
+      await call(
+        app,
+        'POST',
+        `/api/documents/${created.document.id}/conversations/${created.mainConversation.id}/send`,
+        {
+          message: 'A message that streams both thinking and text deltas.',
+        },
+      );
       await waitFor(() => frames.some((f) => f.type === 'thinking_delta'));
       await waitFor(() => frames.some((f) => f.type === 'text_delta'));
       await waitFor(() => storage.getConversation(created.mainConversation.id)?.status === 'idle');
@@ -620,11 +713,13 @@ describe('Contract: WebSocket event stream (websocket-events.md)', () => {
 
   it('two simultaneously connected clients both receive document_content_changed for a manual edit (FR-003)', async () => {
     const { app, baseUrl } = await setup();
-    await createDoc(app);
-    const a = await openSocket(baseUrl, null);
-    const b = await openSocket(baseUrl, null);
+    const created = await createDoc(app);
+    const a = await openSocket(baseUrl, created.document.id, null);
+    const b = await openSocket(baseUrl, created.document.id, null);
     try {
-      await call(app, 'PATCH', '/api/document', { changes: [{ from: 0, to: 0, insert: '## ' }] });
+      await call(app, 'PATCH', `/api/documents/${created.document.id}`, {
+        changes: [{ from: 0, to: 0, insert: '## ' }],
+      });
       await waitFor(() => a.frames.some((f) => f.type === 'document_content_changed'));
       await waitFor(() => b.frames.some((f) => f.type === 'document_content_changed'));
     } finally {

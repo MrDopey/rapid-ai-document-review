@@ -190,7 +190,7 @@ export class ConflictService {
     const message = renderConflictMessage(
       edit.operations,
       detail,
-      this.automerge.get().getContent(),
+      this.automerge.get(edit.documentId).getContent(),
       willRequest ? 'requested' : 'exhausted',
       maxAttempts,
     );

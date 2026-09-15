@@ -46,7 +46,7 @@ async function load(): Promise<void> {
   try {
     originalSnapshot.value = documentStore.content;
     resetExpanded();
-    preview.value = await httpClient.previewEdit(props.editId);
+    preview.value = await httpClient.previewEdit(documentStore.activeDocumentId!, props.editId);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load preview.';
   } finally {

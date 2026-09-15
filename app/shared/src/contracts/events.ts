@@ -327,6 +327,7 @@ export type ApplicationEventType = ApplicationEvent['type'];
 
 export const SubscribeFrame = z.object({
   type: z.literal('subscribe'),
+  documentId: z.string(),
   sinceSequence: z.number().int().nullable(),
 });
 export type SubscribeFrame = z.infer<typeof SubscribeFrame>;

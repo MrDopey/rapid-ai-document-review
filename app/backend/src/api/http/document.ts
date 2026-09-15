@@ -5,9 +5,9 @@ import {
   PatchDocumentRequest,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
-  DocumentAlreadyExistsError,
   DocumentNotFoundError,
   DocumentOutOfSyncError,
+  LastDocumentError,
   type DocumentService,
 } from '../../document/document-service.ts';
 import type { RevisionService } from '../../document/revision-service.ts';
@@ -19,33 +19,46 @@ export function registerDocumentRoutes(
 ): void {
   const { documentService, revisionService } = deps;
 
-  app.post('/api/document', async (request, reply) => {
+  app.post('/api/documents', async (request, reply) => {
     const data = parseOrFail(reply, CreateDocumentRequest, request.body);
     if (!data) return;
-    try {
-      const result = documentService.create(data.content, data.title);
-      return reply.status(201).send(result);
-    } catch (err) {
-      if (err instanceof DocumentAlreadyExistsError) {
-        return sendError(reply, 409, 'DOCUMENT_ALREADY_EXISTS', err.message);
-      }
-      throw err;
-    }
+    const result = documentService.create(data.content, data.title);
+    return reply.status(201).send(result);
   });
 
-  app.get('/api/document', async (_request, reply) => {
-    const result = documentService.get();
+  app.get('/api/documents', async (_request, reply) => {
+    return reply.send({ documents: documentService.listDocuments() });
+  });
+
+  app.get('/api/documents/:documentId', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
+    const result = documentService.get(documentId);
     if (!result) {
-      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
+      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'Document not found');
     }
+    // Fetching a document's full content/state is what "switching to it" means from the
+    // frontend's perspective — recording it here is what makes `listDocuments`'s `isActive`
+    // ordering, and restoring the active document across a restart, correct without any
+    // separate session state.
+    documentService.setActive(documentId);
     return reply.send(result);
   });
 
-  app.patch('/api/document', async (request, reply) => {
+  app.patch('/api/documents/:documentId', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
     const data = parseOrFail(reply, PatchDocumentRequest, request.body);
     if (!data) return;
     try {
+      if (
+        data.baseRevision === undefined &&
+        data.changes === undefined &&
+        data.title !== undefined
+      ) {
+        const document = documentService.renameDocument(documentId, data.title);
+        return reply.send({ currentRevision: document.currentRevision, revisionCreated: false });
+      }
       const result = await documentService.applyChanges(
+        documentId,
         data.baseRevision,
         data.changes,
         data.title,
@@ -64,12 +77,29 @@ export function registerDocumentRoutes(
     }
   });
 
-  app.get('/api/document/export', async (request, reply) => {
+  app.delete('/api/documents/:documentId', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
+    try {
+      documentService.deleteDocument(documentId);
+      return reply.send({ id: documentId });
+    } catch (err) {
+      if (err instanceof DocumentNotFoundError) {
+        return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', err.message);
+      }
+      if (err instanceof LastDocumentError) {
+        return sendError(reply, 409, 'LAST_DOCUMENT', err.message);
+      }
+      throw err;
+    }
+  });
+
+  app.get('/api/documents/:documentId/export', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
     const data = parseOrFail(reply, ExportDocumentQuery, request.query);
     if (!data) return;
-    const doc = documentService.get();
+    const doc = documentService.get(documentId);
     if (!doc) {
-      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
+      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'Document not found');
     }
     const content = revisionService.export(doc.document.id, data.revision);
     if (content === null) {

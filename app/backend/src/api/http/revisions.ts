@@ -28,10 +28,11 @@ export function registerRevisionRoutes(
 ): void {
   const { storage, revisionService } = deps;
 
-  app.get('/api/revisions', async (request, reply) => {
-    const doc = storage.getDocument();
+  app.get('/api/documents/:documentId/revisions', async (request, reply) => {
+    const { documentId } = request.params as { documentId: string };
+    const doc = storage.getDocument(documentId);
     if (!doc) {
-      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
+      return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'Document not found');
     }
     const data = parseOrFail(reply, PaginationQuery, request.query);
     if (!data) return;
@@ -50,12 +51,12 @@ export function registerRevisionRoutes(
     });
   });
 
-  app.post<{ Params: { revision: string } }>(
-    '/api/revisions/:revision/restore',
+  app.post<{ Params: { documentId: string; revision: string } }>(
+    '/api/documents/:documentId/revisions/:revision/restore',
     async (request, reply) => {
-      const doc = storage.getDocument();
+      const doc = storage.getDocument(request.params.documentId);
       if (!doc) {
-        return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'No document has been created yet');
+        return sendError(reply, 404, 'DOCUMENT_NOT_FOUND', 'Document not found');
       }
       const revisionNumber = Number(request.params.revision);
       if (!Number.isInteger(revisionNumber)) {

@@ -8,6 +8,7 @@ import {
   GetConversationResponse,
   GetDocumentResponse,
   ListConversationsResponse,
+  ListDocumentsResponse,
   ListRevisionsResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import type {
@@ -119,7 +120,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     const app1 = boot1.app;
     const storage1 = boot1.storage;
 
-    const createRes = await call(app1, 'POST', '/api/document', {
+    const createRes = await call(app1, 'POST', '/api/documents', {
       title: 'Restart Fixture',
       content: DOC_CONTENT,
     });
@@ -142,16 +143,16 @@ describe('restart recovery (FR-039/FR-039a)', () => {
 
     // A manual edit, debounced into revision 2 — exercises the real Automerge persistence path
     // (splice + snapshot/changes), not just a directly-poked DB row.
-    const patchRes = await call(app1, 'PATCH', '/api/document', {
+    const patchRes = await call(app1, 'PATCH', `/api/documents/${documentId}`, {
       baseRevision: created.document.currentRevision,
       changes: [{ from: 0, to: 0, insert: 'PREFIX ' }],
     });
     expect(patchRes.status).toBe(200);
-    await waitFor(() => (storage1.getDocument()?.currentRevision ?? 0) >= 2, {
+    await waitFor(() => (storage1.getDocument(documentId)?.currentRevision ?? 0) >= 2, {
       message: 'manual-edit debounce revision never landed',
     });
-    expect(storage1.getDocument()?.currentRevision).toBe(2);
-    expect(storage1.getDocument()?.currentRevision).toBe(
+    expect(storage1.getDocument(documentId)?.currentRevision).toBe(2);
+    expect(storage1.getDocument(documentId)?.currentRevision).toBe(
       storage1.getLatestRevision(documentId)?.revision,
     );
 
@@ -206,7 +207,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     const storage2 = boot2.storage;
 
     // Document content and current_revision are intact.
-    const getDocRes = await call(app2, 'GET', '/api/document');
+    const getDocRes = await call(app2, 'GET', `/api/documents/${documentId}`);
     expect(getDocRes.status).toBe(200);
     const getDoc = GetDocumentResponse.parse(getDocRes.json);
     expect(getDoc.document.id).toBe(documentId);
@@ -215,7 +216,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     expect(getDoc.content).toContain('A second paragraph stays constant');
 
     // Revision history is intact.
-    const revsRes = await call(app2, 'GET', '/api/revisions');
+    const revsRes = await call(app2, 'GET', `/api/documents/${documentId}/revisions`);
     expect(revsRes.status).toBe(200);
     const revs = ListRevisionsResponse.parse(revsRes.json);
     expect(revs.revisions.map((r) => r.revision).sort((a, b) => a - b)).toEqual([1, 2]);
@@ -230,7 +231,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
 
     // ...and via a fresh client's GET /api/conversations resync (connected-client resync, in scope
     // at this basic level; full WS/e2e resync machinery is out of scope for this suite).
-    const listRes = await call(app2, 'GET', '/api/conversations');
+    const listRes = await call(app2, 'GET', `/api/documents/${documentId}/conversations`);
     expect(listRes.status).toBe(200);
     const list = ListConversationsResponse.parse(listRes.json);
     const interruptedDto = list.conversations.find((c) => c.id === interruptedBranch.id);
@@ -239,7 +240,11 @@ describe('restart recovery (FR-039/FR-039a)', () => {
 
     // The pending staged proposal's status is unchanged — still pending, not lost or silently
     // resolved by recovery.
-    const getConvRes = await call(app2, 'GET', `/api/conversations/${proposalBranch.id}`);
+    const getConvRes = await call(
+      app2,
+      'GET',
+      `/api/documents/${documentId}/conversations/${proposalBranch.id}`,
+    );
     expect(getConvRes.status).toBe(200);
     const getConv = GetConversationResponse.parse(getConvRes.json);
     expect(getConv.stagedEdits).toHaveLength(1);
@@ -265,7 +270,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     const conflictBranch = createBranchConversation(
       storage2,
       documentId,
-      storage2.getDocument()!.currentRevision,
+      storage2.getDocument(documentId)!.currentRevision,
       'Conflict Branch',
     );
     const supersededEdit: StagedEditRow = {
@@ -273,7 +278,7 @@ describe('restart recovery (FR-039/FR-039a)', () => {
       documentId,
       conversationId: conflictBranch.id,
       piToolCallId: 'tool_conflict_original',
-      sourceRevision: storage2.getDocument()!.currentRevision,
+      sourceRevision: storage2.getDocument(documentId)!.currentRevision,
       summary: 'Original proposal, later superseded by a conflict',
       operations: [{ old_string: 'second paragraph', new_string: 'SECOND PARAGRAPH' }],
       status: 'superseded',
@@ -297,14 +302,21 @@ describe('restart recovery (FR-039/FR-039a)', () => {
     const storage3 = boot3.storage;
 
     const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
-    const sendRes = await call(app3, 'POST', `/api/conversations/${conflictBranch.id}/send`, {
-      message:
-        PROPOSE_EDIT_DIRECTIVE +
-        JSON.stringify({
-          summary: 'Replacement for the conflicting proposal',
-          operations: [{ old_string: 'second paragraph', new_string: 'SECOND PARAGRAPH REPLACED' }],
-        }),
-    });
+    const sendRes = await call(
+      app3,
+      'POST',
+      `/api/documents/${documentId}/conversations/${conflictBranch.id}/send`,
+      {
+        message:
+          PROPOSE_EDIT_DIRECTIVE +
+          JSON.stringify({
+            summary: 'Replacement for the conflicting proposal',
+            operations: [
+              { old_string: 'second paragraph', new_string: 'SECOND PARAGRAPH REPLACED' },
+            ],
+          }),
+      },
+    );
     expect(sendRes.status).toBe(202);
     await waitFor(() => storage3.listStagedEditsByConversation(conflictBranch.id).length === 2);
 
@@ -319,5 +331,59 @@ describe('restart recovery (FR-039/FR-039a)', () => {
 
     storage3.close();
     await app3.close();
+  });
+});
+
+describe('multi-document active-document restart persistence (FR-011)', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'restart-active-doc-test-'));
+  const databasePath = join(tmpDir, 'document-review.sqlite');
+
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('restores whichever document was last made active before a restart, not simply the most recently created one', async () => {
+    const boot1 = await bootApp(databasePath);
+    const app1 = boot1.app;
+    const storage1 = boot1.storage;
+
+    const createA = await call(app1, 'POST', '/api/documents', {
+      title: 'Document A',
+      content: 'A content',
+    });
+    const docA = CreateDocumentResponse.parse(createA.json).document.id;
+
+    // Created after A, so by creation-time ordering alone it would be "most recent" — the point of
+    // this test is that an explicit switch back to A overrides that.
+    const createB = await call(app1, 'POST', '/api/documents', {
+      title: 'Document B',
+      content: 'B content',
+    });
+    const docB = CreateDocumentResponse.parse(createB.json).document.id;
+
+    // GET is what the frontend calls on switching to a document (DocumentService.setActive) —
+    // switch back to A last, so A (not B) is the one restart recovery should restore.
+    await call(app1, 'GET', `/api/documents/${docA}`);
+
+    const preRestartList = ListDocumentsResponse.parse(
+      (await call(app1, 'GET', '/api/documents')).json,
+    );
+    expect(preRestartList.documents.find((d) => d.isActive)?.id).toBe(docA);
+
+    storage1.close();
+    await app1.close();
+
+    const boot2 = await bootApp(databasePath);
+    const app2 = boot2.app;
+    const storage2 = boot2.storage;
+
+    const postRestartList = ListDocumentsResponse.parse(
+      (await call(app2, 'GET', '/api/documents')).json,
+    );
+    expect(postRestartList.documents.map((d) => d.id).sort()).toEqual([docA, docB].sort());
+    expect(postRestartList.documents.find((d) => d.isActive)?.id).toBe(docA);
+
+    storage2.close();
+    await app2.close();
   });
 });

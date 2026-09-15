@@ -129,6 +129,7 @@ describe('HistoryPanel — Restore confirmation dialog', () => {
 
   function mountPanel() {
     const store = useDocumentStore();
+    store.activeDocumentId = 'doc-1';
     store.revisions = [
       makeRevision({
         revision: 2,
@@ -172,7 +173,7 @@ describe('HistoryPanel — Restore confirmation dialog', () => {
     await wrapper.get('.restore-dialog').get('.restore-button').trigger('click');
     await flushPromises();
 
-    expect(httpClient.restoreRevision).toHaveBeenCalledWith(1);
+    expect(httpClient.restoreRevision).toHaveBeenCalledWith('doc-1', 1);
     expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
   });
 
@@ -198,5 +199,74 @@ describe('HistoryPanel — Restore confirmation dialog', () => {
 
     expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
     expect(httpClient.restoreRevision).not.toHaveBeenCalled();
+  });
+});
+
+// Multi-document support (010-multi-document-support, US2/T031): the drawer is a reserved grid
+// column, not remounted on every document switch (App.vue keeps it mounted via `v-if="historyOpen"`,
+// toggled only by open/close) — so HistoryPanel must react to `activeDocumentId` changing while it
+// stays mounted, rather than relying solely on its one-time `onMounted` guard.
+describe('HistoryPanel — reloads on document switch (US2/T031)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.listRevisions).mockReset();
+  });
+
+  it('re-fetches revisions when activeDocumentId changes, discarding the previous document’s list', async () => {
+    vi.mocked(httpClient.listRevisions).mockResolvedValue({
+      revisions: [makeRevision({ revision: 1, origin: 'creation' })],
+      nextCursor: null,
+    });
+
+    const store = useDocumentStore();
+    store.activeDocumentId = 'doc-a';
+    store.revisions = [makeRevision({ revision: 7, origin: 'creation' })];
+
+    const wrapper = mount(HistoryPanel, {
+      global: { plugins: [pinia], stubs: { RevisionDiffViewer: true } },
+    });
+    await flushPromises();
+    expect(httpClient.listRevisions).not.toHaveBeenCalled();
+
+    // switchTo() (stores/document.ts) resets revisions/cursor to empty as part of switching —
+    // simulated directly here since this test targets HistoryPanel's reaction, not switchTo itself.
+    store.revisions = [];
+    store.revisionsNextCursor = null;
+    store.activeDocumentId = 'doc-b';
+    await flushPromises();
+
+    expect(httpClient.listRevisions).toHaveBeenCalledWith('doc-b', { cursor: undefined });
+    expect(wrapper.vm).toBeTruthy();
+    expect(store.revisions.map((r) => r.revision)).toEqual([1]);
+  });
+
+  it('dismisses any open diff/reconciliation view left over from the previous document', async () => {
+    vi.mocked(httpClient.listRevisions).mockResolvedValue({ revisions: [], nextCursor: null });
+
+    const store = useDocumentStore();
+    store.activeDocumentId = 'doc-a';
+    store.revisions = [
+      makeRevision({ revision: 2, origin: 'manual_debounce' }),
+      makeRevision({ revision: 1, origin: 'creation' }),
+    ];
+
+    const wrapper = mount(HistoryPanel, {
+      global: { plugins: [pinia], stubs: { RevisionDiffViewer: true } },
+    });
+    const row = wrapper.findAll('.history-entry').find((r) => r.find('strong').text() === 'v2')!;
+    await row
+      .find('.actions')
+      .findAll('button')
+      .find((b) => b.text() === 'Diff')!
+      .trigger('click');
+    expect(wrapper.find('.modal-overlay').exists()).toBe(true);
+
+    store.activeDocumentId = 'doc-b';
+    await flushPromises();
+
+    expect(wrapper.find('.modal-overlay').exists()).toBe(false);
   });
 });

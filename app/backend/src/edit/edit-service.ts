@@ -221,7 +221,7 @@ export class EditService {
             outcome: 'applied',
             stagedEditId: edit.id,
             revision: edit.appliedRevision ?? 0,
-            content: this.automerge.get().getContent(),
+            content: this.automerge.get(edit.documentId).getContent(),
           },
         };
       }
@@ -231,7 +231,7 @@ export class EditService {
         );
       }
 
-      const currentText = this.automerge.get().getContent();
+      const currentText = this.automerge.get(edit.documentId).getContent();
       const result = reconcile(edit.operations, currentText);
 
       if (result.outcome === 'clean') {
@@ -318,7 +318,8 @@ export class EditService {
       }
     }
 
-    const document = this.storage.getDocument();
+    const conversation = this.storage.getConversation(conversationId);
+    const document = conversation ? this.storage.getDocument(conversation.documentId) : null;
     return { results, currentRevision: document?.currentRevision ?? 0 };
   }
 
@@ -346,12 +347,12 @@ export class EditService {
 
   preview(editId: string) {
     const edit = this.getOrThrow(editId);
-    const currentText = this.automerge.get().getContent();
+    const currentText = this.automerge.get(edit.documentId).getContent();
     if (edit.status === 'applied') {
       const revRow = this.storage.getRevision(edit.documentId, edit.sourceRevision);
       if (revRow) {
         const heads = JSON.parse(revRow.heads) as string[];
-        const sourceText = this.automerge.get().view(heads);
+        const sourceText = this.automerge.get(edit.documentId).view(heads);
         return previewStagedEdit(edit, currentText, sourceText);
       }
     }
@@ -371,13 +372,13 @@ export class EditService {
     edit: StagedEditRow,
     patches: { from: number; to: number; insert: string }[],
   ): ApplyEditResponse {
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(edit.documentId);
     if (!document) throw new Error('Document not found');
     const conversation = this.storage.getConversation(edit.conversationId);
     const predictedRevision = document.currentRevision + 1;
 
     const revisionRow = this.storage.transaction(() => {
-      this.automerge.get().splice(patches);
+      this.automerge.get(edit.documentId).splice(patches);
 
       const resolvedAt = new Date().toISOString();
       this.storage.updateStagedEdit(edit.id, {
@@ -401,7 +402,7 @@ export class EditService {
         autoApplied: edit.autoApplied,
       });
 
-      const content = this.automerge.get().getContent();
+      const content = this.automerge.get(edit.documentId).getContent();
       const contentHash = createHash('sha256').update(content).digest('hex');
       this.publish(edit.documentId, null, 'document_content_changed', {
         changes: patches,
@@ -420,7 +421,7 @@ export class EditService {
       });
     });
 
-    const content = this.automerge.get().getContent();
+    const content = this.automerge.get(edit.documentId).getContent();
     return { outcome: 'applied', stagedEditId: edit.id, revision: revisionRow.revision, content };
   }
 

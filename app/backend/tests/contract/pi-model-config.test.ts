@@ -100,6 +100,7 @@ function buildHarness(mods: Awaited<ReturnType<typeof loadFresh>>) {
     piSessionDir: `/tmp/${docId}`,
     createdAt: now,
     updatedAt: now,
+    lastActiveAt: now,
   });
 
   const convId = newId('conv');

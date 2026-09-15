@@ -1,21 +1,27 @@
 import type { AutomergeStore } from './automerge-store.ts';
 
-/** Shared mutable slot so DocumentService and RevisionService can both reach the one Automerge store. */
+/** Shared registry so DocumentService and RevisionService can both reach any document's Automerge
+ *  store, keyed by document id. */
 export class AutomergeStoreHolder {
-  private store: AutomergeStore | null = null;
+  private stores = new Map<string, AutomergeStore>();
 
-  get(): AutomergeStore {
-    if (!this.store) {
+  get(documentId: string): AutomergeStore {
+    const store = this.stores.get(documentId);
+    if (!store) {
       throw new Error('Document not created yet');
     }
-    return this.store;
+    return store;
   }
 
-  isSet(): boolean {
-    return this.store !== null;
+  isSet(documentId: string): boolean {
+    return this.stores.has(documentId);
   }
 
-  set(store: AutomergeStore): void {
-    this.store = store;
+  set(documentId: string, store: AutomergeStore): void {
+    this.stores.set(documentId, store);
+  }
+
+  delete(documentId: string): void {
+    this.stores.delete(documentId);
   }
 }

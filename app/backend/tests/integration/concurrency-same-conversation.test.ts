@@ -169,7 +169,7 @@ function flushMicrotasks(): Promise<void> {
 describe('FIX 2: overlapping sends on the same conversation do not corrupt its state', () => {
   it('a second send fired before the first has settled is queued, not thrown into the session (no spurious agent_error/"already streaming")', async () => {
     const h = buildHarness();
-    const document = h.storage.getDocument()!;
+    const document = h.storage.listDocuments()[0]!;
     const conv = createConversation(h.storage, document.id, document.currentRevision);
     const session = new FakePiSession({ sessionId: conv.id });
     registerFakeSession(h.piService, conv.id, session);
@@ -215,7 +215,7 @@ describe('FIX 2: overlapping sends on the same conversation do not corrupt its s
 
   it('does not affect a second send on a DIFFERENT conversation, which still runs immediately alongside the first', async () => {
     const h = buildHarness();
-    const document = h.storage.getDocument()!;
+    const document = h.storage.listDocuments()[0]!;
     const convA = createConversation(h.storage, document.id, document.currentRevision);
     const convB = createConversation(h.storage, document.id, document.currentRevision);
     const sessionA = new FakePiSession({ sessionId: convA.id });

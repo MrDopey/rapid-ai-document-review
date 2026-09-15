@@ -26,16 +26,17 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
 
     const createRes = await app.inject({
       method: 'POST',
-      url: '/api/document',
+      url: '/api/documents',
       payload: { content: '# Doc\n\nHello.\n' },
     });
     expect(createRes.statusCode).toBe(201);
     const created = JSON.parse(createRes.body) as CreateDocumentResponse;
+    const documentId = created.document.id;
     const conversationId = created.mainConversation.id;
 
     const sendRes = await app.inject({
       method: 'POST',
-      url: `/api/conversations/${conversationId}/send`,
+      url: `/api/documents/${documentId}/conversations/${conversationId}/send`,
       payload: { message: HANG_DIRECTIVE },
     });
     expect(sendRes.statusCode).toBe(202);
@@ -51,7 +52,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     // is built and the retry is accepted normally; it will time out again the same way.
     const retryRes = await app.inject({
       method: 'POST',
-      url: `/api/conversations/${conversationId}/retry`,
+      url: `/api/documents/${documentId}/conversations/${conversationId}/retry`,
     });
     expect(retryRes.statusCode).toBe(202);
     await waitFor(() => storage.getConversation(conversationId)?.status === 'working');
@@ -70,7 +71,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     // — proving the conversation is genuinely recoverable, not just capable of erroring again.
     const followUp = await app.inject({
       method: 'POST',
-      url: `/api/conversations/${conversationId}/send`,
+      url: `/api/documents/${documentId}/conversations/${conversationId}/send`,
       payload: { message: 'hello again' },
     });
     expect(followUp.statusCode).toBe(202);
@@ -89,15 +90,16 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
 
     const createRes = await app.inject({
       method: 'POST',
-      url: '/api/document',
+      url: '/api/documents',
       payload: { content: '# Doc\n\nHello.\n' },
     });
     const created = JSON.parse(createRes.body) as CreateDocumentResponse;
+    const documentId = created.document.id;
     const conversationId = created.mainConversation.id;
 
     const sendRes = await app.inject({
       method: 'POST',
-      url: `/api/conversations/${conversationId}/send`,
+      url: `/api/documents/${documentId}/conversations/${conversationId}/send`,
       payload: { message: HANG_DIRECTIVE },
     });
     expect(sendRes.statusCode).toBe(202);
@@ -115,7 +117,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
 
     const followUp = await app.inject({
       method: 'POST',
-      url: `/api/conversations/${conversationId}/send`,
+      url: `/api/documents/${documentId}/conversations/${conversationId}/send`,
       payload: { message: 'hello again' },
     });
     expect(followUp.statusCode).toBe(202);

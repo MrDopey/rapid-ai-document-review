@@ -135,7 +135,7 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     );
     expect(staged.status).toBe('pending');
 
-    const docBefore = h.storage.getDocument()!;
+    const docBefore = h.storage.getDocument(documentId)!;
     const latestRevisionBefore = h.storage.getLatestRevision(documentId);
 
     // Simulate a crash partway through the write sequence: `createRevision` is the last storage
@@ -157,7 +157,7 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     // revision row or current_revision bump exists.
     expect(h.storage.getStagedEdit(staged.id)?.status).toBe('pending');
     expect(h.storage.getStagedEdit(staged.id)?.appliedRevision).toBeNull();
-    expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision);
+    expect(h.storage.getDocument(documentId)?.currentRevision).toBe(docBefore.currentRevision);
     expect(h.storage.getLatestRevision(documentId)?.revision).toBe(
       latestRevisionBefore?.revision ?? 0,
     );
@@ -173,7 +173,7 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     // is a separate, narrower concern than the SQL-row desync FIX 3 targets.)
     h.storage.createRevision = originalCreateRevision;
     const conv2 = createConversation(h.storage, documentId, docBefore.currentRevision);
-    const currentFirstWord = h.automerge.get().getContent().split(' ')[0]!;
+    const currentFirstWord = h.automerge.get(documentId).getContent().split(' ')[0]!;
     const staged2 = h.editService.stage(
       conv2.id,
       'tool_call_2',
@@ -184,7 +184,7 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     const result = await h.editService.apply(staged2.id);
     expect(result.response.outcome).toBe('applied');
     expect(h.storage.getStagedEdit(staged2.id)?.status).toBe('applied');
-    expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision + 1);
+    expect(h.storage.getDocument(documentId)?.currentRevision).toBe(docBefore.currentRevision + 1);
     expect(h.storage.getLatestRevision(documentId)?.revision).toBe(docBefore.currentRevision + 1);
   });
 
@@ -208,7 +208,12 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     }) as typeof h.storage.appendEvent;
 
     await expect(
-      h.documentService.applyChanges(undefined, [{ from: 0, to: 5, insert: 'Howdy' }], undefined),
+      h.documentService.applyChanges(
+        documentId,
+        undefined,
+        [{ from: 0, to: 5, insert: 'Howdy' }],
+        undefined,
+      ),
     ).rejects.toThrow('simulated crash mid-sequence');
 
     // The Automerge `document_change` row from the splice was rolled back along with the event
@@ -217,19 +222,20 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
 
     h.storage.appendEvent = originalAppendEvent;
     await h.documentService.applyChanges(
+      documentId,
       undefined,
       [{ from: 0, to: 5, insert: 'Howdy' }],
       undefined,
     );
     expect(h.storage.listChangesSince(documentId, 0)).toHaveLength(changesBefore + 1);
-    expect(h.automerge.get().getContent()).toBe('Howdy world.\n');
+    expect(h.automerge.get(documentId).getContent()).toBe('Howdy world.\n');
   });
 
   it('RevisionService.createRevision(): a mid-sequence throw rolls back both the revision row and the document.current_revision bump together', () => {
     const h = buildHarness();
     const created = h.documentService.create('Hello world.\n', 'Doc');
     const documentId = created.document.id;
-    const docBefore = h.storage.getDocument()!;
+    const docBefore = h.storage.getDocument(documentId)!;
     const latestRevisionBefore = h.storage.getLatestRevision(documentId);
 
     const originalUpdateDocumentRevision = h.storage.updateDocumentRevision.bind(h.storage);
@@ -253,7 +259,7 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
     expect(h.storage.getLatestRevision(documentId)?.revision).toBe(
       latestRevisionBefore?.revision ?? 0,
     );
-    expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision);
+    expect(h.storage.getDocument(documentId)?.currentRevision).toBe(docBefore.currentRevision);
 
     h.storage.updateDocumentRevision = originalUpdateDocumentRevision;
     const row = h.revisionService.createRevision(documentId, {
@@ -261,6 +267,6 @@ describe('FIX 3: multi-statement document/revision writes are transactional', ()
       origin: 'manual_debounce',
     });
     expect(row.revision).toBe(docBefore.currentRevision + 1);
-    expect(h.storage.getDocument()?.currentRevision).toBe(docBefore.currentRevision + 1);
+    expect(h.storage.getDocument(documentId)?.currentRevision).toBe(docBefore.currentRevision + 1);
   });
 });

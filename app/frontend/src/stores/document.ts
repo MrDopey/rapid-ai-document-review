@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import type { DocumentDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type { DocumentSummaryDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RevisionDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RestoreRevisionResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient, ApiError } from '../transport/http-client.js';
@@ -14,6 +15,12 @@ async function sha256Hex(text: string): Promise<string> {
 export interface DocumentState {
   document: DocumentDto | null;
   content: string;
+  // The document currently open in this tab, and every open document available to switch to
+  // (dropdown, keyboard shortcut). `activeDocumentId` mirrors `document?.id` — kept as a separate
+  // field so it stays defined even in the brief window between choosing a target id (`switchTo`)
+  // and that fetch resolving.
+  activeDocumentId: string | null;
+  documents: DocumentSummaryDto[];
   revisions: RevisionDto[];
   revisionsNextCursor: string | null;
   eventSequence: number;
@@ -37,6 +44,8 @@ export const useDocumentStore = defineStore('document', {
   state: (): DocumentState => ({
     document: null,
     content: '',
+    activeDocumentId: null,
+    documents: [],
     revisions: [],
     revisionsNextCursor: null,
     eventSequence: 0,
@@ -46,24 +55,100 @@ export const useDocumentStore = defineStore('document', {
   }),
 
   actions: {
+    async loadDocuments(): Promise<void> {
+      const result = await httpClient.listDocuments();
+      this.documents = result.documents;
+    },
+
+    /** Startup load: fetches every open document, then switches to whichever was active at
+     *  shutdown (`isActive`, per `DocumentService.listDocuments`'s most-recently-active ordering —
+     *  FR-011). Leaves `document`/`activeDocumentId` unset (paste-to-create screen) when there are
+     *  none yet. */
     async load(): Promise<void> {
-      const result = await httpClient.getDocument();
-      this.loaded = true;
-      if (!result) {
+      await this.loadDocuments();
+      const active = this.documents.find((d) => d.isActive) ?? this.documents[0];
+      if (!active) {
+        this.loaded = true;
         this.document = null;
         this.content = '';
+        this.activeDocumentId = null;
         return;
       }
+      await this.switchTo(active.id);
+    },
+
+    /** Fetches `documentId`'s full content/state and makes it the active document (FR-003). Resets
+     *  revision pagination — a different document's revision history starts from a fresh cursor. */
+    async switchTo(documentId: string): Promise<void> {
+      const result = await httpClient.getDocument(documentId);
+      this.loaded = true;
+      if (!result) return;
+      this.activeDocumentId = documentId;
       this.document = result.document;
       this.content = result.content;
       this.eventSequence = result.eventSequence;
+      this.revisions = [];
+      this.revisionsNextCursor = null;
+      await this.loadDocuments();
     },
 
     async create(content: string, title?: string): Promise<void> {
       const result = await httpClient.createDocument({ content, title });
+      this.activeDocumentId = result.document.id;
       this.document = result.document;
       this.content = result.content;
       this.loaded = true;
+      await this.loadDocuments();
+    },
+
+    /** "+ New document" (FR-001): a brand-new, otherwise-empty document, immediately made active. */
+    async createNew(): Promise<void> {
+      await this.create('# Untitled\n');
+    },
+
+    async rename(documentId: string, title: string): Promise<void> {
+      await httpClient.renameDocument(documentId, title);
+      if (this.document && this.activeDocumentId === documentId) {
+        this.document = { ...this.document, title };
+      }
+      await this.loadDocuments();
+    },
+
+    /** FR-008/FR-009: deletes a document (the backend itself rejects deleting the last one). If the
+     *  active document was removed, switches to whichever document is now most-recently-active. */
+    async remove(documentId: string): Promise<void> {
+      try {
+        await httpClient.deleteDocument(documentId);
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'LAST_DOCUMENT') {
+          this.conflictMessage = 'Cannot delete the only remaining document.';
+          return;
+        }
+        throw err;
+      }
+      await this.loadDocuments();
+      if (this.activeDocumentId !== documentId) return;
+      const next = this.documents[0];
+      if (next) {
+        await this.switchTo(next.id);
+      } else {
+        this.activeDocumentId = null;
+        this.document = null;
+        this.content = '';
+      }
+    },
+
+    /** Shared by `patchContent`'s 409 handling and `resyncDocument`'s passive staleness checks:
+     *  re-fetches whichever document is currently active, rather than re-deriving "the" active
+     *  document from the list (which could differ from the one this tab is actually showing if
+     *  `activeDocumentId` came from a switch already in progress). Falls back to `load()` only when
+     *  no document has ever been active in this tab. */
+    async refreshActive(): Promise<void> {
+      if (this.activeDocumentId) {
+        await this.switchTo(this.activeDocumentId);
+      } else {
+        await this.load();
+      }
     },
 
     // Retries indefinitely on network/server failure (e.g. a disconnected backend) rather than
@@ -87,11 +172,11 @@ export const useDocumentStore = defineStore('document', {
         let attempt = 0;
         for (;;) {
           try {
-            await httpClient.patchDocument({ baseRevision, changes });
+            await httpClient.patchDocument(this.activeDocumentId!, { baseRevision, changes });
             return;
           } catch (err) {
             if (err instanceof ApiError && err.status === 409) {
-              await this.load();
+              await this.refreshActive();
               this.conflictMessage =
                 'This document changed elsewhere while you were editing. Your last edit was not saved — please redo it.';
               return;
@@ -118,11 +203,11 @@ export const useDocumentStore = defineStore('document', {
     // the in-flight patch IS the one just rejected, so resyncing immediately is correct.
     async resyncDocument(): Promise<void> {
       if (this.pendingPatchCount > 0) return;
-      await this.load();
+      await this.refreshActive();
     },
 
     async loadRevisions(): Promise<void> {
-      const page = await httpClient.listRevisions({
+      const page = await httpClient.listRevisions(this.activeDocumentId!, {
         cursor: this.revisionsNextCursor ?? undefined,
       });
       this.revisions = this.revisionsNextCursor
@@ -136,7 +221,7 @@ export const useDocumentStore = defineStore('document', {
     // read-only dry-run that never changes any proposal's status, so there is nothing else here
     // for this action itself to act on beyond passing it through.
     async restore(revision: number): Promise<RestoreRevisionResponse> {
-      const result = await httpClient.restoreRevision(revision);
+      const result = await httpClient.restoreRevision(this.activeDocumentId!, revision);
       this.content = result.content;
       if (this.document) {
         this.document = { ...this.document, currentRevision: result.currentRevision };
@@ -147,13 +232,14 @@ export const useDocumentStore = defineStore('document', {
     },
 
     async exportRevision(revision?: number, download = false): Promise<string> {
-      return httpClient.exportDocument({ revision, download });
+      return httpClient.exportDocument(this.activeDocumentId!, { revision, download });
     },
 
     async handleServerFrame(frame: ServerFrame): Promise<void> {
       if (frame.kind === 'subscribed') {
         const { content, ...document } = frame.frame.snapshot.document;
         this.document = document;
+        this.activeDocumentId = document.id;
         this.eventSequence = frame.frame.currentSequence;
         // A patch is still in flight (retrying after a disconnect, most likely) — the snapshot
         // predates it, so applying it now would silently discard the not-yet-resent local edit.

@@ -108,6 +108,7 @@ describe('z-index scale — style.css :root tokens', () => {
 vi.mock('../../src/transport/http-client.js', () => ({
   httpClient: {
     getDocument: vi.fn(),
+    listDocuments: vi.fn(),
     listConversations: vi.fn(),
     getSettings: vi.fn(),
     patchSettings: vi.fn(),
@@ -499,6 +500,18 @@ describe('z-index scale — App.vue overlays', () => {
     stubMatchMedia(true);
     localStorage.clear();
     vi.mocked(httpClient.getDocument).mockReset().mockResolvedValue(getDocumentResponse);
+    vi.mocked(httpClient.listDocuments)
+      .mockReset()
+      .mockResolvedValue({
+        documents: [
+          {
+            id: documentFixture.id,
+            title: documentFixture.title,
+            isActive: true,
+            lastActiveAt: documentFixture.updatedAt,
+          },
+        ],
+      });
     vi.mocked(httpClient.listConversations)
       .mockReset()
       .mockResolvedValue(listConversationsResponse);

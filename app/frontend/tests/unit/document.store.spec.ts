@@ -22,6 +22,7 @@ vi.mock('../../src/transport/http-client.js', () => {
     httpClient: {
       getDocument: vi.fn(),
       patchDocument: vi.fn(),
+      listDocuments: vi.fn().mockResolvedValue({ documents: [] }),
     },
     ApiError: MockApiError,
   };
@@ -36,6 +37,7 @@ describe('document store — patchContent 409/retry behavior', () => {
 
   it('a genuine-conflict 409 stops retrying, resyncs the document, and sets conflictMessage', async () => {
     const store = useDocumentStore();
+    store.activeDocumentId = 'doc-1'; // a real tab always has one active before it can ever patch
     vi.mocked(httpClient.patchDocument).mockRejectedValue(
       new ApiError(409, 'UNKNOWN', 'Document has changed since baseRevision 3'),
     );

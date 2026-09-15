@@ -35,6 +35,7 @@ interface DocumentDbRow {
   pi_session_dir: string;
   created_at: string;
   updated_at: string;
+  last_active_at: string;
 }
 
 function mapDocument(row: DocumentDbRow): DocumentRow {
@@ -45,6 +46,7 @@ function mapDocument(row: DocumentDbRow): DocumentRow {
     piSessionDir: row.pi_session_dir,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    lastActiveAt: row.last_active_at,
   };
 }
 
@@ -220,10 +222,17 @@ export class SqliteStorageAdapter implements StorageAdapter {
 
   // ---- document ----
 
-  getDocument(): DocumentRow | null {
-    const row = this.db.prepare('SELECT * FROM document LIMIT 1').get() as
+  getDocument(documentId: string): DocumentRow | null {
+    const row = this.db.prepare('SELECT * FROM document WHERE id = ?').get(documentId) as
       DocumentDbRow | undefined;
     return row ? mapDocument(row) : null;
+  }
+
+  listDocuments(): DocumentRow[] {
+    const rows = this.db
+      .prepare('SELECT * FROM document ORDER BY last_active_at DESC')
+      .all() as unknown as DocumentDbRow[];
+    return rows.map(mapDocument);
   }
 
   createDocument(
@@ -232,10 +241,19 @@ export class SqliteStorageAdapter implements StorageAdapter {
     const currentRevision = row.currentRevision ?? 0;
     this.db
       .prepare(
-        `INSERT INTO document (id, title, current_revision, pi_session_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO document
+           (id, title, current_revision, pi_session_dir, created_at, updated_at, last_active_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.id, row.title, currentRevision, row.piSessionDir, row.createdAt, row.updatedAt);
+      .run(
+        row.id,
+        row.title,
+        currentRevision,
+        row.piSessionDir,
+        row.createdAt,
+        row.updatedAt,
+        row.lastActiveAt,
+      );
     return { ...row, currentRevision };
   }
 
@@ -249,6 +267,36 @@ export class SqliteStorageAdapter implements StorageAdapter {
     this.db
       .prepare(`UPDATE document SET title = ?, updated_at = ? WHERE id = ?`)
       .run(title, updatedAt, id);
+  }
+
+  renameDocument(documentId: string, title: string): DocumentRow {
+    const updatedAt = new Date().toISOString();
+    this.updateDocumentTitle(documentId, title, updatedAt);
+    const row = this.getDocument(documentId);
+    if (!row) {
+      throw new Error(`Document not found: ${documentId}`);
+    }
+    return row;
+  }
+
+  deleteDocument(documentId: string): void {
+    // Deletion order respects the FK graph (`revision` -> conversation/staged_edit,
+    // `staged_edit`/`conversation_event` -> conversation) since `foreign_keys = ON`.
+    this.transaction(() => {
+      this.db.prepare(`DELETE FROM revision WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM staged_edit WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM conversation_event WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM conversation WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM document_change WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM document_snapshot WHERE document_id = ?`).run(documentId);
+      this.db.prepare(`DELETE FROM document WHERE id = ?`).run(documentId);
+    });
+  }
+
+  touchLastActive(documentId: string): void {
+    this.db
+      .prepare(`UPDATE document SET last_active_at = ? WHERE id = ?`)
+      .run(new Date().toISOString(), documentId);
   }
 
   // ---- revision ----

@@ -83,6 +83,7 @@ function buildHarness() {
     piSessionDir: `/tmp/${docId}`,
     createdAt: now,
     updatedAt: now,
+    lastActiveAt: now,
   });
 
   function createConversationAtDepth(branchDepth: number): ConversationRow {

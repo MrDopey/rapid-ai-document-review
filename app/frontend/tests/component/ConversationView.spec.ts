@@ -12,6 +12,7 @@ import {
   useConversationsStore,
   type ConversationMessageState,
 } from '../../src/stores/conversations.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // jsdom doesn't implement `Element.scrollTo` — `ConversationView.vue`'s own sticky-auto-scroll
@@ -102,6 +103,7 @@ describe('ConversationView — draft-aware discard-on-close', () => {
     conversationOverrides: Partial<ConversationDto> = {},
     messages: MessageDto[] = [],
   ) {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     const conversation = conversationFixture({ id: conversationId, ...conversationOverrides });
     store.conversations = [conversation];
@@ -164,7 +166,7 @@ describe('ConversationView — draft-aware discard-on-close', () => {
     const discarded = await store.discardIfEmpty('branch-2');
 
     expect(discarded).toBe(true);
-    expect(httpClient.discardConversation).toHaveBeenCalledWith('branch-2');
+    expect(httpClient.discardConversation).toHaveBeenCalledWith('doc-1', 'branch-2');
     expect(store.conversations.some((c) => c.id === 'branch-2')).toBe(false);
   });
 
@@ -181,7 +183,7 @@ describe('ConversationView — draft-aware discard-on-close', () => {
 
     const discarded = await store.discardIfEmpty('branch-3');
     expect(discarded).toBe(true);
-    expect(httpClient.discardConversation).toHaveBeenCalledWith('branch-3');
+    expect(httpClient.discardConversation).toHaveBeenCalledWith('doc-1', 'branch-3');
   });
 
   it('restores a previously left draft when the same conversation is reopened', async () => {
@@ -411,6 +413,7 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
   function mountView(
     props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {},
   ) {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     const conversation = conversationFixture({ id: 'conv-1', canBranch: props.canBranch ?? true });
     store.conversations = [conversation];
@@ -474,7 +477,9 @@ describe('ConversationView — Branch button (cap gating + auto-focus)', () => {
     await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
 
-    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv-1' });
+    expect(httpClient.branchConversation).toHaveBeenCalledWith('doc-1', {
+      parentConversationId: 'conv-1',
+    });
     expect(wrapper.emitted('branch-created')?.[0]).toEqual(['branch-9']);
   });
 });
@@ -497,6 +502,7 @@ describe('ConversationView — rename UI', () => {
   });
 
   function mountView() {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     const conversation = conversationFixture({ id: 'conv-1', name: 'Original Name' });
     store.conversations = [conversation];
@@ -545,7 +551,7 @@ describe('ConversationView — rename UI', () => {
     await input.trigger('keydown.enter');
     await flushPromises();
 
-    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'New Name');
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('doc-1', 'conv-1', 'New Name');
     expect(store.conversations[0]?.name).toBe('New Name');
     expect(wrapper.find('.thread-title-input').exists()).toBe(false);
     expect(wrapper.find('h2').text()).toBe('New Name');
@@ -563,7 +569,7 @@ describe('ConversationView — rename UI', () => {
     await input.trigger('blur');
     await flushPromises();
 
-    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'Blurred Name');
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('doc-1', 'conv-1', 'Blurred Name');
     expect(wrapper.find('h2').text()).toBe('Blurred Name');
   });
 

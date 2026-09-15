@@ -37,8 +37,15 @@ export function registerWsRoutes(
         return;
       }
       // subscribe
-      const doc = storage.getDocument();
-      if (!doc) return;
+      const doc = storage.getDocument(frame.data.documentId);
+      if (!doc) {
+        socket.send(
+          JSON.stringify({
+            error: { code: 'DOCUMENT_NOT_FOUND', message: 'Document not found' },
+          }),
+        );
+        return;
+      }
       eventHub.subscribe(socket, doc.id, frame.data.sinceSequence);
     });
 

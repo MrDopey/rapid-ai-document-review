@@ -137,7 +137,7 @@ export class ConversationReviewService {
         this.storage,
         row,
         document.currentRevision,
-        this.automerge.get().getContent(),
+        this.automerge.get(document.id).getContent(),
       ),
       reviewedConversationIds,
     };

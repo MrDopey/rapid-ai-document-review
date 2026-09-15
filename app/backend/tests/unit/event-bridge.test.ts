@@ -52,6 +52,7 @@ function buildHarness(): Harness {
     piSessionDir: '/tmp/pi-sessions',
     createdAt: now,
     updatedAt: now,
+    lastActiveAt: now,
   });
 
   const conversationId = newId('conv');

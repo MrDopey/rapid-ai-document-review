@@ -4,6 +4,7 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { StagedEditDto } from '@rapid-ai-document-review/shared/contracts/http';
 import EditsList from '../../src/components/edits/EditsList.vue';
 import { useEditsStore } from '../../src/stores/edits.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // This list is fed straight from `useEditsStore().editsFor`, which mirrors the backend's
@@ -49,6 +50,7 @@ describe('EditsList — proposal ordering', () => {
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    useDocumentStore().activeDocumentId = 'doc-1';
     vi.mocked(httpClient.listEdits).mockReset();
   });
 
@@ -108,6 +110,7 @@ describe('EditsList — edit-preview overlay dismissal', () => {
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    useDocumentStore().activeDocumentId = 'doc-1';
     vi.mocked(httpClient.listEdits).mockReset();
     vi.mocked(httpClient.previewEdit).mockReset();
   });
@@ -209,6 +212,7 @@ describe('EditsList — per-row Drop confirmation gate', () => {
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    useDocumentStore().activeDocumentId = 'doc-1';
     vi.mocked(httpClient.listEdits).mockReset();
     vi.mocked(httpClient.dropEdit).mockReset();
     confirmSpy = vi.spyOn(window, 'confirm');
@@ -242,7 +246,7 @@ describe('EditsList — per-row Drop confirmation gate', () => {
     await flushPromises();
 
     expect(confirmSpy).toHaveBeenCalledWith('Drop this proposed edit? This cannot be undone.');
-    expect(httpClient.dropEdit).toHaveBeenCalledWith('edit-1');
+    expect(httpClient.dropEdit).toHaveBeenCalledWith('doc-1', 'edit-1');
   });
 
   it('cancelling the dialog is a no-op — the edit is neither dropped nor left busy', async () => {

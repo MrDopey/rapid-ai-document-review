@@ -10,6 +10,7 @@ import {
   useConversationsStore,
   type ConversationMessageState,
 } from '../../src/stores/conversations.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // Extracted from `ConversationThreadBox.vue` and `ConversationView.vue`, both of which hand-
@@ -64,6 +65,7 @@ describe('useConversationBranchAction', () => {
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    useDocumentStore().activeDocumentId = 'doc-1';
     vi.mocked(httpClient.branchConversation).mockReset();
   });
 
@@ -121,7 +123,9 @@ describe('useConversationBranchAction', () => {
     const { action, onBranchCreated } = setup({ canBranch: true });
     action.value.onClick();
     await flushPromises();
-    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'c1' });
+    expect(httpClient.branchConversation).toHaveBeenCalledWith('doc-1', {
+      parentConversationId: 'c1',
+    });
     expect(onBranchCreated).toHaveBeenCalledWith('branch-9');
   });
 

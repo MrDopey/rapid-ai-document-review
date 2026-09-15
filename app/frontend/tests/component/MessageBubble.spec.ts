@@ -9,6 +9,7 @@ import {
   useConversationsStore,
   type ConversationMessageState,
 } from '../../src/stores/conversations.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // The new "Branch" parity test below (focused-view header action) drives
@@ -561,6 +562,7 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     messages: ConversationMessageState[],
     conversationOverrides: Partial<ConversationDto> = {},
   ) {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     store.conversations = [conversationFixture(conversationOverrides)];
     store.messagesByConversation['conv1'] = messages;
@@ -613,7 +615,9 @@ describe('ConversationDetailPanel/ConversationView — Expand all/Branch parity 
     await branchButton.trigger('click');
     await flushPromises();
 
-    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv1' });
+    expect(httpClient.branchConversation).toHaveBeenCalledWith('doc-1', {
+      parentConversationId: 'conv1',
+    });
   });
 
   it('disables the Branch button when the server-computed canBranch is false (e.g. max depth reached)', () => {

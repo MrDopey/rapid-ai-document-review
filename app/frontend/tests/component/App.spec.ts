@@ -46,6 +46,17 @@ const listConversationsResponse: ListConversationsResponse = {
   nextCursor: null,
 };
 
+const listDocumentsResponse = {
+  documents: [
+    {
+      id: documentFixture.id,
+      title: documentFixture.title,
+      isActive: true,
+      lastActiveAt: documentFixture.updatedAt,
+    },
+  ],
+};
+
 const settingsFixture: UserSettingsDto = {
   thinkingVisible: false,
   revisionDebounceMs: 300_000,
@@ -59,17 +70,30 @@ const settingsFixture: UserSettingsDto = {
 vi.mock('../../src/transport/http-client.js', () => ({
   httpClient: {
     getDocument: vi.fn(async () => getDocumentResponse),
+    listDocuments: vi.fn(async () => listDocumentsResponse),
     listConversations: vi.fn(async () => listConversationsResponse),
     getSettings: vi.fn(async () => settingsFixture),
     patchSettings: vi.fn(async () => settingsFixture),
     // Used only by the "auto-focus on branch" suite below — the other suites in this file never
     // branch, so this stays unset (undefined resolution) for them.
     branchConversation: vi.fn(),
+    // Used only by the "Document switcher" suite below.
+    createDocument: vi.fn(),
+    renameDocument: vi.fn(),
+    deleteDocument: vi.fn(),
   },
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
 }));
 
-import { httpClient } from '../../src/transport/http-client.js';
+import { httpClient, ApiError } from '../../src/transport/http-client.js';
 import { HOTKEY_BINDINGS, findConflicts } from '../../src/a11y/keymap-registry.js';
 import { useConversationsStore } from '../../src/stores/conversations.js';
 import { useDocumentStore } from '../../src/stores/document.js';
@@ -86,6 +110,7 @@ vi.mock('../../src/transport/ws-client.js', async () => {
     connect = vi.fn();
     close = vi.fn();
     send = vi.fn();
+    resubscribe = vi.fn();
   }
   return { WsClient: MockWsClient };
 });
@@ -354,7 +379,9 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     await wrapper.get('[data-action="branch"]').trigger('click');
     await flushPromises();
 
-    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'main-1' });
+    expect(httpClient.branchConversation).toHaveBeenCalledWith('doc-1', {
+      parentConversationId: 'main-1',
+    });
     const states = focusedPanelStates(wrapper);
     expect(states.map((s) => s.conversationId).sort()).toEqual(['branch-1', 'main-1']);
     // The freshly auto-focused branch becomes `lastInteractedId` — the one active panel — and
@@ -1503,5 +1530,267 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
 
     expect(activeConversationId(wrapper)).toBe('c1');
     expect(document.activeElement?.id).toBe('composer-c1');
+  });
+});
+
+// 010-multi-document-support, User Story 1: create/list/switch documents via the title-bar dropdown
+// (DocumentSwitcherDropdown.vue) or the Ctrl+Alt+[/Ctrl+Alt+] hotkeys (a11y/keymap-registry.ts).
+describe('App.vue — Document switcher (multi-document)', () => {
+  let pinia: Pinia;
+  let currentWrapper: VueWrapper | null = null;
+
+  const docA: DocumentDto = {
+    id: 'doc-a',
+    title: 'Document A',
+    currentRevision: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const docB: DocumentDto = {
+    id: 'doc-b',
+    title: 'Document B',
+    currentRevision: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    stubMatchMedia(true);
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [
+        { id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt },
+        { id: docB.id, title: docB.title, isActive: false, lastActiveAt: docB.updatedAt },
+      ],
+    });
+    vi.mocked(httpClient.getDocument).mockImplementation(async (id: string) =>
+      id === docA.id
+        ? { document: docA, content: 'Content A', eventSequence: 0 }
+        : { document: docB, content: 'Content B', eventSequence: 0 },
+    );
+  });
+
+  afterEach(() => {
+    currentWrapper?.unmount();
+    currentWrapper = null;
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  async function mountSwitcherApp(): Promise<VueWrapper> {
+    currentWrapper = await mountApp(pinia);
+    return currentWrapper;
+  }
+
+  function openDropdown(wrapper: VueWrapper) {
+    return wrapper.find('.document-switcher-toggle').trigger('click');
+  }
+
+  it('lists every open document, most-recently-active first, marking the active one', async () => {
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+
+    const rows = wrapper.findAll('.document-switcher-select');
+    expect(rows.map((r) => r.text())).toEqual(['Document A', 'Document B']);
+    expect(wrapper.findAll('.document-switcher-row')[0]!.classes()).toContain('is-active');
+    expect(wrapper.findAll('.document-switcher-row')[1]!.classes()).not.toContain('is-active');
+  });
+
+  it('clicking a non-active row switches the active document, its content, and re-subscribes the WS', async () => {
+    const wrapper = await mountSwitcherApp();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document A');
+
+    await openDropdown(wrapper);
+    const rows = wrapper.findAll('.document-switcher-select');
+    await rows[1]!.trigger('click');
+    await flushPromises();
+
+    expect(httpClient.getDocument).toHaveBeenCalledWith('doc-b');
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document B');
+    // Switching back confirms Document A's own content was never touched by the switch away.
+    await openDropdown(wrapper);
+    await wrapper.findAll('.document-switcher-select')[0]!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document A');
+  });
+
+  it('Ctrl+Alt+]/Ctrl+Alt+[ cycle through documents, wrapping at both ends', async () => {
+    const wrapper = await mountSwitcherApp();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document A');
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'BracketRight', ctrlKey: true, altKey: true }),
+    );
+    await flushPromises();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document B');
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'BracketRight', ctrlKey: true, altKey: true }),
+    );
+    await flushPromises();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document A');
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'BracketLeft', ctrlKey: true, altKey: true }),
+    );
+    await flushPromises();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document B');
+  });
+
+  it('the cycle hotkey is a no-op with only one open document', async () => {
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [{ id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt }],
+    });
+    const wrapper = await mountSwitcherApp();
+    expect(httpClient.getDocument).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'BracketRight', ctrlKey: true, altKey: true }),
+    );
+    await flushPromises();
+
+    expect(httpClient.getDocument).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Document A');
+  });
+
+  it('"+ New document" creates a document and immediately switches to it', async () => {
+    const newDoc: DocumentDto = {
+      id: 'doc-c',
+      title: 'Untitled',
+      currentRevision: 1,
+      createdAt: '2026-01-03T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    vi.mocked(httpClient.createDocument).mockResolvedValue({
+      document: newDoc,
+      content: '# Untitled\n',
+      mainConversation: {
+        id: 'main-c',
+        name: 'main-c',
+        kind: 'main',
+        parentId: null,
+        branchDepth: 0,
+        status: 'idle',
+        isPrimary: true,
+        contextRevision: 1,
+        isStale: false,
+        pendingEditCount: 0,
+        canEdit: true,
+        canBranch: true,
+        errorMessage: null,
+        createdAt: newDoc.createdAt,
+        closedAt: null,
+        readOnly: false,
+        anchorOrphaned: false,
+        seedSelection: null,
+        forkedFromMessageId: null,
+      },
+    });
+
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+    await wrapper.find('.document-switcher-create').trigger('click');
+    await flushPromises();
+
+    expect(httpClient.createDocument).toHaveBeenCalled();
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Untitled');
+  });
+
+  it('renames a document via the rename affordance (FR-007)', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Renamed Doc');
+    vi.mocked(httpClient.renameDocument).mockResolvedValue({
+      currentRevision: docA.currentRevision,
+      revisionCreated: false,
+    });
+
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+    await wrapper.find('.document-switcher-rename').trigger('click');
+    await flushPromises();
+
+    expect(promptSpy).toHaveBeenCalled();
+    expect(httpClient.renameDocument).toHaveBeenCalledWith('doc-a', 'Renamed Doc');
+    expect(wrapper.find('.document-switcher-toggle-title').text()).toBe('Renamed Doc');
+    promptSpy.mockRestore();
+  });
+
+  it('a blank/cancelled rename prompt is a no-op', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+    await wrapper.find('.document-switcher-rename').trigger('click');
+    await flushPromises();
+
+    expect(httpClient.renameDocument).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('deletes a non-active document after confirmation (FR-008)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(httpClient.deleteDocument).mockResolvedValue({ id: docB.id });
+    vi.mocked(httpClient.listDocuments).mockResolvedValueOnce({
+      documents: [
+        { id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt },
+        { id: docB.id, title: docB.title, isActive: false, lastActiveAt: docB.updatedAt },
+      ],
+    });
+
+    const wrapper = await mountSwitcherApp();
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [{ id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt }],
+    });
+
+    await openDropdown(wrapper);
+    const deleteButtons = wrapper.findAll('.document-switcher-delete');
+    await deleteButtons[1]!.trigger('click');
+    await flushPromises();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(httpClient.deleteDocument).toHaveBeenCalledWith('doc-b');
+    confirmSpy.mockRestore();
+  });
+
+  it('a cancelled delete confirmation is a no-op', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+    await wrapper.findAll('.document-switcher-delete')[1]!.trigger('click');
+    await flushPromises();
+
+    expect(httpClient.deleteDocument).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('disables the delete affordance for the sole remaining document', async () => {
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [{ id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt }],
+    });
+    const wrapper = await mountSwitcherApp();
+    await openDropdown(wrapper);
+
+    expect(wrapper.find('.document-switcher-delete').attributes('disabled')).toBeDefined();
+  });
+
+  it('surfaces a 409 LAST_DOCUMENT error via the conflict banner if delete is bypassed', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [{ id: docA.id, title: docA.title, isActive: true, lastActiveAt: docA.updatedAt }],
+    });
+    vi.mocked(httpClient.deleteDocument).mockRejectedValue(
+      new ApiError(409, 'LAST_DOCUMENT', 'Cannot delete the only remaining document.'),
+    );
+
+    const wrapper = await mountSwitcherApp();
+    const store = useDocumentStore();
+    await store.remove(docA.id);
+    await flushPromises();
+
+    expect(store.conflictMessage).toBe('Cannot delete the only remaining document.');
+    expect(wrapper.find('.toolbar-conflict-banner').text()).toContain(
+      'Cannot delete the only remaining document.',
+    );
+    confirmSpy.mockRestore();
   });
 });

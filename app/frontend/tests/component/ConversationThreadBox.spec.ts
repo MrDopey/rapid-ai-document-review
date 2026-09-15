@@ -5,6 +5,7 @@ import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts
 import { computeAnchorY, type AnchorPositionSource } from '../../src/components/canvas/anchorY.js';
 import ConversationThreadBox from '../../src/components/conversation/ConversationThreadBox.vue';
 import { useConversationsStore } from '../../src/stores/conversations.js';
+import { useDocumentStore } from '../../src/stores/document.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 // Rename UI (title edit) below drives `useConversationsStore().rename()`, which calls through to
@@ -162,6 +163,7 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
   function mountBox(
     props: { atFocusCap?: boolean; maxFocused?: number; canBranch?: boolean } = {},
   ) {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     store.conversations = [
       conversationFixture({ id: 'conv-1', name: 'Conv One', canBranch: props.canBranch ?? true }),
@@ -215,7 +217,9 @@ describe('ConversationThreadBox — Branch button (cap gating + auto-focus)', ()
     await wrapper.find('[data-action="branch"]').trigger('click');
     await flushPromises();
 
-    expect(httpClient.branchConversation).toHaveBeenCalledWith({ parentConversationId: 'conv-1' });
+    expect(httpClient.branchConversation).toHaveBeenCalledWith('doc-1', {
+      parentConversationId: 'conv-1',
+    });
     expect(wrapper.emitted('branch-created')?.[0]).toEqual(['branch-9']);
   });
 });
@@ -263,6 +267,7 @@ describe('ConversationThreadBox — rename UI', () => {
   });
 
   function mountBox() {
+    useDocumentStore().activeDocumentId = 'doc-1';
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'conv-1', name: 'Original Name' })];
     store.messagesByConversation['conv-1'] = [];
@@ -302,7 +307,7 @@ describe('ConversationThreadBox — rename UI', () => {
     await input.trigger('keydown.enter');
     await flushPromises();
 
-    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'New Name');
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('doc-1', 'conv-1', 'New Name');
     expect(store.conversations[0]?.name).toBe('New Name');
     expect(wrapper.find('.thread-title-input').exists()).toBe(false);
     expect(wrapper.find('.thread-title').text()).toBe('New Name');
@@ -319,7 +324,7 @@ describe('ConversationThreadBox — rename UI', () => {
     await input.trigger('blur');
     await flushPromises();
 
-    expect(httpClient.renameConversation).toHaveBeenCalledWith('conv-1', 'Blurred Name');
+    expect(httpClient.renameConversation).toHaveBeenCalledWith('doc-1', 'conv-1', 'Blurred Name');
     expect(wrapper.find('.thread-title').text()).toBe('Blurred Name');
   });
 

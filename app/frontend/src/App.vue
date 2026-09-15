@@ -7,6 +7,7 @@ import { useEditsStore } from './stores/edits.js';
 import { WsClient } from './transport/ws-client.js';
 import { mountLiveRegions } from './a11y/live-regions.js';
 import DocumentCanvas from './components/canvas/DocumentCanvas.vue';
+import DocumentSwitcherDropdown from './components/header/DocumentSwitcherDropdown.vue';
 import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
 import ReconnectingIndicator from './components/hud/ReconnectingIndicator.vue';
@@ -504,6 +505,8 @@ const globalBindingHandlers: Record<string, () => void> = {
   'cycle-conversation-next': () => cycleFocusedConversation(1),
   'cycle-conversation-next-arrow': () => cycleFocusedConversation(1),
   'cycle-conversation-next-alt': () => cycleFocusedConversation(1),
+  'switch-document-next': () => cycleDocument(1),
+  'switch-document-prev': () => cycleDocument(-1),
 };
 
 function onGlobalKeydown(event: KeyboardEvent): void {
@@ -572,7 +575,11 @@ onBeforeUnmount(() => {
 
 function connectWs(): void {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const client = new WsClient(`${protocol}//${location.host}/events`, () => store.eventSequence);
+  const client = new WsClient(
+    `${protocol}//${location.host}/events`,
+    () => store.activeDocumentId!,
+    () => store.eventSequence,
+  );
   // Each store owns its own `subscribeToFrames` wiring (see the `subscribeToFrames` method on
   // stores/document.ts, conversations.ts, settings.ts and edits.ts) — this loop is the single
   // place a new store's frame handling needs to be registered, rather than a hand-listed
@@ -583,6 +590,73 @@ function connectWs(): void {
   }
   client.connect();
   wsClient.value = client;
+}
+
+// Switching the active document (dropdown/hotkey) re-subscribes the existing WS connection to the
+// newly active documentId rather than opening a second one (contracts/http-and-ws.md) — `oldId` is
+// `null` only on the very first load, before `connectWs` has run, so there is nothing to
+// re-subscribe yet.
+watch(
+  () => store.activeDocumentId,
+  (newId, oldId) => {
+    if (oldId && newId && newId !== oldId) {
+      wsClient.value?.resubscribe();
+    }
+  },
+);
+
+/** Dropdown row click / next-previous hotkey (FR-003): fetches the target document and swaps every
+ *  other document-scoped surface to match. `closeAllFocused` drops the multi-focus overlay first —
+ *  its `lastInteractedId`/`focusedConversationIds` name conversations belonging to the document
+ *  being switched away from, and conversation ids are only unique per document-independent
+ *  generation, never meaningfully "focusable" once their owning document is no longer active. The
+ *  WS re-subscribe above fires from this same `activeDocumentId` change, so it isn't repeated here. */
+async function switchDocument(documentId: string): Promise<void> {
+  if (documentId === store.activeDocumentId) return;
+  closeAllFocused();
+  await store.switchTo(documentId);
+  await conversationsStore.load();
+}
+
+/** Ctrl+Alt+[ / Ctrl+Alt+] (`onGlobalKeydown` below): moves to the previous/next document in
+ *  `store.documents`' current (most-recently-active-first) order, wrapping at both ends. A no-op
+ *  with zero or one document — nothing to switch to. */
+function cycleDocument(offset: number): void {
+  const docs = store.documents;
+  if (docs.length <= 1) return;
+  const currentIndex = docs.findIndex((d) => d.id === store.activeDocumentId);
+  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + docs.length) % docs.length;
+  void switchDocument(docs[nextIndex]!.id);
+}
+
+/** DocumentSwitcherDropdown's "+ New document" row (FR-001): mirrors `switchDocument`'s own
+ *  cross-store refresh — `store.createNew()` already makes the new document active (triggering the
+ *  WS re-subscribe watch above), so this only needs to additionally refresh the conversation HUD's
+ *  list to the new (auto-created Main-conversation-only) document. */
+async function onCreateNewDocument(): Promise<void> {
+  await store.createNew();
+  await conversationsStore.load();
+}
+
+/** DocumentSwitcherDropdown's rename affordance (FR-007): `window.prompt` matches this app's only
+ *  other free-text confirmation pattern (there is no existing inline-edit-in-place primitive to
+ *  reuse). A blank/cancelled prompt is a no-op. */
+async function onRenameDocument(documentId: string): Promise<void> {
+  const current = store.documents.find((d) => d.id === documentId)?.title ?? '';
+  const title = window.prompt('Rename document', current);
+  if (title === null || !title.trim()) return;
+  await store.rename(documentId, title.trim());
+}
+
+/** DocumentSwitcherDropdown's delete affordance (FR-008/FR-009): `window.confirm` matches
+ *  DropAllButton.vue's existing destructive-action pattern. The dropdown already disables the
+ *  delete button once only one document remains, but a stale dropdown could still race the
+ *  request through — `store.remove` catches that 409 `LAST_DOCUMENT` itself and surfaces it via
+ *  the same dismissible `conflictMessage` banner rather than throwing. */
+async function onDeleteDocument(documentId: string): Promise<void> {
+  const title = store.documents.find((d) => d.id === documentId)?.title || 'Untitled';
+  if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
+  await store.remove(documentId);
 }
 
 async function onCreateDocument(): Promise<void> {
@@ -697,23 +771,23 @@ async function onToggleReasoning(event: Event): Promise<void> {
   </section>
 
   <div v-else class="editor-layout">
-    <!-- A two-column layout (~80/20): the document title, plus the Keyboard-shortcuts/Help icon
-         triggers pinned to its right, shows via `.document-title-bar` above both columns (and in
-         the browser tab — see the `document.title` watch in <script>); the left column holds just
-         the "Conversations (HUD)" box (whose rows now also carry their own Make/Clear Primary
-         button — see HudPanel.vue); the right column, top-aligned with the HUD box and extending
-         down through its bottom (plain flex-row stretch gives this for free), holds just the
-         Global Actions box. The Primary designation error banner is rendered as its own full-width
-         strip beneath both columns. -->
+    <!-- A two-column layout (~80/20): the document switcher (DocumentSwitcherDropdown.vue), plus
+         the Keyboard-shortcuts/Help icon triggers pinned to its right, shows via
+         `.document-title-bar` above both columns (and in the browser tab — see the
+         `document.title` watch in <script>); the left column holds just the "Conversations (HUD)"
+         box (whose rows now also carry their own Make/Clear Primary button — see HudPanel.vue);
+         the right column, top-aligned with the HUD box and extending down through its bottom
+         (plain flex-row stretch gives this for free), holds just the Global Actions box. The
+         Primary designation error banner is rendered as its own full-width strip beneath both
+         columns. -->
     <header class="toolbar">
-      <!-- `store.document` is always set here (this whole branch is `v-else` of `!hasDocument`
-           above), so `.title` is always available; the `'AI Document Review'` fallback is purely
-           defensive (an empty-string title, say) rather than something this branch is ever
-           expected to hit in practice. -->
       <div class="document-title-bar">
-        <h1 class="document-title-text">
-          {{ store.document?.title || 'AI Document Review' }}
-        </h1>
+        <DocumentSwitcherDropdown
+          @switch="switchDocument"
+          @create="onCreateNewDocument"
+          @rename="onRenameDocument"
+          @delete="onDeleteDocument"
+        />
         <!-- Icon-only controls (labels dropped, aria-label/title kept for a11y), pinned to the
              title bar's right edge. -->
         <div class="title-bar-icons">
@@ -1112,23 +1186,13 @@ async function onToggleReasoning(event: Event): Promise<void> {
   color: inherit;
 }
 /* Deliberately small/unobtrusive — this two-column toolbar layout (see the comment on
-   `.toolbar-columns` below) has no spare vertical room for a large heading. A flex row: the title
-   text takes the available space (truncating with an ellipsis, per `.document-title-text` below)
-   with the Keyboard-shortcuts/Help icon buttons pinned to the right. */
+   `.toolbar-columns` below) has no spare vertical room for a large heading. A flex row: the
+   document switcher takes the available space with the Keyboard-shortcuts/Help icon buttons
+   pinned to the right. */
 .document-title-bar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-.document-title-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .title-bar-icons {
   flex: 0 0 auto;

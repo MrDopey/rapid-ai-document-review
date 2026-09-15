@@ -185,6 +185,20 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
       'editor, the conversation-rename field, or while any dialog is open.',
     scope: 'Global',
   },
+  {
+    keys: 'Ctrl+Alt+]',
+    description:
+      'Switch to the next open document (most-recently-active order). No-op with only one document open. ' +
+      'Works from anywhere except the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
+  {
+    keys: 'Ctrl+Alt+[',
+    description:
+      'Switch to the previous open document (most-recently-active order). No-op with only one document open. ' +
+      'Works from anywhere except the document editor, the composer, or an open dialog.',
+    scope: 'Global',
+  },
 ] as const;
 
 /**
@@ -455,6 +469,20 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     composerExempt: true,
     description:
       'Focus the next currently-focused conversation panel (wraps). Alternate for Ctrl+Alt+L, in case the OS/window manager claims that combo (e.g. as a "Lock screen" shortcut).',
+  },
+  {
+    id: 'switch-document-next',
+    modifiers: { ctrl: true, alt: true, shift: false },
+    code: 'BracketRight',
+    scope: 'Global',
+    description: 'Switch to the next open document.',
+  },
+  {
+    id: 'switch-document-prev',
+    modifiers: { ctrl: true, alt: true, shift: false },
+    code: 'BracketLeft',
+    scope: 'Global',
+    description: 'Switch to the previous open document.',
   },
   {
     id: 'toggle-filter',

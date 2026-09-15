@@ -140,6 +140,7 @@ describe('FIX 4: document-mutating writes route through the shared per-document 
 
     const withLockSpy = vi.spyOn(h.primaryMutex, 'withLock');
     await h.documentService.applyChanges(
+      documentId,
       undefined,
       [{ from: 0, to: 5, insert: 'Howdy' }],
       undefined,
@@ -191,8 +192,8 @@ describe('FIX 4: document-mutating writes route through the shared per-document 
     expect(new Set(revisions).size).toBe(2);
     expect(revisions.sort()).toEqual([revisionBefore + 1, revisionBefore + 2]);
 
-    expect(h.storage.getDocument()?.currentRevision).toBe(revisionBefore + 2);
-    expect(h.automerge.get().getContent()).toBe('ONE two three FOUR.\n');
+    expect(h.storage.getDocument(documentId)?.currentRevision).toBe(revisionBefore + 2);
+    expect(h.automerge.get(documentId).getContent()).toBe('ONE two three FOUR.\n');
     expect(h.storage.getStagedEdit(editA.id)?.status).toBe('applied');
     expect(h.storage.getStagedEdit(editB.id)?.status).toBe('applied');
   });

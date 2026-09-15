@@ -171,8 +171,8 @@ export class ConversationService {
     const existing = this.storage.getMainConversation(documentId);
     if (existing) return existing;
 
-    const document = this.storage.getDocument();
-    if (!document || document.id !== documentId) {
+    const document = this.storage.getDocument(documentId);
+    if (!document) {
       throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     }
     const now = new Date().toISOString();
@@ -200,7 +200,7 @@ export class ConversationService {
       row.id,
       document.title,
       document.currentRevision,
-      this.automerge.get().getContent(),
+      this.automerge.get(documentId).getContent(),
     );
 
     return row;
@@ -209,17 +209,19 @@ export class ConversationService {
   /**
    * Delivers the document under review as a brand-new Main conversation's first message, so the
    * agent has it in message history from the start rather than only reachable via the on-demand
-   * `read_document` tool (document-tools.ts). Fire-and-forget through the ordinary `send()` path,
-   * same convention as `branch()`/`review()`'s seed messages above: it appears in the transcript
-   * as a normal `role: 'user'` message and its own progress/failure surfaces over the event
-   * stream, never blocking the caller (a document-creation or startup-recovery call, neither of
-   * which should wait on a full agent turn). Called once, at Main-creation time, by both
+   * `read_document` tool (document-tools.ts). Sent with `isSeed: true`, same convention as
+   * `branch()`'s seed message above: it appears in the transcript as a normal `role: 'user'`
+   * message and is delivered into the Pi session, but — unlike `review()`'s send, which
+   * deliberately triggers a real agent turn — never starts one on its own; creating a document (or
+   * the startup-recovery call below) must not silently kick off a live model call. Its own
+   * progress/failure surfaces over the event stream, never blocking the caller. Called once, at
+   * Main-creation time, by both
    * `ensureMain` above and `DocumentService.create` (which builds Main directly rather than
    * through `ensureMain`, for construction-order reasons — see server.ts).
    */
   seedMain(conversationId: string, documentTitle: string, revision: number, content: string): void {
     const seedMessage = buildMainSeedMessage(documentTitle, revision, content);
-    void this.send(conversationId, seedMessage).catch((err) => {
+    void this.send(conversationId, seedMessage, { isSeed: true }).catch((err) => {
       // `event: 'agent_error'` — same reasoning as branch()'s/review()'s seed-message catch above.
       logger.warn(
         {
@@ -259,10 +261,10 @@ export class ConversationService {
   }
 
   getAll(documentId: string, options: PaginationOptions): ListConversationsResponse {
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(documentId);
     if (!document) throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     const page = this.storage.listConversations(documentId, options);
-    const content = this.automerge.get().getContent();
+    const content = this.automerge.get(documentId).getContent();
     return {
       currentRevision: document.currentRevision,
       conversations: toConversationDtos(
@@ -277,14 +279,14 @@ export class ConversationService {
 
   getOne(conversationId: string): GetConversationResponse {
     const conversation = this.getConversationOrThrow(conversationId);
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(conversation.documentId);
     if (!document) throw new DocumentNotFoundError('Document not found');
     return {
       conversation: toConversationDto(
         this.storage,
         conversation,
         document.currentRevision,
-        this.automerge.get().getContent(),
+        this.automerge.get(conversation.documentId).getContent(),
       ),
       messages: this.buildMessages(conversationId),
       stagedEdits: this.storage.listStagedEditsByConversation(conversationId).map(toStagedEditDto),
@@ -302,7 +304,7 @@ export class ConversationService {
    */
   rename(conversationId: string, name: string): ConversationDto {
     const conversation = this.getConversationOrThrow(conversationId);
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(conversation.documentId);
     if (!document) throw new DocumentNotFoundError('Document not found');
 
     const now = new Date().toISOString();
@@ -314,7 +316,7 @@ export class ConversationService {
       this.storage,
       updated,
       document.currentRevision,
-      this.automerge.get().getContent(),
+      this.automerge.get(conversation.documentId).getContent(),
     );
   }
 
@@ -357,14 +359,14 @@ export class ConversationService {
       );
     }
 
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(parent.documentId);
     if (!document) throw new DocumentNotFoundError('Document not found');
 
     let seedSelection: SeedSelection | null = null;
     let seedExcerpt = '';
     let documentContent = '';
     if (request.selection) {
-      documentContent = this.automerge.get().getContent();
+      documentContent = this.automerge.get(document.id).getContent();
       const { from, to } = request.selection;
       const text = documentContent.slice(from, to);
       seedSelection = { from, to, text };
@@ -438,7 +440,7 @@ export class ConversationService {
       this.storage,
       row,
       document.currentRevision,
-      documentContent || this.automerge.get().getContent(),
+      documentContent || this.automerge.get(document.id).getContent(),
     );
   }
 
@@ -562,8 +564,8 @@ export class ConversationService {
    * own DB-write-then-publish ordering above.
    */
   private archiveMain(documentId: string): CloseConversationResponse {
-    const document = this.storage.getDocument();
-    if (!document || document.id !== documentId) {
+    const document = this.storage.getDocument(documentId);
+    if (!document) {
       throw new DocumentNotFoundError(`Document not found: ${documentId}`);
     }
     const oldMain = this.storage.getMainConversation(documentId);
@@ -637,7 +639,7 @@ export class ConversationService {
       newMainId,
       document.title,
       document.currentRevision,
-      this.automerge.get().getContent(),
+      this.automerge.get(documentId).getContent(),
     );
 
     return {
@@ -715,7 +717,7 @@ export class ConversationService {
       throw new ConversationNotClosedError('Only a closed conversation can be reviewed');
     }
 
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(target.documentId);
     if (!document) throw new DocumentNotFoundError('Document not found');
 
     return this.reviewService.review(target, document, {
@@ -812,7 +814,7 @@ export class ConversationService {
       );
     }
 
-    const document = this.storage.getDocument();
+    const document = this.storage.getDocument(conversation.documentId);
     if (!document) throw new DocumentNotFoundError('Document not found');
 
     const previousContextRevision = conversation.contextRevision;

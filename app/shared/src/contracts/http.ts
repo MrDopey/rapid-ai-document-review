@@ -34,7 +34,7 @@ export type ConflictDetail = z.infer<typeof ConflictDetail>;
 
 export const ErrorCode = z.enum([
   'DOCUMENT_NOT_FOUND',
-  'DOCUMENT_ALREADY_EXISTS',
+  'LAST_DOCUMENT',
   'CONVERSATION_NOT_FOUND',
   'MAX_CONVERSATION_DEPTH_EXCEEDED',
   'MAX_EDITING_DEPTH_EXCEEDED',
@@ -71,6 +71,25 @@ export const DocumentDto = z.object({
   updatedAt: z.string(),
 });
 export type DocumentDto = z.infer<typeof DocumentDto>;
+
+export const DocumentSummaryDto = z.object({
+  id: z.string(),
+  title: z.string(),
+  isActive: z.boolean(),
+  lastActiveAt: z.string(),
+});
+export type DocumentSummaryDto = z.infer<typeof DocumentSummaryDto>;
+
+export const ListDocumentsResponse = z.object({
+  documents: z.array(DocumentSummaryDto),
+});
+export type ListDocumentsResponse = z.infer<typeof ListDocumentsResponse>;
+
+export const RenameDocumentRequest = z.object({ title: z.string().min(1) });
+export type RenameDocumentRequest = z.infer<typeof RenameDocumentRequest>;
+
+export const DeleteDocumentResponse = z.object({ id: z.string() });
+export type DeleteDocumentResponse = z.infer<typeof DeleteDocumentResponse>;
 
 export const ConversationSeedSelectionDto = z.object({
   from: z.number().int(),

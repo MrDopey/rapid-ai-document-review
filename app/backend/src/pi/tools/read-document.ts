@@ -91,16 +91,16 @@ export function createReadDocumentTool(deps: ReadDocumentToolDeps) {
     parameters: ReadDocumentToolParams,
     execute: async (_toolCallId, rawParams) => {
       const params = readDocumentParams.parse(rawParams);
-      const document = deps.storage.getDocument();
       const conversation = deps.storage.getConversation(deps.conversationId);
+      const document = conversation ? deps.storage.getDocument(conversation.documentId) : null;
       if (!document || !conversation) {
         return textResult('No document is available to read.');
       }
 
       const revisionRow = deps.storage.getRevision(document.id, conversation.contextRevision);
       const content = revisionRow
-        ? deps.automerge.get().view(JSON.parse(revisionRow.heads) as string[])
-        : deps.automerge.get().getContent();
+        ? deps.automerge.get(document.id).view(JSON.parse(revisionRow.heads) as string[])
+        : deps.automerge.get(document.id).getContent();
 
       const text = renderReadResult(
         document.title,

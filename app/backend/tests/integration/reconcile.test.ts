@@ -162,10 +162,10 @@ function registerFakeSession(
  *  and record a `manual_debounce` revision (skipping the real debounce timer, which is orthogonal
  *  to what this suite tests). */
 function advance(h: Harness, documentId: string, oldStr: string, newStr: string): void {
-  const content = h.automerge.get().getContent();
+  const content = h.automerge.get(documentId).getContent();
   const from = content.indexOf(oldStr);
   if (from === -1) throw new Error(`advance(): "${oldStr}" not found in current content`);
-  h.automerge.get().splice([{ from, to: from + oldStr.length, insert: newStr }]);
+  h.automerge.get(documentId).splice([{ from, to: from + oldStr.length, insert: newStr }]);
   h.revisionService.createRevision(documentId, { source: 'user', origin: 'manual_debounce' });
 }
 
@@ -245,7 +245,7 @@ function assertCrossEntityInvariants(storage: StorageAdapter, documentId: string
   }
 
   // 8. Revision continuity: gapless from 1..currentRevision.
-  const doc = storage.getDocument();
+  const doc = storage.getDocument(documentId);
   if (doc) {
     expect(revisions).toHaveLength(doc.currentRevision);
   }
@@ -300,7 +300,7 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     const outcome = await h.editService.apply(edit.id);
     expect(outcome.response.outcome).toBe('applied');
 
-    const content = h.automerge.get().getContent();
+    const content = h.automerge.get(documentId).getContent();
     // SC-005: both changes preserved — the proposal's and the concurrent manual edit's.
     expect(content).toContain('The swift fox jumps over the lazy dog.');
     expect(content).toContain('A second paragraph now differs');
@@ -377,7 +377,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
 
     const applied = await h.editService.apply(replacement.id);
     expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get().getContent()).toContain('The swift fox leaps over the sleepy dog.');
+    expect(h.automerge.get(documentId).getContent()).toContain(
+      'The swift fox leaps over the sleepy dog.',
+    );
 
     assertCrossEntityInvariants(h.storage, documentId);
   });
@@ -423,7 +425,7 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     expect(replacement.supersedesId).toBe(edit1.id);
     const applied = await h.editService.apply(replacement.id);
     expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get().getContent()).toContain('jumps over the sleepy dog');
+    expect(h.automerge.get(documentId).getContent()).toContain('jumps over the sleepy dog');
 
     assertCrossEntityInvariants(h.storage, documentId);
   });
@@ -472,7 +474,7 @@ describe('conflict/reconciliation pipeline (US6)', () => {
 
     const applied = await h.editService.apply(replacement.id);
     expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get().getContent()).toContain('XY');
+    expect(h.automerge.get(documentId).getContent()).toContain('XY');
 
     assertCrossEntityInvariants(h.storage, documentId);
   });
@@ -567,7 +569,9 @@ describe('conflict/reconciliation pipeline (US6)', () => {
 
     const r3 = await h.editService.apply(edit3.id);
     expect(r3.response.outcome).toBe('applied');
-    expect(h.automerge.get().getContent()).toContain('The swift fox sprints past the sleepy dog.');
+    expect(h.automerge.get(documentId).getContent()).toContain(
+      'The swift fox sprints past the sleepy dog.',
+    );
 
     expect(h.storage.getStagedEdit(edit1.id)?.status).toBe('superseded');
     expect(h.storage.getStagedEdit(edit2.id)?.status).toBe('superseded');
@@ -659,7 +663,7 @@ describe('conflict/reconciliation pipeline (US6)', () => {
 
     // One more conflict: the chain is already at the cap (max_replacement_attempts = 2 default).
     advance(h, documentId, 'Rev A2 of the drifting phrase.', 'Rev A3 of the drifting phrase.');
-    const contentBeforeExhaustion = h.automerge.get().getContent();
+    const contentBeforeExhaustion = h.automerge.get(documentId).getContent();
     const r3 = await h.editService.apply(edit3.id);
     expect(r3.response.outcome).toBe('conflict_exhausted');
     if (r3.response.outcome !== 'conflict_exhausted') throw new Error('unreachable');
@@ -672,7 +676,7 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     // occurred in this conversation's whole history (for edit1's and edit2's conflicts).
     expect(fakeSession.prompts).toHaveLength(2);
     // The document is unchanged by the exhausted apply attempt, and the conversation stays usable.
-    expect(h.automerge.get().getContent()).toBe(contentBeforeExhaustion);
+    expect(h.automerge.get(documentId).getContent()).toBe(contentBeforeExhaustion);
     expect(h.storage.getConversation(branch.id)?.status).not.toBe('errored');
 
     expect(h.storage.getStagedEdit(edit3.id)?.status).toBe('superseded');
