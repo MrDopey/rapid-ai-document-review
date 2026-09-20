@@ -3,7 +3,9 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import ThreadCard from '../../src/components/thread/ThreadCard.vue';
+import ToolCallMessage from '../../src/components/conversation/ToolCallMessage.vue';
 import { useThreadStore } from '../../src/stores/thread.js';
+import { useSettingsStore } from '../../src/stores/settings.js';
 import type { ConversationMessageState } from '../../src/stores/conversations.js';
 
 // `ThreadCard.vue` never calls any of these directly in the scenarios below (messages/threads are
@@ -278,6 +280,67 @@ describe('ThreadCard — per-thread "Expand all"/"Collapse all"', () => {
     await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
 
     expect(store.expandedByMessage['root-1']).toEqual({ m0: false, m1: false });
+  });
+});
+
+// Tool calls as their own message component (011-linear-thread-mode follow-up): a tool-call-carrier
+// message inside a real Thread-mode transcript must render via `ToolCallMessage.vue`, with
+// `data-message-id` present on its root — `composables/messageScroll.ts`'s
+// `scrollMessageTopIntoView` depends on that exact selector for Thread mode's focus-jump hotkeys
+// (Ctrl+Alt+J/K, fixed in `eba7130`), so a regression here would silently break that scroll target.
+describe('ThreadCard — tool-call-carrier message renders via ToolCallMessage', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('renders a carrier message (with tool-call detail) via ToolCallMessage, carrying data-message-id', () => {
+    useSettingsStore().settings = {
+      thinkingVisible: false,
+      revisionDebounceMs: 300_000,
+      maxConcurrentAgents: 3,
+      maxEditingDepth: 2,
+      maxConversationDepth: 3,
+      maxReplacementAttempts: 2,
+      softWordCountThreshold: 20_000,
+    };
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', kind: 'thread-root' })];
+    store.messagesByThread['root-1'] = [
+      makeMessage('m0'),
+      makeMessage('tc-1', {
+        text: '',
+        isToolCallCarrier: true,
+        toolCalls: [
+          {
+            toolCallId: 'tc_1',
+            name: 'web_search',
+            args: { query: 'x' },
+            resultText: 'result',
+            failureReason: null,
+            stagedEditId: null,
+          },
+        ],
+      }),
+    ];
+    store.expandedByMessage['root-1'] = { m0: true, 'tc-1': true };
+
+    const wrapper = mountCard('root-1');
+
+    const toolCallMessage = wrapper.findComponent(ToolCallMessage);
+    expect(toolCallMessage.exists()).toBe(true);
+    expect(toolCallMessage.props('message').id).toBe('tc-1');
+    const root = wrapper.get('[data-message-kind="tool-call"]');
+    expect(root.attributes('data-message-id')).toBe('tc-1');
   });
 });
 

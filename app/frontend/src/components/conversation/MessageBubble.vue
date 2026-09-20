@@ -5,6 +5,7 @@ import { render } from '../../render/markdown-pipeline.js';
 import { domPurifySanitizer } from '../../render/sanitizer.js';
 import type { ConversationMessageState } from '../../stores/conversations.js';
 import { useClampToggle } from '../../composables/clampToggle.js';
+import ToolCallMessage from './ToolCallMessage.vue';
 
 // FR-008/data-model.md's MessageDisplayState: `expanded` defaults to `true` (no clamp) purely as a
 // safe default for any caller that omits the prop entirely (e.g. `ConversationThreadBox.vue`'s own
@@ -30,15 +31,12 @@ const clamp = useClampToggle(
   (value) => emit('update:expanded', value),
 );
 
+// `message.toolCalls` no longer affects this component's own clamp — the tool-call rows (and
+// their own independent clamp registrations) now live entirely in `ToolCallMessage.vue`, below.
 watch(
   () => props.message.text,
   () => void nextTick(clamp.recompute),
   { immediate: true, flush: 'post' },
-);
-watch(
-  () => props.message.toolCalls,
-  () => void nextTick(clamp.recompute),
-  { immediate: true, flush: 'post', deep: true },
 );
 
 // All agent-produced (and, defensively, user-authored) content passes the sanitizer before
@@ -54,12 +52,6 @@ const safeReasoning = computed(() =>
     ? domPurifySanitizer.sanitize(render(props.message.reasoning, { html: false }))
     : '',
 );
-
-// contracts/frontend-display.md: `args`/`resultText` are stored raw/compact — pretty-printing is
-// purely a render-time concern, never done before persistence.
-function formatToolArgs(args: unknown): string {
-  return JSON.stringify(args, null, 2) ?? String(args);
-}
 </script>
 
 <template>
@@ -77,92 +69,73 @@ function formatToolArgs(args: unknown): string {
        when the toggle is on so the underlying event is still inspectable — UNLESS this carrier
        segment actually has tool-call detail to show, in which case it renders regardless of the
        toggle (Research Decision 5: tool-call detail is a factual record, not gated by "Show
-       reasoning"). -->
-  <article
+       reasoning"). This gate is unchanged from before tool calls got their own component — it's
+       just relocated to wrap the branch below instead of a single `<article>`. -->
+  <template
     v-if="
       !message.isToolCallCarrier || settings.thinkingVisible || (message.toolCalls?.length ?? 0) > 0
     "
-    class="message-bubble"
-    :class="{ 'seed-card': seed, 'tool-call-carrier': message.isToolCallCarrier }"
-    :data-role="message.role"
-    :data-message-id="message.id"
-    :aria-busy="message.streaming"
   >
-    <header class="message-role">
-      <span class="message-role-label">
-        {{
-          seed ? 'Context — discussing this excerpt' : message.role === 'user' ? 'You' : 'Assistant'
-        }}
-      </span>
-
-      <!-- FR-008/research.md §4: a real <button>, minimum 24x24px hit area, only rendered when
-           there's actually more to show/hide. Placed next to the role label — not after the
-           message content — so it's reachable without scrolling past a long, still-collapsed
-           message to find it. -->
-      <button
-        v-if="clamp.isOverflowing(TEXT_ID)"
-        type="button"
-        class="expand-toggle-button"
-        :aria-label="`${clamp.label(TEXT_ID)} of this message`"
-        @click="clamp.toggle(TEXT_ID)"
-      >
-        {{ clamp.label(TEXT_ID) }}
-      </button>
-    </header>
-
-    <details v-if="message.reasoning" class="reasoning" :open="settings.thinkingVisible">
-      <summary>Reasoning</summary>
-      <!-- eslint-disable-next-line vue/no-v-html -- safeReasoning is DOMPurify-sanitized, see render/sanitizer.ts -->
-      <div class="reasoning-content" v-html="safeReasoning" />
-    </details>
-
-    <p v-if="message.isToolCallCarrier && settings.thinkingVisible" class="tool-call-carrier-note">
-      Tool call — this segment carries no reply text of its own.
-    </p>
-
-    <!-- Tool-call detail (contracts/frontend-display.md): a factual record of what the agent did,
-         not gated by "Show reasoning" at all (Research Decision 5) — renders whenever this message
-         has any `toolCalls`, regardless of the toggle. Plain text interpolation only (no v-html):
-         `args`/`resultText`/`failureReason` may contain untrusted content from a fetched page or
-         search snippet (Constitution Principle VI). Expand/collapse per call, same `clamp`
-         controller (and CLAMP_HEIGHT_PX) the message text below uses. -->
-    <div
-      v-for="call in message.toolCalls ?? []"
-      :key="call.toolCallId"
-      class="tool-call"
-      :class="{ 'tool-call-error': call.failureReason }"
+    <!-- A tool-call-carrier message renders as its own distinct card (`ToolCallMessage.vue`) — the
+         promoted `.tool-call` box IS the outer card, not nested inside this component's generic
+         gray/blue "Assistant" bubble chrome. `expanded` continues to drive bulk cascade
+         (`update:expanded`) exactly as it did when the tool-call rows lived inline here. -->
+    <ToolCallMessage
+      v-if="message.isToolCallCarrier"
+      :message="message"
+      :expanded="expanded"
+      @update:expanded="emit('update:expanded', $event)"
+    />
+    <article
+      v-else
+      class="message-bubble"
+      :class="{ 'seed-card': seed }"
+      :data-role="message.role"
+      :data-message-id="message.id"
+      :aria-busy="message.streaming"
     >
-      <div class="tool-call-header">
-        <div class="tool-call-name">{{ call.name }}</div>
+      <header class="message-role">
+        <span class="message-role-label">
+          {{
+            seed
+              ? 'Context — discussing this excerpt'
+              : message.role === 'user'
+                ? 'You'
+                : 'Assistant'
+          }}
+        </span>
+
+        <!-- FR-008/research.md §4: a real <button>, minimum 24x24px hit area, only rendered when
+             there's actually more to show/hide. Placed next to the role label — not after the
+             message content — so it's reachable without scrolling past a long, still-collapsed
+             message to find it. -->
         <button
-          v-if="clamp.isOverflowing(call.toolCallId)"
+          v-if="clamp.isOverflowing(TEXT_ID)"
           type="button"
           class="expand-toggle-button"
-          :aria-label="`${clamp.label(call.toolCallId)} of this tool call`"
-          @click="clamp.toggle(call.toolCallId)"
+          :aria-label="`${clamp.label(TEXT_ID)} of this message`"
+          @click="clamp.toggle(TEXT_ID)"
         >
-          {{ clamp.label(call.toolCallId) }}
+          {{ clamp.label(TEXT_ID) }}
         </button>
-      </div>
-      <div
-        :ref="(el) => clamp.setEl(call.toolCallId, el as Element | null)"
-        class="tool-call-body"
-        :style="clamp.clampStyle(call.toolCallId)"
-      >
-        <pre class="tool-call-args">{{ formatToolArgs(call.args) }}</pre>
-        <pre class="tool-call-result">{{ call.failureReason ?? call.resultText }}</pre>
-      </div>
-    </div>
+      </header>
 
-    <!-- eslint-disable vue/no-v-html -- safeText is DOMPurify-sanitized, see render/sanitizer.ts -->
-    <div
-      :ref="(el) => clamp.setEl(TEXT_ID, el as Element | null)"
-      class="message-text text-wrap-safe"
-      :style="clamp.clampStyle(TEXT_ID)"
-      v-html="safeText"
-    />
-    <!-- eslint-enable vue/no-v-html -->
-  </article>
+      <details v-if="message.reasoning" class="reasoning" :open="settings.thinkingVisible">
+        <summary>Reasoning</summary>
+        <!-- eslint-disable-next-line vue/no-v-html -- safeReasoning is DOMPurify-sanitized, see render/sanitizer.ts -->
+        <div class="reasoning-content" v-html="safeReasoning" />
+      </details>
+
+      <!-- eslint-disable vue/no-v-html -- safeText is DOMPurify-sanitized, see render/sanitizer.ts -->
+      <div
+        :ref="(el) => clamp.setEl(TEXT_ID, el as Element | null)"
+        class="message-text text-wrap-safe"
+        :style="clamp.clampStyle(TEXT_ID)"
+        v-html="safeText"
+      />
+      <!-- eslint-enable vue/no-v-html -->
+    </article>
+  </template>
 </template>
 
 <style scoped>
@@ -235,53 +208,6 @@ function formatToolArgs(args: unknown): string {
 .reasoning summary {
   cursor: pointer;
 }
-/* Debug-visible note for a tool-call-carrier segment shown while "Show reasoning" is on (see the
-   root `v-if` above) — same muted, small-print treatment as `.reasoning`, so it reads as internal/
-   diagnostic content rather than a genuine reply. */
-.tool-call-carrier-note {
-  margin: 0 0 0.35rem;
-  font-size: 0.85rem;
-  font-style: italic;
-  opacity: 0.7;
-}
-/* contracts/frontend-display.md: informational/read-only agent activity gets its own dedicated
-   token pair (`--info-*`), distinct from `--status-active-*`/`--queue-*`; a failed call reuses the
-   existing `--danger-*` pair rather than introducing a second error color. */
-.tool-call {
-  margin: 0 0 0.5rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  background: var(--info-bg, #eff6ff);
-  border: 1px solid var(--info-border, #bfdbfe);
-  color: var(--info-color, #1e3a8a);
-}
-.tool-call.tool-call-error {
-  background: var(--danger-bg, #fee2e2);
-  border-color: var(--danger-color, #b3261e);
-  color: var(--danger-color, #b3261e);
-}
-.tool-call-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-.tool-call-name {
-  font-weight: 600;
-}
-.tool-call-args,
-.tool-call-result {
-  margin: 0 0 0.25rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family: monospace;
-}
-.tool-call-result:last-child,
-.tool-call-args:last-child {
-  margin-bottom: 0;
-}
 .message-text :deep(p:first-child) {
   margin-top: 0;
 }
@@ -299,13 +225,11 @@ function formatToolArgs(args: unknown): string {
    codebase's other layout-affecting transitions (`App.vue`'s `grid-template-columns`,
    `DocumentCanvas.vue`'s pane `width`), not `ThreadCard.vue`'s own shorter `box-shadow 0.15s`
    (a color change, not a reflow, so it reads fine faster). */
-.message-text,
-.tool-call-body {
+.message-text {
   transition: max-height 220ms ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  .message-text,
-  .tool-call-body {
+  .message-text {
     transition: none !important;
   }
 }

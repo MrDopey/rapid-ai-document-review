@@ -8,6 +8,7 @@ import type {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import ConversationView from '../../src/components/conversation/ConversationView.vue';
 import MessageBubble from '../../src/components/conversation/MessageBubble.vue';
+import ToolCallMessage from '../../src/components/conversation/ToolCallMessage.vue';
 import {
   useConversationsStore,
   type ConversationMessageState,
@@ -884,5 +885,76 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
     await flushPromises();
 
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+// Tool calls as their own message component (011-linear-thread-mode follow-up): a tool-call-carrier
+// message inside a real focused-view transcript must render via `ToolCallMessage.vue`, with
+// `data-message-id` present on its root — `composables/messageScroll.ts`'s
+// `scrollMessageTopIntoView` depends on that exact selector (this view's own scroll-to-top-of-
+// message behavior, covered above for plain messages), so a regression here would silently break
+// that scroll target for a carrier message too.
+describe('ConversationView — tool-call-carrier message renders via ToolCallMessage', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.mocked(httpClient.getConversation).mockReset();
+    vi.mocked(httpClient.listEdits).mockReset();
+    vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
+  });
+
+  it('renders a carrier message (with tool-call detail) via ToolCallMessage, carrying data-message-id', async () => {
+    const store = useConversationsStore();
+    const conversation = conversationFixture({ id: 'conv-1' });
+    store.conversations = [conversation];
+    const carrier: ConversationMessageState = {
+      id: 'tc-1',
+      role: 'assistant',
+      text: '',
+      reasoning: null,
+      isToolCallCarrier: true,
+      toolCalls: [
+        {
+          toolCallId: 'tc_1',
+          name: 'web_search',
+          args: { query: 'x' },
+          resultText: 'result',
+          failureReason: null,
+          stagedEditId: null,
+        },
+      ],
+      streaming: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    store.messagesByConversation['conv-1'] = [carrier];
+    vi.mocked(httpClient.getConversation).mockResolvedValue({
+      conversation,
+      messages: [
+        {
+          id: 'tc-1',
+          role: 'assistant',
+          text: '',
+          reasoning: null,
+          isToolCallCarrier: true,
+          toolCalls: carrier.toolCalls,
+          createdAt: carrier.createdAt,
+        },
+      ],
+      stagedEdits: [],
+    });
+
+    const wrapper = mount(ConversationView, {
+      props: { conversationId: 'conv-1' },
+      global: { plugins: [pinia] },
+    });
+    await flushPromises();
+
+    const toolCallMessage = wrapper.findComponent(ToolCallMessage);
+    expect(toolCallMessage.exists()).toBe(true);
+    expect(toolCallMessage.props('message').id).toBe('tc-1');
+    const root = wrapper.get('[data-message-kind="tool-call"]');
+    expect(root.attributes('data-message-id')).toBe('tc-1');
   });
 });

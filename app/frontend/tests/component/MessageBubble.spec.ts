@@ -544,6 +544,49 @@ describe('ConversationThreadBox — continuity context for a freshly-created pla
 
     expect(wrapper.find('.continuity-context').exists()).toBe(false);
   });
+
+  // 011-linear-thread-mode follow-up (tool calls as their own message component): the "last
+  // assistant message" picker must skip a tool-call-carrier segment (`isToolCallCarrier` — no
+  // reply text of its own, now rendered as its own `ToolCallMessage.vue` card) so this read-only
+  // continuity snippet always shows real reply text instead of resolving to an empty/hidden
+  // carrier.
+  it('skips a trailing tool-call-carrier segment when picking the last assistant message for continuity', async () => {
+    const historyWithTrailingCarrier: ConversationMessageState[] = [
+      makeMessage({ id: 'm1', role: 'user', text: 'second question' }),
+      makeMessage({ id: 'm2', role: 'assistant', text: 'a real reply' }),
+      makeMessage({
+        id: 'm3',
+        role: 'assistant',
+        text: '',
+        isToolCallCarrier: true,
+        toolCalls: [
+          {
+            toolCallId: 'tc_1',
+            name: 'web_search',
+            args: { query: 'x' },
+            resultText: 'result',
+            failureReason: null,
+            stagedEditId: null,
+          },
+        ],
+      }),
+    ];
+    const wrapper = mountBranchBox({
+      branchOverrides: { forkedFromMessageId: 'm3' } as Partial<ConversationDto>,
+      parentMessages: historyWithTrailingCarrier,
+      branchMessages: [],
+    });
+    await wrapper.vm.$nextTick();
+
+    const context = wrapper.find('.continuity-context');
+    expect(context.exists()).toBe(true);
+    const contextBubbles = context.findAllComponents(MessageBubble);
+    expect(contextBubbles.map((b) => b.props('message').text)).toEqual([
+      'second question',
+      'a real reply',
+    ]);
+    expect(contextBubbles.map((b) => b.props('message').id)).not.toContain('m3');
+  });
 });
 
 // Parity fix (005-canvas-conversation-threads follow-up): the sidebar's compact

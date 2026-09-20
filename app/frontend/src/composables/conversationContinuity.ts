@@ -45,7 +45,13 @@ export function useConversationContinuity(conversationId: () => string): Convers
     if (forkIndex === -1) return [];
     const upToFork = parentMessages.slice(0, forkIndex + 1);
     const lastUser = [...upToFork].reverse().find((m) => m.role === 'user');
-    const lastAssistant = [...upToFork].reverse().find((m) => m.role === 'assistant');
+    // Skip a tool-call-carrier segment (`isToolCallCarrier` — an internal artifact of the model
+    // calling a tool, now rendered as its own distinct `ToolCallMessage.vue` card, not a genuine
+    // reply) when picking the "last assistant message" for this read-only continuity snippet — it
+    // should always show real reply text, never resolve to an empty/hidden carrier.
+    const lastAssistant = [...upToFork]
+      .reverse()
+      .find((m) => m.role === 'assistant' && !m.isToolCallCarrier);
     const result: ConversationMessageState[] = [];
     for (const m of upToFork) {
       if (m === lastUser || m === lastAssistant) result.push(m);
