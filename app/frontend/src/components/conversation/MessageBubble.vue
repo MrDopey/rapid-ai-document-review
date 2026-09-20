@@ -57,6 +57,17 @@ function useClampToggle(
   // unclipped content height regardless of whether `overflow: hidden`/`max-height` happens to be
   // applied at the time it's read, so this is accurate whether currently expanded or collapsed.
   const overflowing = ref<Record<string, boolean>>({});
+  // 011-linear-thread-mode follow-up: each overflowing id's own measured `scrollHeight`, kept in
+  // step with `overflowing` by the same `recompute()` pass. `clampStyle` below uses this so
+  // *both* the collapsed and expanded states of an overflowing block resolve to a concrete pixel
+  // `max-height` (160px vs. this element's own real height) rather than expanded meaning "no
+  // `max-height` at all" — two concrete numbers is what lets the `transition: max-height` in this
+  // component's `<style>` actually animate the toggle instead of snapping instantly, which is what
+  // Thread mode's tree layout (`ThreadCard.vue`) needs: its branch-connector lines have no
+  // coordinates of their own to recalculate (they're `position: absolute` purely relative to their
+  // own `.thread-branch-fork`, at a fixed offset — see that file's own doc comment), so the only
+  // thing standing between a toggle and a fluid reflow was this instant snap.
+  const heights = ref<Record<string, number>>({});
   const secondaryExpanded = ref<Record<string, boolean>>({});
 
   watch(getPrimaryExpanded, (value) => {
@@ -88,6 +99,7 @@ function useClampToggle(
   function recompute(): void {
     for (const [id, el] of els) {
       overflowing.value[id] = el.scrollHeight > CLAMP_HEIGHT_PX;
+      heights.value[id] = el.scrollHeight;
     }
   }
 
@@ -95,10 +107,20 @@ function useClampToggle(
     return overflowing.value[id] ?? false;
   }
 
+  // Non-overflowing content is left completely alone (`undefined`, exactly as before this doc
+  // comment's `heights` addition) — it never had a toggle, so it never needs a `max-height` at
+  // all. An overflowing id, though, now always resolves to a concrete `max-height` on *both*
+  // sides of its toggle (this element's own measured height at rest — no clip, and visually
+  // identical to the old unclamped/`undefined` expanded state) rather than losing `max-height`
+  // altogether once expanded, so the CSS `transition: max-height` below has two real numbers to
+  // animate between instead of jumping from 160px to "none".
   function clampStyle(id: string): { maxHeight: string; overflow: string } | undefined {
-    return !isExpanded(id) && isOverflowing(id)
-      ? { maxHeight: `${CLAMP_HEIGHT_PX}px`, overflow: 'hidden' }
-      : undefined;
+    if (!isOverflowing(id)) return undefined;
+    const collapsed = !isExpanded(id);
+    return {
+      maxHeight: `${collapsed ? CLAMP_HEIGHT_PX : (heights.value[id] ?? CLAMP_HEIGHT_PX)}px`,
+      overflow: 'hidden',
+    };
   }
 
   function label(id: string): string {
@@ -376,6 +398,27 @@ function formatToolArgs(args: unknown): string {
 }
 .message-text :deep(p:last-child) {
   margin-bottom: 0;
+}
+/* Expand/collapse (`clamp.clampStyle` above, script) toggles `max-height` between the clamp and
+   this element's own measured height — animating that reflow, rather than snapping it instantly,
+   is what keeps Thread mode's tree layout (`ThreadCard.vue`'s `.thread-branch-fork::before`/
+   `::after` connector line+arrowhead) sliding smoothly to its new position alongside a toggled
+   message instead of jumping there in one frame. Those connectors have no coordinates of their own
+   to update on toggle — they're `position: absolute` at a fixed offset purely relative to their
+   own (unrelated) `.thread-branch-fork` box, so they already ride along with whatever this
+   transition animates for free, with no separate recalculation step. `220ms ease` matches this
+   codebase's other layout-affecting transitions (`App.vue`'s `grid-template-columns`,
+   `DocumentCanvas.vue`'s pane `width`), not `ThreadCard.vue`'s own shorter `box-shadow 0.15s`
+   (a color change, not a reflow, so it reads fine faster). */
+.message-text,
+.tool-call-body {
+  transition: max-height 220ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-text,
+  .tool-call-body {
+    transition: none !important;
+  }
 }
 /* research.md §4: real <button>, minimum 24x24px hit area regardless of the bubble's density.
    `--accent-color` measures a thin 4.34:1 against `--user-bubble-bg` (both derive from the same

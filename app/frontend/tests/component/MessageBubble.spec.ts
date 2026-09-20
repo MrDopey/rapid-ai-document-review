@@ -115,7 +115,11 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
     expect(wrapper.emitted('update:expanded')).toEqual([[true]]);
   });
 
-  it('when expanded=true, the clamp is lifted and the toggle reads "Show less"', async () => {
+  // `maxHeight` resolves to the element's own measured `scrollHeight` (`mockTallScrollHeight`'s
+  // 400px), not `''`/no style at all, once expanded — a concrete pixel value on *both* sides of
+  // the toggle is what lets `<style>`'s `transition: max-height` actually animate the change
+  // instead of jumping from 160px to "none" (see that rule's own doc comment).
+  it('when expanded=true, the clamp opens to the content\'s own measured height and the toggle reads "Show less"', async () => {
     const wrapper = mountBubble({
       message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
       expanded: true,
@@ -123,7 +127,7 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
 
-    expect((wrapper.get('.message-text').element as HTMLElement).style.maxHeight).toBe('');
+    expect((wrapper.get('.message-text').element as HTMLElement).style.maxHeight).toBe('400px');
     expect(wrapper.find('.expand-toggle-button').text()).toBe('Show less');
   });
 
@@ -131,7 +135,7 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
     const wrapper = mountBubble({ message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }) });
     mockTallScrollHeight(wrapper.get('.message-text').element);
     await wrapper.vm.$nextTick();
-    expect((wrapper.get('.message-text').element as HTMLElement).style.maxHeight).toBe('');
+    expect((wrapper.get('.message-text').element as HTMLElement).style.maxHeight).toBe('400px');
   });
 });
 
@@ -370,7 +374,7 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
     const bubbleAfter = wrapper.getComponent(MessageBubble);
     expect(bubbleAfter.props('expanded')).toBe(true);
     expect(bubbleAfter.get('.expand-toggle-button').text()).toBe('Show less');
-    expect((bubbleAfter.get('.message-text').element as HTMLElement).style.maxHeight).toBe('');
+    expect((bubbleAfter.get('.message-text').element as HTMLElement).style.maxHeight).toBe('400px');
   });
 
   it("persists the focused view's toggle to localStorage, keyed by message id (shared with the thread-box view)", async () => {

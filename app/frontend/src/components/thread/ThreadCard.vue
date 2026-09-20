@@ -523,7 +523,15 @@ const cardStyle = computed(() => ({
    (mockup's "───▶"). `padding-left` reserves the room the line/arrowhead draw into, so this
    completely owns its own spacing from `.thread-card`'s right edge — `.thread-node`'s row has no
    extra `gap` of its own (see below), meaning it's this padding alone, not a shared gap, that keeps
-   the whole tree's per-branch connector self-contained no matter how many groups/forks stack up. */
+   the whole tree's per-branch connector self-contained no matter how many groups/forks stack up.
+   Deliberately never needs recalculating when a message's expand/collapse toggle changes some
+   box's height: `top`/`left` below are fixed offsets purely relative to THIS `.thread-branch-fork`'s
+   own (`position: relative`) box, never a measured coordinate on the trunk or a sibling fork, so
+   ordinary reflow already carries this connector to the right place for free — there is no
+   JS-computed position to go stale. The one thing standing between a toggle and *smooth* (not
+   instant-snap) motion was the toggled box's own height change having no transition —
+   `MessageBubble.vue`'s `.message-text`/`.tool-call-body` `transition: max-height` now covers
+   that; see its own doc comment. */
 .thread-branch-fork {
   position: relative;
   padding-left: 1.75rem;

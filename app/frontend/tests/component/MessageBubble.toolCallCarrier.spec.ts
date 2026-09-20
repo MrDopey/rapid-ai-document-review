@@ -240,7 +240,7 @@ describe('MessageBubble — tool calls clamp/expand like the message text does',
     await wrapper.get('.tool-call .expand-toggle-button').trigger('click');
 
     expect(wrapper.get('.tool-call .expand-toggle-button').text()).toBe('Show less');
-    expect((wrapper.get('.tool-call-body').element as HTMLElement).style.maxHeight).toBe('');
+    expect((wrapper.get('.tool-call-body').element as HTMLElement).style.maxHeight).toBe('400px');
     // Toggling a tool call is purely local UI state, not the message-level expand/collapse
     // (data-model.md's MessageDisplayState) — no update:expanded should be emitted for it.
     expect(wrapper.emitted('update:expanded')).toBeUndefined();
@@ -277,7 +277,7 @@ describe('MessageBubble — tool calls clamp/expand like the message text does',
     await wrapper.setProps({ expanded: true });
 
     expect(wrapper.get('.tool-call .expand-toggle-button').text()).toBe('Show less');
-    expect((wrapper.get('.tool-call-body').element as HTMLElement).style.maxHeight).toBe('');
+    expect((wrapper.get('.tool-call-body').element as HTMLElement).style.maxHeight).toBe('400px');
   });
 
   // Dynamic/generalized regression coverage for the cascade rule (bug: an individually-expanded
