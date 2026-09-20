@@ -87,7 +87,7 @@ function formatToolArgs(args: unknown): string {
       :class="{ 'tool-call-error': call.failureReason }"
     >
       <div class="tool-call-header">
-        <div class="tool-call-name">{{ call.name }}</div>
+        <div class="tool-call-name">Tool: {{ call.name }}</div>
         <button
           v-if="clamp.isOverflowing(call.toolCallId)"
           type="button"

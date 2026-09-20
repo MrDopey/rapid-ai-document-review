@@ -107,7 +107,7 @@ describe('ToolCallMessage — tool-call detail is not gated by "Show reasoning" 
     const wrapper = mountCard(carrierWithToolCall('tc-off'));
 
     expect(wrapper.find('.tool-call').exists()).toBe(true);
-    expect(wrapper.find('.tool-call-name').text()).toBe('web_search');
+    expect(wrapper.find('.tool-call-name').text()).toBe('Tool: web_search');
     expect(wrapper.find('.tool-call-args').text()).toContain('rapid ai document review');
     expect(wrapper.find('.tool-call-result').text()).toBe('Web search: 1 result');
   });
@@ -117,7 +117,7 @@ describe('ToolCallMessage — tool-call detail is not gated by "Show reasoning" 
     const wrapper = mountCard(carrierWithToolCall('tc-on'));
 
     expect(wrapper.find('.tool-call').exists()).toBe(true);
-    expect(wrapper.find('.tool-call-name').text()).toBe('web_search');
+    expect(wrapper.find('.tool-call-name').text()).toBe('Tool: web_search');
     expect(wrapper.find('.tool-call-args').text()).toContain('rapid ai document review');
     expect(wrapper.find('.tool-call-result').text()).toBe('Web search: 1 result');
   });
