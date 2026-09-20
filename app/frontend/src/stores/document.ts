@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import type { DocumentDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { DocumentSummaryDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type { DocumentType } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RevisionDto } from '@rapid-ai-document-review/shared/contracts/http';
 import type { RestoreRevisionResponse } from '@rapid-ai-document-review/shared/contracts/http';
 import { httpClient, ApiError } from '../transport/http-client.js';
@@ -92,8 +93,8 @@ export const useDocumentStore = defineStore('document', {
       await this.loadDocuments();
     },
 
-    async create(content: string, title?: string): Promise<void> {
-      const result = await httpClient.createDocument({ content, title });
+    async create(content: string, title?: string, documentType?: DocumentType): Promise<void> {
+      const result = await httpClient.createDocument({ content, title, documentType });
       this.activeDocumentId = result.document.id;
       this.document = result.document;
       this.content = result.content;
@@ -101,9 +102,12 @@ export const useDocumentStore = defineStore('document', {
       await this.loadDocuments();
     },
 
-    /** "+ New document" (FR-001): a brand-new, otherwise-empty document, immediately made active. */
-    async createNew(): Promise<void> {
-      await this.create('# Untitled\n');
+    /** "+ New document" (FR-001), extended by 011-linear-thread-mode's document-creation type
+     *  choice (spec 010's flow, spec 011 Clarifications 2026-09-20): a brand-new, otherwise-empty
+     *  document, immediately made active. Defaults to `'canvas'` (unchanged prior behavior) when no
+     *  type is passed. */
+    async createNew(documentType: DocumentType = 'canvas'): Promise<void> {
+      await this.create('# Untitled\n', undefined, documentType);
     },
 
     async rename(documentId: string, title: string): Promise<void> {

@@ -58,7 +58,12 @@ export class TurnRunner {
       () => this.concurrencyLimiter.release(conversation.documentId, conversation.id),
     );
 
-    const run = () => this.piService.send(conversation, message, bridge);
+    // 011-linear-thread-mode: a Thread's turn runs through the shared-session leaf-repositioning
+    // path instead of the ordinary per-conversation-file one — see `PiService.sendOnThread`.
+    const run = () =>
+      conversation.kind === 'thread-root' || conversation.kind === 'thread-branch'
+        ? this.piService.sendOnThread(conversation, message, bridge)
+        : this.piService.send(conversation, message, bridge);
 
     return this.concurrencyLimiter.acquire(
       conversation.documentId,

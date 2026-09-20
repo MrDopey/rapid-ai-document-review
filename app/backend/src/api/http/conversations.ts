@@ -28,7 +28,9 @@ import {
   PrimaryTargetBusyError,
   type PrimaryService,
 } from '../../conversation/primary-service.ts';
+import { DocumentNotFoundError } from '../../document/document-service.ts';
 import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { DocumentWrongTypeError, requireDocumentType } from './document-type-guard.ts';
 import { parseOrFail, sendError } from './errors.ts';
 
 /**
@@ -88,6 +90,12 @@ function handleConversationError(
   if (err instanceof PrimaryTargetBusyError) {
     return { status: 409, code: 'PRIMARY_TARGET_BUSY', details: err.details };
   }
+  if (err instanceof DocumentWrongTypeError) {
+    return { status: 409, code: 'DOCUMENT_WRONG_TYPE' };
+  }
+  if (err instanceof DocumentNotFoundError) {
+    return { status: 404, code: 'DOCUMENT_NOT_FOUND' };
+  }
   return null;
 }
 
@@ -144,14 +152,18 @@ export function registerConversationRoutes(
     },
   );
 
-  app.post('/api/documents/:documentId/conversations', async (request, reply) => {
-    const data = parseOrFail(reply, CreateConversationRequest, request.body);
-    if (!data) return;
-    return withConversationErrors(reply, async () => {
-      const conversation = conversationService.branch(data);
-      return reply.status(201).send(conversation);
-    });
-  });
+  app.post<{ Params: { documentId: string } }>(
+    '/api/documents/:documentId/conversations',
+    async (request, reply) => {
+      const data = parseOrFail(reply, CreateConversationRequest, request.body);
+      if (!data) return;
+      return withConversationErrors(reply, async () => {
+        requireDocumentType(storage, request.params.documentId, 'canvas');
+        const conversation = conversationService.branch(data);
+        return reply.status(201).send(conversation);
+      });
+    },
+  );
 
   // 005-canvas-conversation-threads follow-up: discards an untouched branch placeholder (zero
   // messages, no children — see `ConversationService.discardIfEmpty`'s doc comment) outright,

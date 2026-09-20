@@ -22,6 +22,7 @@ function createDocument(storage: SqliteStorageAdapter): string {
     id,
     title: 'Fixture',
     piSessionDir: '/tmp/pi-sessions',
+    documentType: 'canvas',
     createdAt: now,
     updatedAt: now,
     lastActiveAt: now,

@@ -9,6 +9,7 @@ const STATEMENTS: string[] = [
     title             TEXT NOT NULL,
     current_revision  INTEGER NOT NULL DEFAULT 0,
     pi_session_dir    TEXT NOT NULL,
+    document_type     TEXT NOT NULL DEFAULT 'canvas',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
     last_active_at    TEXT NOT NULL DEFAULT ''
@@ -58,7 +59,7 @@ const STATEMENTS: string[] = [
     parent_id          TEXT,
     name               TEXT NOT NULL,
     kind               TEXT NOT NULL
-                         CHECK (kind IN ('main', 'branch', 'review')),
+                         CHECK (kind IN ('main', 'branch', 'review', 'thread-root', 'thread-branch')),
 
     pi_session_path    TEXT NOT NULL,
 
@@ -74,6 +75,9 @@ const STATEMENTS: string[] = [
 
     seed_selection     TEXT,
     forked_from_message_id TEXT,
+    pi_leaf_entry_id   TEXT,
+    done_at            TEXT,
+    seed_excerpt_text  TEXT,
 
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
@@ -200,6 +204,80 @@ const MIGRATIONS: Migration[] = [
     apply: (db) => {
       addColumnIfMissing(db, 'document', 'last_active_at', `TEXT NOT NULL DEFAULT ''`);
       db.exec(`UPDATE document SET last_active_at = updated_at WHERE last_active_at = ''`);
+    },
+  },
+  {
+    version: 4,
+    apply: (db) => {
+      addColumnIfMissing(db, 'document', 'document_type', `TEXT NOT NULL DEFAULT 'canvas'`);
+
+      // `conversation.kind`'s CHECK constraint (011-linear-thread-mode) is baked into the
+      // `CREATE TABLE` body, unlike a plain column default — SQLite cannot widen an existing
+      // table's CHECK via `ALTER TABLE ADD COLUMN`, so the whole table is rebuilt under one
+      // `PRAGMA foreign_keys = OFF` window (referencing tables — staged_edit/conversation_event/
+      // revision/conversation.parent_id itself — keep their FK clauses valid by table name across
+      // the rename, they just must not be checked mid-rebuild).
+      const columns = db.prepare(`PRAGMA table_info(conversation)`).all() as Array<{
+        name: string;
+      }>;
+      const alreadyWidened = columns.some((c) => c.name === 'pi_leaf_entry_id');
+      if (!alreadyWidened) {
+        db.exec('PRAGMA foreign_keys = OFF;');
+        try {
+          db.exec(`CREATE TABLE conversation_new (
+            id                 TEXT PRIMARY KEY,
+            document_id        TEXT NOT NULL,
+            parent_id          TEXT,
+            name               TEXT NOT NULL,
+            kind               TEXT NOT NULL
+                                 CHECK (kind IN ('main', 'branch', 'review', 'thread-root', 'thread-branch')),
+
+            pi_session_path    TEXT NOT NULL,
+
+            status             TEXT NOT NULL
+                                 CHECK (status IN ('idle', 'working', 'errored', 'closed')),
+            error_message      TEXT,
+
+            is_primary         INTEGER NOT NULL DEFAULT 0,
+            is_current_main    INTEGER NOT NULL DEFAULT 0,
+
+            context_revision   INTEGER NOT NULL,
+            branch_depth       INTEGER NOT NULL DEFAULT 0,
+
+            seed_selection     TEXT,
+            forked_from_message_id TEXT,
+            pi_leaf_entry_id   TEXT,
+            done_at            TEXT,
+            seed_excerpt_text  TEXT,
+
+            created_at         TEXT NOT NULL,
+            updated_at         TEXT NOT NULL,
+            closed_at          TEXT,
+
+            FOREIGN KEY (document_id) REFERENCES document(id),
+            FOREIGN KEY (parent_id)   REFERENCES conversation(id)
+          )`);
+          db.exec(`INSERT INTO conversation_new
+            (id, document_id, parent_id, name, kind, pi_session_path, status, error_message,
+             is_primary, is_current_main, context_revision, branch_depth, seed_selection,
+             forked_from_message_id, pi_leaf_entry_id, done_at, seed_excerpt_text,
+             created_at, updated_at, closed_at)
+            SELECT
+             id, document_id, parent_id, name, kind, pi_session_path, status, error_message,
+             is_primary, is_current_main, context_revision, branch_depth, seed_selection,
+             forked_from_message_id, NULL, NULL, NULL,
+             created_at, updated_at, closed_at
+            FROM conversation`);
+          db.exec(`DROP TABLE conversation`);
+          db.exec(`ALTER TABLE conversation_new RENAME TO conversation`);
+          db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_primary
+            ON conversation (document_id) WHERE is_primary = 1`);
+          db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_one_current_main
+            ON conversation (document_id) WHERE is_current_main = 1`);
+        } finally {
+          db.exec('PRAGMA foreign_keys = ON;');
+        }
+      }
     },
   },
 ];

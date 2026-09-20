@@ -137,6 +137,11 @@ export const ConversationSummaryFoldedEvent = base(
   z.object({ parentConversationId: z.string(), summary: z.string() }),
 );
 
+export const ConversationDoneChangedEvent = base(
+  'conversation_done_changed',
+  z.object({ doneAt: z.string().nullable() }),
+);
+
 export const PrimaryChangedEvent = base(
   'primary_changed',
   z.object({
@@ -300,6 +305,7 @@ export const ApplicationEvent = z.discriminatedUnion('type', [
   ConversationRenamedEvent,
   ConversationClosedEvent,
   ConversationSummaryFoldedEvent,
+  ConversationDoneChangedEvent,
   PrimaryChangedEvent,
   AgentErrorEvent,
   AgentStartedEvent,

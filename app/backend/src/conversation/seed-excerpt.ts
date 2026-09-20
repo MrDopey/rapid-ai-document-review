@@ -268,6 +268,18 @@ export function buildSelectionOnlySeedMessage(selectionText: string): string {
   return buildSelectionBlock(selectionText).join('\n');
 }
 
+/**
+ * Seeds a linear-thread-mode branch (011-linear-thread-mode, FR-005a) with the exact highlighted
+ * passage that triggered it, wrapped in its own `<branch-seed-excerpt>` tag pair — the same
+ * XML-tagging convention `wrapDocumentRevision`/`wrapHighlightedSelection` use for canvas-mode
+ * seeds (constitution's Quality & Review Gates rule), under a distinct tag name since this excerpt
+ * is a passage from prior *conversation* text, not document content (research.md R2/R4).
+ */
+export function buildThreadBranchSeedMessage(highlightedText: string): string {
+  const tag = 'branch-seed-excerpt';
+  return [`<${tag}>`, '', highlightedText, '', `</${tag}>`].join('\n');
+}
+
 /** Generates a conversation name from the selection's first heading or leading words (FR-014). */
 export function deriveBranchName(seedExcerpt: string, selectionText: string): string {
   const headingLine = seedExcerpt.split('\n').find((l) => HEADING_RE.test(l.trim()));

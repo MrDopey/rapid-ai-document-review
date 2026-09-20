@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -10,6 +10,7 @@ import {
 import { config } from '../config.ts';
 import { logger } from '../logging.ts';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
+import { buildConversationMessages } from '../conversation/message-log.ts';
 import type { EditService } from '../edit/edit-service.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionLike } from './agent-session-port.ts';
@@ -82,6 +83,14 @@ function resolveAgentTurnTimeoutMs(): number {
  */
 export class PiService {
   private readonly sessions = new Map<string, AgentSessionLike>();
+  /** One `SessionManager` per Thread row (011-linear-thread-mode), keyed by conversation id, used
+   *  purely for the shared-file branch/leaf bookkeeping `sendOnThread`/`seedThreadSession` need —
+   *  independent of `sessions` above, which caches the turn-EXECUTING agent session (fake or
+   *  real). `SessionManager.branch()` only repositions its OWN instance's in-memory leaf pointer
+   *  (never persisted — confirmed against the SDK's `_buildIndex`, which re-derives a freshly
+   *  `open()`ed file's leaf as whatever entry was physically last appended), so every Thread must
+   *  keep reusing the SAME instance across sends rather than re-deriving position from disk. */
+  private readonly threadSessionManagers = new Map<string, SessionManager>();
   private modelRuntimePromise: Promise<ModelRuntime> | null = null;
   /** Late-bound (server.ts, right after EditService is constructed): PiService needs EditService
    * to build the `propose_document_edit` tool, and EditService needs PiService to request
@@ -201,7 +210,10 @@ export class PiService {
     return tools;
   }
 
-  private async getOrCreateSession(conversation: ConversationRow): Promise<AgentSessionLike> {
+  private async getOrCreateSession(
+    conversation: ConversationRow,
+    sessionManagerOverride?: SessionManager,
+  ): Promise<AgentSessionLike> {
     const cached = this.sessions.get(conversation.id);
     if (cached) return cached;
 
@@ -225,14 +237,21 @@ export class PiService {
       ? this.storage.getConversation(conversation.parentId)
       : null;
 
-    const sessionManager = existsSync(conversation.piSessionPath)
-      ? SessionManager.open(conversation.piSessionPath, sessionDir, cwd)
-      : parent && existsSync(parent.piSessionPath)
-        ? // Branches fork from the parent's own Pi session file (design.md §21 deviation, plan.md) so
-          // the conversation tree lives in one per-document session directory; the seeded excerpt
-          // itself still arrives as an ordinary first message (FR-012), never via this fork alone.
-          SessionManager.forkFrom(parent.piSessionPath, cwd, sessionDir, { id: conversation.id })
-        : SessionManager.create(cwd, sessionDir, { id: conversation.id });
+    // A thread-kind conversation (011-linear-thread-mode) supplies its own already-branched
+    // `SessionManager` (see `prepareThreadSession` below) rather than letting this method derive
+    // one itself — every Thread sharing one file must reposition the shared leaf pointer to its
+    // own tip before the SDK starts appending, which the generic open/forkFrom/create derivation
+    // below has no way to know how to do.
+    const sessionManager =
+      sessionManagerOverride ??
+      (existsSync(conversation.piSessionPath)
+        ? SessionManager.open(conversation.piSessionPath, sessionDir, cwd)
+        : parent && existsSync(parent.piSessionPath)
+          ? // Branches fork from the parent's own Pi session file (design.md §21 deviation, plan.md) so
+            // the conversation tree lives in one per-document session directory; the seeded excerpt
+            // itself still arrives as an ordinary first message (FR-012), never via this fork alone.
+            SessionManager.forkFrom(parent.piSessionPath, cwd, sessionDir, { id: conversation.id })
+          : SessionManager.create(cwd, sessionDir, { id: conversation.id }));
 
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -285,8 +304,13 @@ export class PiService {
    * conversation is evicted so the *next* send/retry builds a fresh one instead of reusing a
    * session that may be wedged.
    */
-  async send(conversation: ConversationRow, message: string, bridge: EventBridge): Promise<void> {
-    const session = await this.getOrCreateSession(conversation);
+  async send(
+    conversation: ConversationRow,
+    message: string,
+    bridge: EventBridge,
+    sessionManagerOverride?: SessionManager,
+  ): Promise<void> {
+    const session = await this.getOrCreateSession(conversation, sessionManagerOverride);
     const unsubscribe = session.subscribe((event) => {
       bridge.handle(event);
       // `bridge.hasErrored` (not `event.type === 'agent_error'`): the real Pi SDK has no such
@@ -354,6 +378,152 @@ export class PiService {
       content: seedMessage,
       display: true,
     });
+  }
+
+  /**
+   * Opens (or reuses this process's cached) `SessionManager` for a Thread's shared session file
+   * and repositions its leaf to the Thread's own recorded tip (011-linear-thread-mode, research.md
+   * R1) — every call site that needs to append onto, or read the current position of, a specific
+   * Thread's own branch of the shared tree goes through this first. Also corrects
+   * `thread.piSessionPath` in storage the first time Pi actually names the file, mirroring
+   * `getOrCreateSession`'s own real-session `actualPath` correction, and returns the
+   * possibly-updated row so callers never read the row's now-stale in-memory `piSessionPath`.
+   */
+  private prepareThreadSession(thread: ConversationRow): {
+    sessionManager: SessionManager;
+    thread: ConversationRow;
+  } {
+    let sessionManager = this.threadSessionManagers.get(thread.id);
+    if (!sessionManager) {
+      const sessionDir = dirname(thread.piSessionPath);
+      const cwd = process.cwd();
+      sessionManager = existsSync(thread.piSessionPath)
+        ? SessionManager.open(thread.piSessionPath, sessionDir, cwd)
+        : SessionManager.create(cwd, sessionDir, { id: thread.id });
+      this.threadSessionManagers.set(thread.id, sessionManager);
+    }
+    if (thread.piLeafEntryId) {
+      sessionManager.branch(thread.piLeafEntryId);
+    }
+
+    // Resolved to an absolute path before comparing/storing: `SessionManager.create()` leaves
+    // `getSessionFile()` relative (whatever `sessionDir` this call passed in), while `.open()`
+    // resolves it absolute internally — since every Thread sharing this file may reach it via
+    // either path (root creates it fresh, a branch's first send/seed opens the existing file),
+    // comparing the raw strings would otherwise "correct" root's own row to one string and a
+    // branch's row to a different (if pointing at the identical file) one.
+    const actualPath = sessionManager.getSessionFile();
+    const resolvedActualPath = actualPath ? resolve(actualPath) : null;
+    let current = thread;
+    if (resolvedActualPath && resolvedActualPath !== resolve(thread.piSessionPath)) {
+      this.storage.updateConversation(thread.id, { piSessionPath: resolvedActualPath });
+      current = { ...thread, piSessionPath: resolvedActualPath };
+    }
+    return { sessionManager, thread: current };
+  }
+
+  private recordThreadLeaf(threadId: string, sessionManager: SessionManager): void {
+    const leafId = sessionManager.getLeafId();
+    if (leafId) this.storage.updateConversation(threadId, { piLeafEntryId: leafId });
+  }
+
+  /**
+   * Sends a message on a Thread (011-linear-thread-mode, research.md R1): repositions the shared
+   * session file's leaf to this Thread's own tip via `prepareThreadSession`, runs the turn through
+   * the ordinary `send()` path (fake or real, exactly as canvas mode), then records the shared
+   * tree's new leaf entry id back onto this Thread's own row. Under `RADR_BE_PI_FAKE_SESSIONS=1`,
+   * `FakeAgentSession` never touches a real `SessionManager` at all (`getOrCreateSession`'s early
+   * return) — the user's own message is still appended directly here so the shared file keeps a
+   * genuine branch point other Threads can be resolved against (`resolveThreadAnchorEntryId`
+   * below), even with no real model in the loop.
+   */
+  async sendOnThread(thread: ConversationRow, message: string, bridge: EventBridge): Promise<void> {
+    const { sessionManager, thread: current } = this.prepareThreadSession(thread);
+    if (config.piFakeSessions) {
+      sessionManager.appendMessage({
+        role: 'user',
+        content: message,
+      } as unknown as Parameters<SessionManager['appendMessage']>[0]);
+      // The SDK's own `_persist` defers writing anything to disk until an assistant-role entry
+      // exists in this session's `fileEntries` — with no real model in the loop, that only ever
+      // happens once the fake turn's own reply lands, asynchronously, well after `send()` below
+      // returns (`FakeAgentSession.prompt()` is fire-and-forget). `addCleanup` runs once the turn
+      // actually settles, so the reply is read back from the application's own event log (already
+      // persisted there by then) and appended here too — otherwise the shared bookkeeping tree
+      // would never actually reach disk under fake sessions at all.
+      bridge.addCleanup(() => {
+        const reply = buildConversationMessages(this.storage, current.id).at(-1);
+        if (reply?.role === 'assistant') {
+          sessionManager.appendMessage({
+            role: 'assistant',
+            content: reply.text,
+          } as unknown as Parameters<SessionManager['appendMessage']>[0]);
+        }
+        this.recordThreadLeaf(current.id, sessionManager);
+      });
+      await this.send(current, message, bridge);
+      return;
+    }
+    await this.send(current, message, bridge, sessionManager);
+    this.recordThreadLeaf(current.id, sessionManager);
+  }
+
+  /**
+   * Delivers a new thread-branch's auto-seed message (011-linear-thread-mode) into the shared
+   * session file at the branch's own anchor position, without triggering a turn — the Thread
+   * analogue of `seedSession` above, positioned via `prepareThreadSession` instead of the generic
+   * open/forkFrom/create derivation (which has no notion of a shared leaf to reposition).
+   */
+  async seedThreadSession(thread: ConversationRow, seedMessage: string): Promise<void> {
+    const { sessionManager, thread: current } = this.prepareThreadSession(thread);
+    sessionManager.appendMessage({
+      role: 'user',
+      content: seedMessage,
+    } as unknown as Parameters<SessionManager['appendMessage']>[0]);
+    this.recordThreadLeaf(current.id, sessionManager);
+    if (!config.piFakeSessions) {
+      const session = await this.getOrCreateSession(current, sessionManager);
+      await session.sendCustomMessage({
+        customType: 'branch_seed',
+        content: seedMessage,
+        display: true,
+      });
+    }
+  }
+
+  /**
+   * Resolves a Thread's `anchorMessageId` (an application `MessageDto.id`, from
+   * `ConversationService`'s message log) to the underlying Pi session entry id
+   * `ThreadService.branchFromHighlight` records as the new branch's `piLeafEntryId`
+   * (011-linear-thread-mode, research.md R2). Message ids and Pi entry ids are two different id
+   * spaces (`newId('msg')` vs. Pi's own generated ids) with no persisted mapping between them, so
+   * this walks the parent Thread's own path (`getBranch`) and matches by rendered text — the same
+   * extraction `readClosedTranscript` already uses to read a closed conversation's transcript.
+   * Falls back to the path entry at the same relative position when no exact text match exists
+   * (only possible for an assistant-authored anchor under fake sessions, where no real model ever
+   * generated that text) so a resolvable entry id is always returned.
+   */
+  resolveThreadAnchorEntryId(
+    parent: ConversationRow,
+    appMessages: { id: string; text: string }[],
+    anchorMessageId: string,
+  ): string {
+    const { sessionManager } = this.prepareThreadSession(parent);
+    const pathEntries = sessionManager
+      .getBranch(parent.piLeafEntryId ?? undefined)
+      .filter((entry) => entry.type === 'message')
+      .reverse();
+
+    const anchorIndex = appMessages.findIndex((m) => m.id === anchorMessageId);
+    const anchorText = appMessages[anchorIndex]?.text ?? '';
+    const exact = pathEntries.find((entry) => {
+      const text = extractPlainMessageText((entry as { message: unknown }).message);
+      return text !== null && anchorText.length > 0 && text.endsWith(anchorText);
+    });
+    if (exact) return exact.id;
+
+    const clampedIndex = Math.min(Math.max(anchorIndex, 0), pathEntries.length - 1);
+    return pathEntries[clampedIndex]?.id ?? parent.piLeafEntryId ?? anchorMessageId;
   }
 
   /** Test-only accessor: the cached session for `conversationId`, if one has been created —
@@ -518,6 +688,7 @@ export class PiService {
       session.dispose();
     }
     this.sessions.clear();
+    this.threadSessionManagers.clear();
     this.modelRuntimePromise = null;
   }
 }

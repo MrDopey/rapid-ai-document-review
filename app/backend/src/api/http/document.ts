@@ -22,7 +22,7 @@ export function registerDocumentRoutes(
   app.post('/api/documents', async (request, reply) => {
     const data = parseOrFail(reply, CreateDocumentRequest, request.body);
     if (!data) return;
-    const result = documentService.create(data.content, data.title);
+    const result = documentService.create(data.content, data.title, data.documentType);
     return reply.status(201).send(result);
   });
 

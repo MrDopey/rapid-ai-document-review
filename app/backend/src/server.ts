@@ -14,6 +14,7 @@ import { toConversationDtos } from './conversation/conversation-mapper.ts';
 import { ConversationService } from './conversation/conversation-service.ts';
 import { ConversationFoldService } from './conversation/conversation-fold-service.ts';
 import { ConversationReviewService } from './conversation/conversation-review-service.ts';
+import { ThreadService } from './conversation/thread-service.ts';
 import { PrimaryService } from './conversation/primary-service.ts';
 import { ConcurrencyLimiter } from './conversation/concurrency-limiter.ts';
 import { EventPublisher } from './events/event-publisher.ts';
@@ -26,6 +27,7 @@ import { EditService } from './edit/edit-service.ts';
 import { registerDocumentRoutes } from './api/http/document.ts';
 import { registerRevisionRoutes } from './api/http/revisions.ts';
 import { registerConversationRoutes } from './api/http/conversations.ts';
+import { registerThreadRoutes } from './api/http/threads.ts';
 import { registerEditRoutes } from './api/http/edits.ts';
 import { registerSettingsRoutes } from './api/http/settings.ts';
 import { registerSystemPromptRoutes } from './api/http/system-prompt.ts';
@@ -64,6 +66,7 @@ export function buildApp() {
         id: doc?.id ?? documentId,
         title: doc?.title ?? '',
         currentRevision: doc?.currentRevision ?? 0,
+        documentType: doc?.documentType ?? 'canvas',
         createdAt: doc?.createdAt ?? '',
         updatedAt: doc?.updatedAt ?? '',
         content,
@@ -174,6 +177,19 @@ export function buildApp() {
   // conversation's first message with the document via `conversationService.seedMain`.
   documentService.setConversationService(conversationService);
 
+  // 011-linear-thread-mode: a separate lifecycle service for threaded-conversation documents'
+  // Threads (see thread-service.ts's doc comment for why it's not folded into ConversationService).
+  // Depends on `conversationService` (reuses its `send()` for seed delivery) — constructed after
+  // it, mirroring the same late-bound-setter pattern `documentService.conversationService` uses.
+  const threadService = new ThreadService(
+    storage,
+    piService,
+    eventService,
+    eventHub,
+    conversationService,
+  );
+  documentService.setThreadService(threadService);
+
   // Defensive idempotency: Main is normally created as part of document creation
   // (DocumentService.create); this only fills a gap if that invariant were ever violated.
   for (const doc of storage.listDocuments()) {
@@ -195,6 +211,7 @@ export function buildApp() {
     registerDocumentRoutes(instance, { documentService, revisionService });
     registerRevisionRoutes(instance, { storage, revisionService });
     registerConversationRoutes(instance, { conversationService, primaryService, storage });
+    registerThreadRoutes(instance, { threadService, conversationService, storage });
     registerEditRoutes(instance, { editService, storage });
     registerSettingsRoutes(instance, { storage, eventService, eventHub });
     registerSystemPromptRoutes(instance);

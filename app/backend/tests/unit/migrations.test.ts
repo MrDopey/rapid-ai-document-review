@@ -75,9 +75,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
 
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/010-multi-document-support (adds last_active_at).
+    // Latest migration version as of specs/011-linear-thread-mode (widens conversation.kind and adds document_type).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      3,
+      4,
     );
 
     // The pre-existing row survived the upgrade untouched, and the newly-added column on it reads
@@ -129,9 +129,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/010-multi-document-support (adds last_active_at).
+    // Latest migration version as of specs/011-linear-thread-mode (widens conversation.kind and adds document_type).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      3,
+      4,
     );
     db.close();
   });
@@ -155,7 +155,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      3,
+      4,
     );
     db.close();
   });
@@ -169,7 +169,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      3,
+      4,
     );
 
     const conversation = db
@@ -204,7 +204,7 @@ describe('migration version 3: last_active_at (specs/010-multi-document-support)
     migrate(db);
     expect(tableColumns(db, 'document')).toContain('last_active_at');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      3,
+      4,
     );
     db.close();
   });
@@ -233,6 +233,71 @@ describe('migration version 3: last_active_at (specs/010-multi-document-support)
       unknown
     >;
     expect(document.last_active_at).toBe('2025-06-01T00:00:00.000Z');
+
+    db.close();
+  });
+});
+
+/**
+ * Migration version 4 (011-linear-thread-mode): `document.document_type` (plain `ADD COLUMN`) and
+ * `conversation.kind`'s widened `CHECK` (`'thread-root'`/`'thread-branch'`), which — unlike a plain
+ * column — SQLite cannot add via `ALTER TABLE`, so the whole `conversation` table is rebuilt.
+ */
+describe('migration version 4: document_type + widened conversation.kind (011-linear-thread-mode)', () => {
+  it('a fresh install gets document_type and the widened kind CHECK at the latest user_version', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db);
+    expect(tableColumns(db, 'document')).toContain('document_type');
+    expect(tableColumns(db, 'conversation')).toContain('pi_leaf_entry_id');
+    expect(tableColumns(db, 'conversation')).toContain('done_at');
+    expect(tableColumns(db, 'conversation')).toContain('seed_excerpt_text');
+    db.prepare(
+      `INSERT INTO document (id, title, pi_session_dir, document_type, created_at, updated_at)
+       VALUES ('doc_x', 'Doc X', '/tmp/pi', 'thread', 'now', 'now')`,
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO conversation
+             (id, document_id, name, kind, pi_session_path, status, context_revision, created_at, updated_at)
+           VALUES ('conv_thread', 'doc_x', 'Thread', 'thread-root', '/tmp/t.jsonl', 'idle', 1, 'now', 'now')`,
+        )
+        .run(),
+    ).not.toThrow();
+    db.close();
+  });
+
+  it('an existing database rebuilds conversation in place, preserving rows and widening the kind CHECK', () => {
+    const db = createPreMigration1Database();
+    expect(tableColumns(db, 'document')).not.toContain('document_type');
+    expect(tableColumns(db, 'conversation')).not.toContain('pi_leaf_entry_id');
+
+    migrate(db);
+
+    expect(tableColumns(db, 'document')).toContain('document_type');
+    const conversation = db
+      .prepare('SELECT * FROM conversation WHERE id = ?')
+      .get('conv_old') as Record<string, unknown>;
+    expect(conversation.name).toBe('Main');
+    expect(conversation.kind).toBe('main');
+    expect(conversation.pi_leaf_entry_id).toBeNull();
+    expect(conversation.done_at).toBeNull();
+    expect(conversation.seed_excerpt_text).toBeNull();
+    expect(indexNames(db, 'conversation')).toContain('conversation_one_primary');
+
+    db.prepare(
+      `INSERT INTO document (id, title, pi_session_dir, document_type, created_at, updated_at)
+       VALUES ('doc_old', 'Old Doc', '/tmp/pi', 'thread', 'now', 'now')`,
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO conversation
+             (id, document_id, name, kind, pi_session_path, status, context_revision, created_at, updated_at)
+           VALUES ('conv_thread', 'doc_old', 'Thread', 'thread-branch', '/tmp/t.jsonl', 'idle', 1, 'now', 'now')`,
+        )
+        .run(),
+    ).not.toThrow();
 
     db.close();
   });

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { DocumentType } from '@rapid-ai-document-review/shared/contracts/http';
 import { useDocumentStore } from './stores/document.js';
 import { useConversationsStore } from './stores/conversations.js';
+import { useThreadStore } from './stores/thread.js';
 import { useSettingsStore } from './stores/settings.js';
 import { useEditsStore } from './stores/edits.js';
 import { WsClient } from './transport/ws-client.js';
 import { mountLiveRegions } from './a11y/live-regions.js';
 import DocumentCanvas from './components/canvas/DocumentCanvas.vue';
+import ThreadModeView from './components/thread/ThreadModeView.vue';
 import DocumentSwitcherDropdown from './components/header/DocumentSwitcherDropdown.vue';
 import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
@@ -40,6 +43,7 @@ import { orderConversationsByAnchor } from './components/canvas/conversationLayo
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
+const threadStore = useThreadStore();
 const settingsStore = useSettingsStore();
 const editsStore = useEditsStore();
 
@@ -128,6 +132,15 @@ const {
 } = useFocusPanelState(focusCap);
 
 const hasDocument = computed(() => store.document !== null);
+
+// 011-linear-thread-mode (FR-002/FR-014): a document's type is fixed at creation and never
+// changes afterward — this is the one branch point between the two, otherwise entirely separate,
+// top-level views (contracts/thread-mode.md's "Frontend routing/view contract"). Everything below
+// this point that's specific to the canvas Preview/Canvas/History grid (HudPanel, DocumentCanvas,
+// Preview/Editor panes, History, the multi-focus overlay) stays exactly as it was and only ever
+// renders in the `v-else` branch (see the template) — `ThreadModeView` is a genuinely separate
+// component tree, never a variant rendering path through the same one.
+const isThreadDocument = computed(() => store.document?.documentType === 'thread');
 
 // Keeps two surfaces in sync with `store.document?.title`: the browser tab (`document.title`,
 // written here) and the in-app `.document-title-bar` (bound directly in the template below).
@@ -534,6 +547,20 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   globalBindingHandlers[binding.id]?.();
 }
 
+/** 011-linear-thread-mode: the active document's own conversation surface — canvas's
+ *  `conversationsStore` or thread mode's `threadStore` — is loaded exclusively, never both, since
+ *  the two are separate, non-interoperating sets scoped to their own document type (spec
+ *  Clarifications). Shared by every call site that (re)loads "whichever conversation surface the
+ *  now-active document actually uses": initial load, document switch, and both document-creation
+ *  flows. */
+async function loadActiveDocumentThreadOrConversations(): Promise<void> {
+  if (isThreadDocument.value) {
+    await threadStore.load();
+  } else {
+    await conversationsStore.load();
+  }
+}
+
 /** The initial document load, wrapped so it can be re-run verbatim by the Retry button below —
  *  times out after `LOAD_TIMEOUT_MS` (an unreachable backend would otherwise leave `store.loaded`
  *  false forever, with nothing in the template ever able to distinguish "still loading" from
@@ -549,7 +576,7 @@ async function loadInitialDocument(): Promise<void> {
     );
     if (store.document) {
       connectWs();
-      await Promise.all([conversationsStore.load(), settingsStore.load()]);
+      await Promise.all([loadActiveDocumentThreadOrConversations(), settingsStore.load()]);
     }
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : "Couldn't load the document.";
@@ -585,7 +612,13 @@ function connectWs(): void {
   // place a new store's frame handling needs to be registered, rather than a hand-listed
   // `someStore.handleServerFrame(frame)` call per store inside `client.onFrame`, where nothing
   // would enforce that adding a new store here means remembering to add its own line too.
-  for (const frameSubscriber of [store, conversationsStore, settingsStore, editsStore]) {
+  for (const frameSubscriber of [
+    store,
+    conversationsStore,
+    threadStore,
+    settingsStore,
+    editsStore,
+  ]) {
     frameSubscriber.subscribeToFrames(client);
   }
   client.connect();
@@ -615,7 +648,7 @@ async function switchDocument(documentId: string): Promise<void> {
   if (documentId === store.activeDocumentId) return;
   closeAllFocused();
   await store.switchTo(documentId);
-  await conversationsStore.load();
+  await loadActiveDocumentThreadOrConversations();
 }
 
 /** Ctrl+Alt+[ / Ctrl+Alt+] (`onGlobalKeydown` below): moves to the previous/next document in
@@ -629,13 +662,15 @@ function cycleDocument(offset: number): void {
   void switchDocument(docs[nextIndex]!.id);
 }
 
-/** DocumentSwitcherDropdown's "+ New document" row (FR-001): mirrors `switchDocument`'s own
- *  cross-store refresh — `store.createNew()` already makes the new document active (triggering the
- *  WS re-subscribe watch above), so this only needs to additionally refresh the conversation HUD's
- *  list to the new (auto-created Main-conversation-only) document. */
-async function onCreateNewDocument(): Promise<void> {
-  await store.createNew();
-  await conversationsStore.load();
+/** DocumentSwitcherDropdown's "+ New document"/"+ New threaded conversation" rows (FR-001,
+ *  011-linear-thread-mode): mirrors `switchDocument`'s own cross-store refresh —
+ *  `store.createNew(documentType)` already makes the new document active (triggering the WS
+ *  re-subscribe watch above) and its `documentType` is what `isThreadDocument` reads to decide
+ *  which surface to load next; either way, the new document starts with exactly one conversation
+ *  (Main for canvas, the auto-created root Thread for a threaded conversation — FR-004). */
+async function onCreateNewDocument(documentType: DocumentType): Promise<void> {
+  await store.createNew(documentType);
+  await loadActiveDocumentThreadOrConversations();
 }
 
 /** DocumentSwitcherDropdown's rename affordance (FR-007): `window.prompt` matches this app's only
@@ -769,6 +804,36 @@ async function onToggleReasoning(event: Event): Promise<void> {
       Start reviewing
     </button>
   </section>
+
+  <!-- 011-linear-thread-mode (FR-002/FR-014): a genuinely separate top-level view, not a
+       variant rendering path through `.editor-layout` below — see `isThreadDocument`'s own doc
+       comment in <script>. Only the document switcher (needed to switch away/back, FR-014's
+       persistence guarantee) and the same conflict-banner convention are shared; every
+       canvas-specific surface (HudPanel, DocumentCanvas, Preview/Editor, History, the multi-focus
+       overlay) is entirely absent here rather than conditionally hidden, so canvas mode's own
+       markup/behavior below is never touched by this branch existing. -->
+  <div v-else-if="isThreadDocument" class="thread-mode-layout">
+    <header class="document-title-bar thread-mode-title-bar">
+      <DocumentSwitcherDropdown
+        @switch="switchDocument"
+        @create="onCreateNewDocument"
+        @rename="onRenameDocument"
+        @delete="onDeleteDocument"
+      />
+    </header>
+    <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
+      <span>{{ store.conflictMessage }}</span>
+      <button
+        type="button"
+        class="dismiss-notice-button"
+        aria-label="Dismiss conflict notice"
+        @click="store.clearConflictMessage()"
+      >
+        Dismiss
+      </button>
+    </div>
+    <ThreadModeView class="thread-mode-body" />
+  </div>
 
   <div v-else class="editor-layout">
     <!-- A two-column layout (~80/20): the document switcher (DocumentSwitcherDropdown.vue), plus
@@ -1091,6 +1156,22 @@ async function onToggleReasoning(event: Event): Promise<void> {
   display: flex;
   flex-direction: column;
   height: 100vh;
+}
+/* 011-linear-thread-mode: deliberately much simpler than `.editor-layout` above — no
+   Preview/Canvas/History grid concept applies to this mode (contracts/thread-mode.md). */
+.thread-mode-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+.thread-mode-title-bar {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color, #ddd);
+}
+.thread-mode-body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 /* 006-toolbar-reorg (confirmed layout): `.toolbar` is now a column — `.toolbar-columns` (the
    80/20 title+HUD | Primary+Global-Actions row) on top, and (only while there's an error) the

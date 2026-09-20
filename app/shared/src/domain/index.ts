@@ -1,10 +1,14 @@
 export type RevisionSource = 'user' | 'agent';
 export type RevisionOrigin = 'creation' | 'manual_debounce' | 'agent_edit' | 'restore';
 
+export type DocumentType = 'canvas' | 'thread';
+
 export interface Document {
   id: string;
   title: string;
   currentRevision: number;
+  /** Fixed at creation (011-linear-thread-mode, FR-001/FR-014); immutable thereafter. */
+  documentType: DocumentType;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,7 +27,7 @@ export interface Revision {
   createdAt: string;
 }
 
-export type ConversationKind = 'main' | 'branch' | 'review';
+export type ConversationKind = 'main' | 'branch' | 'review' | 'thread-root' | 'thread-branch';
 export type ConversationStatus = 'idle' | 'working' | 'errored' | 'closed';
 
 export interface ConversationSeedSelection {
@@ -50,6 +54,12 @@ export interface Conversation {
    *  a review conversation, and for a branch created from a document `selection` — that anchor
    *  mechanism is `seedSelection` instead (005-canvas-conversation-threads). */
   forkedFromMessageId: string | null;
+  /** 011-linear-thread-mode: non-`null` once a reviewer marks this Thread done; `null` for every
+   *  non-thread `kind`. */
+  doneAt: string | null;
+  /** 011-linear-thread-mode: the highlighted passage that seeded a `thread-branch`; `null` for
+   *  `thread-root` and every non-thread `kind`. */
+  seedExcerptText: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;

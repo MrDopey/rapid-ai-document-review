@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
+import type { DocumentType } from '@rapid-ai-document-review/shared/contracts/http';
 import { useDocumentStore } from '../../stores/document.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 
 const emit = defineEmits<{
   (e: 'switch', documentId: string): void;
-  (e: 'create'): void;
+  // 011-linear-thread-mode (FR-001): the create action now carries the reviewer's chosen
+  // document type — a threaded-conversation document's whole lifetime type is fixed at creation
+  // (FR-014), so this is the one and only place that choice is ever made.
+  (e: 'create', documentType: DocumentType): void;
   (e: 'rename', documentId: string): void;
   (e: 'delete', documentId: string): void;
 }>();
@@ -55,9 +59,13 @@ function selectDocument(documentId: string): void {
   emit('switch', documentId);
 }
 
-function onCreate(): void {
+/** The simplest UI consistent with this app's existing conventions (no rich modal/dialog
+ *  system exists here — rename/delete both use bare `window.prompt`/`window.confirm`) is two
+ *  separate rows rather than a modal with a type picker; each row's own label already states the
+ *  choice, so no further confirmation step is needed. */
+function onCreate(documentType: DocumentType): void {
   close();
-  emit('create');
+  emit('create', documentType);
 }
 
 function onRename(documentId: string, event: Event): void {
@@ -116,6 +124,13 @@ function onDelete(documentId: string, event: Event): void {
           @click="selectDocument(doc.id)"
         >
           <span class="document-switcher-title">{{ doc.title || 'Untitled' }}</span>
+          <!-- 011-linear-thread-mode (contracts/thread-mode.md's "Frontend routing/view contract"):
+               a document-type indicator so the reviewer can tell, before switching, which view
+               (Preview/Canvas/History grid vs. ThreadModeView) they'll land in. Canvas is the
+               default/unmarked case (every pre-existing document is canvas-typed) — only the
+               threaded-conversation type gets a visible badge, so this adds no visual noise to the
+               dropdown's existing, all-canvas usage. -->
+          <span v-if="doc.documentType === 'thread'" class="document-type-badge">Thread</span>
         </button>
         <button
           type="button"
@@ -154,8 +169,23 @@ function onDelete(documentId: string, event: Event): void {
         </button>
       </li>
       <li role="none" class="document-switcher-row document-switcher-new-row">
-        <button type="button" role="menuitem" class="document-switcher-create" @click="onCreate">
+        <button
+          type="button"
+          role="menuitem"
+          class="document-switcher-create"
+          @click="onCreate('canvas')"
+        >
           + New document
+        </button>
+      </li>
+      <li role="none" class="document-switcher-row">
+        <button
+          type="button"
+          role="menuitem"
+          class="document-switcher-create"
+          @click="onCreate('thread')"
+        >
+          + New threaded conversation
         </button>
       </li>
     </ul>
@@ -215,6 +245,8 @@ function onDelete(documentId: string, event: Event): void {
   background: var(--panel-bg-alt, #eef0f3);
 }
 .document-switcher-select {
+  display: flex;
+  align-items: center;
   flex: 1 1 auto;
   min-width: 0;
   text-align: left;
@@ -231,9 +263,22 @@ function onDelete(documentId: string, event: Event): void {
 }
 .document-switcher-title {
   display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 011-linear-thread-mode: a small, unobtrusive badge — same shape as `ThreadCard.vue`'s own
+   `.thread-root-badge` — flagging a threaded-conversation document in the switcher list. */
+.document-type-badge {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--panel-bg-alt, #eef0f3);
+  color: var(--neutral-muted-color, #4b5563);
+  margin-left: 0.35rem;
 }
 .document-switcher-icon-button {
   display: inline-flex;

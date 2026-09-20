@@ -10,7 +10,6 @@ import type {
   ReviewConversationResponse,
   SendMessageResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import type { AutomergeStoreHolder } from '../document/automerge-store-holder.ts';
 import { DocumentNotFoundError } from '../document/document-service.ts';
 import { logger } from '../logging.ts';
@@ -23,7 +22,8 @@ import type { PiService } from '../pi/pi-service.ts';
 import type { TurnRunner } from '../pi/turn-runner.ts';
 import type { ConversationRow, SeedSelection, StorageAdapter } from '../storage/storage-adapter.ts';
 import { toConversationDto, toConversationDtos } from './conversation-mapper.ts';
-import { toStagedEditDto } from '../edit/edit-mapper.ts';
+import { getPendingStagedEditIds, toStagedEditDto } from '../edit/edit-mapper.ts';
+import { buildConversationMessages } from './message-log.ts';
 import {
   buildBranchSeedMessage,
   buildMainSeedMessage,
@@ -94,23 +94,6 @@ interface UserMessageEventData {
    * HTTP contract, since the UI has no reason to render a seed message any differently.
    */
   isSeed?: boolean;
-}
-
-interface ToolStartedEventData {
-  toolCallId: string;
-  toolName: string;
-  messageId: string;
-  args: unknown;
-}
-
-interface ToolCompletedEventData {
-  toolCallId: string;
-  toolName: string;
-  messageId: string;
-  isError: boolean;
-  resultText: string | null;
-  failureReason: string | null;
-  stagedEditId: string | null;
 }
 
 /**
@@ -191,6 +174,9 @@ export class ConversationService {
       branchDepth: 0,
       seedSelection: null,
       forkedFromMessageId: null,
+      piLeafEntryId: null,
+      doneAt: null,
+      seedExcerptText: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -409,6 +395,9 @@ export class ConversationService {
       branchDepth,
       seedSelection,
       forkedFromMessageId,
+      piLeafEntryId: null,
+      doneAt: null,
+      seedExcerptText: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -467,13 +456,11 @@ export class ConversationService {
     // completes, and is externally observable via `listStagedEditsByConversation`, slightly before
     // the turn's own trailing response finishes streaming and flips status back) — checked before
     // the general `working` guard below so this more specific case always wins.
-    const pending = this.storage
-      .listStagedEditsByConversation(conversationId)
-      .filter((e) => e.status === 'pending');
-    if (pending.length > 0) {
+    const pendingEditIds = getPendingStagedEditIds(this.storage, conversationId);
+    if (pendingEditIds.length > 0) {
       throw new PendingEditsBlockCloseError(
-        `Cannot close conversation while ${pending.length} proposal(s) are pending`,
-        pending.map((e) => e.id),
+        `Cannot close conversation while ${pendingEditIds.length} proposal(s) are pending`,
+        pendingEditIds,
       );
     }
 
@@ -600,6 +587,9 @@ export class ConversationService {
         branchDepth: 0,
         seedSelection: null,
         forkedFromMessageId: null,
+        piLeafEntryId: null,
+        doneAt: null,
+        seedExcerptText: null,
         createdAt: now,
         updatedAt: now,
         closedAt: null,
@@ -765,7 +755,13 @@ export class ConversationService {
     // `sendBranchSeedMessage`'s existing fire-and-forget `.catch(...)` (and `seedMain`'s) already
     // logs and swallows it the same way.
     if (options.isSeed) {
-      await this.piService.seedSession(conversation, message);
+      // 011-linear-thread-mode: a Thread's seed is delivered into the shared, leaf-repositioned
+      // session file instead of its own independent one — see `PiService.seedThreadSession`.
+      if (conversation.kind === 'thread-root' || conversation.kind === 'thread-branch') {
+        await this.piService.seedThreadSession(conversation, message);
+      } else {
+        await this.piService.seedSession(conversation, message);
+      }
       return { accepted: true, queued: false, contextRevision: conversation.contextRevision };
     }
 
@@ -892,57 +888,7 @@ export class ConversationService {
   }
 
   private buildMessages(conversationId: string): MessageDto[] {
-    const rows = this.storage.listEventsByConversation(conversationId);
-
-    const toolStartedByCallId = new Map<string, ToolStartedEventData>();
-    for (const row of rows) {
-      if (row.eventType !== 'tool_started') continue;
-      const data = row.data as ToolStartedEventData;
-      toolStartedByCallId.set(data.toolCallId, data);
-    }
-    const toolCallsByMessageId = new Map<string, MessageDto['toolCalls']>();
-    for (const row of rows) {
-      if (row.eventType !== 'tool_completed') continue;
-      const data = row.data as ToolCompletedEventData;
-      const started = toolStartedByCallId.get(data.toolCallId);
-      const entry = {
-        toolCallId: data.toolCallId,
-        name: data.toolName,
-        args: started?.args,
-        resultText: data.resultText,
-        failureReason: data.failureReason,
-        stagedEditId: data.stagedEditId,
-      };
-      const existing = toolCallsByMessageId.get(data.messageId) ?? [];
-      existing.push(entry);
-      toolCallsByMessageId.set(data.messageId, existing);
-    }
-
-    return (
-      rows
-        .filter((row) => row.eventType === 'message_completed')
-        .map((row) => {
-          const data = row.data as UserMessageEventData;
-          return {
-            id: data.messageId,
-            role: data.role,
-            text: data.text,
-            reasoning: data.reasoning,
-            isToolCallCarrier: computeIsToolCallCarrier(data),
-            toolCalls: toolCallsByMessageId.get(data.messageId) ?? [],
-            createdAt: row.createdAt,
-          };
-        })
-        // Defensive: a persisted event can be missing `messageId`/`role`/`text` entirely (e.g., an older
-        // row recorded before validation existed, or a future bug in whatever recorded it). `MessageDto`
-        // requires all three, so one bad row would otherwise fail `GetConversationResponse.parse` on the
-        // client and blank out this conversation's *entire* history rather than just the one row —
-        // dropping it here is strictly better than surfacing a response the client can't parse at all.
-        .filter(
-          (message) =>
-            Boolean(message.id) && Boolean(message.role) && typeof message.text === 'string',
-        )
-    );
+    return buildConversationMessages(this.storage, conversationId);
   }
 
   /**

@@ -1,6 +1,7 @@
 import {
   AcceptRemainingResponse,
   ApplyEditResponse,
+  BranchThreadRequest,
   ClearPrimaryResponse,
   CloseConversationRequest,
   CloseConversationResponse,
@@ -22,6 +23,7 @@ import {
   ListDocumentsResponse,
   ListEditsResponse,
   ListRevisionsResponse,
+  MarkThreadDoneResponse,
   PatchDocumentRequest,
   PatchDocumentResponse,
   PreviewEditResponse,
@@ -29,6 +31,7 @@ import {
   RefreshSendResponse,
   RenameConversationRequest,
   RenameDocumentRequest,
+  ReopenThreadResponse,
   RestoreRevisionResponse,
   RetryResponse,
   ReviewConversationResponse,
@@ -313,6 +316,52 @@ export const httpClient = {
       `/api/documents/${documentId}/conversations/${conversationId}/edits/drop-remaining`,
       { method: 'POST' },
       (j) => DropRemainingResponse.parse(j),
+    );
+  },
+
+  // ---- Linear thread mode (011-linear-thread-mode) ----
+
+  async listThreads(documentId: string, params: { cursor?: string; limit?: number } = {}) {
+    return request(
+      `/api/documents/${documentId}/threads${buildPageQuery(params)}`,
+      undefined,
+      (j) => ListConversationsResponse.parse(j),
+    );
+  },
+
+  async getThreadMessages(documentId: string, id: string) {
+    return request(`/api/documents/${documentId}/threads/${id}/messages`, undefined, (j) =>
+      GetConversationResponse.parse(j),
+    );
+  },
+
+  async sendThreadMessage(documentId: string, id: string, message: string) {
+    const body: SendMessageRequest = { message };
+    return request(
+      `/api/documents/${documentId}/threads/${id}/send`,
+      { method: 'POST', body: JSON.stringify(body) },
+      (j) => SendMessageResponse.parse(j),
+    );
+  },
+
+  async branchThread(documentId: string, id: string, input: BranchThreadRequest) {
+    BranchThreadRequest.parse(input);
+    return request(
+      `/api/documents/${documentId}/threads/${id}/branch`,
+      { method: 'POST', body: JSON.stringify(input) },
+      (j) => ConversationDto.parse(j),
+    );
+  },
+
+  async markThreadDone(documentId: string, id: string) {
+    return request(`/api/documents/${documentId}/threads/${id}/done`, { method: 'POST' }, (j) =>
+      MarkThreadDoneResponse.parse(j),
+    );
+  },
+
+  async reopenThread(documentId: string, id: string) {
+    return request(`/api/documents/${documentId}/threads/${id}/reopen`, { method: 'POST' }, (j) =>
+      ReopenThreadResponse.parse(j),
     );
   },
 

@@ -107,6 +107,8 @@ function buildConversationDto(
     seedSelection,
     forkedFromMessageId: row.forkedFromMessageId,
     anchorOrphaned,
+    doneAt: row.doneAt,
+    seedExcerptText: row.seedExcerptText,
   };
 }
 

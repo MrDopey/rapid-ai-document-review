@@ -9,7 +9,13 @@ export type RevisionSource = z.infer<typeof RevisionSource>;
 export const RevisionOrigin = z.enum(['creation', 'manual_debounce', 'agent_edit', 'restore']);
 export type RevisionOrigin = z.infer<typeof RevisionOrigin>;
 
-export const ConversationKind = z.enum(['main', 'branch', 'review']);
+export const ConversationKind = z.enum([
+  'main',
+  'branch',
+  'review',
+  'thread-root',
+  'thread-branch',
+]);
 export type ConversationKind = z.infer<typeof ConversationKind>;
 
 export const ConversationStatus = z.enum(['idle', 'working', 'errored', 'closed']);
@@ -51,6 +57,12 @@ export const ErrorCode = z.enum([
   'CONVERSATION_NOT_EMPTY',
   'CONVERSATION_BUSY',
   'DOCUMENT_OUT_OF_SYNC',
+  // 011-linear-thread-mode
+  'INVALID_HIGHLIGHT',
+  'ANCHOR_IS_TIP',
+  'PENDING_EDITS_BLOCK_DONE',
+  'ROOT_THREAD_UNDELETABLE',
+  'DOCUMENT_WRONG_TYPE',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -63,10 +75,14 @@ export const ErrorEnvelope = z.object({
 });
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;
 
+export const DocumentType = z.enum(['canvas', 'thread']);
+export type DocumentType = z.infer<typeof DocumentType>;
+
 export const DocumentDto = z.object({
   id: z.string(),
   title: z.string(),
   currentRevision: z.number().int(),
+  documentType: DocumentType,
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -75,6 +91,7 @@ export type DocumentDto = z.infer<typeof DocumentDto>;
 export const DocumentSummaryDto = z.object({
   id: z.string(),
   title: z.string(),
+  documentType: DocumentType,
   isActive: z.boolean(),
   lastActiveAt: z.string(),
 });
@@ -130,6 +147,12 @@ export const ConversationDto = z.object({
   // within a conversation (no `selection` given). `null` for Main, for a review conversation, and
   // for a branch created from a document `selection` (that anchor is `seedSelection` instead).
   forkedFromMessageId: z.string().nullable(),
+  // 011-linear-thread-mode: `null` = active (default top-down list); non-`null` = done (hidden
+  // from it, still fully readable/branchable/reopenable). `null` for every non-thread `kind`.
+  doneAt: z.string().nullable(),
+  // 011-linear-thread-mode: the highlighted passage that seeded a `thread-branch` (FR-005a).
+  // `null` for `thread-root` and every non-thread `kind`.
+  seedExcerptText: z.string().nullable(),
 });
 export type ConversationDto = z.infer<typeof ConversationDto>;
 
@@ -215,6 +238,9 @@ export type PaginationQuery = z.infer<typeof PaginationQuery>;
 export const CreateDocumentRequest = z.object({
   title: z.string().min(1).optional(),
   content: z.string().min(1),
+  // 011-linear-thread-mode: default 'canvas', applied server-side (not in this schema). Fixed for
+  // the document's lifetime once created (FR-001/FR-014) — no route ever changes it afterward.
+  documentType: DocumentType.optional(),
 });
 export type CreateDocumentRequest = z.infer<typeof CreateDocumentRequest>;
 
@@ -504,3 +530,24 @@ export const DropRemainingResponse = z.object({
   droppedEditIds: z.array(z.string()),
 });
 export type DropRemainingResponse = z.infer<typeof DropRemainingResponse>;
+
+// ---- Linear thread mode (011-linear-thread-mode) ----
+
+export const BranchThreadRequest = z.object({
+  anchorMessageId: z.string(),
+  highlightedText: z.string().min(1),
+  name: z.string().min(1).optional(),
+});
+export type BranchThreadRequest = z.infer<typeof BranchThreadRequest>;
+
+export const MarkThreadDoneResponse = z.object({
+  threadId: z.string(),
+  doneAt: z.string(),
+});
+export type MarkThreadDoneResponse = z.infer<typeof MarkThreadDoneResponse>;
+
+export const ReopenThreadResponse = z.object({
+  threadId: z.string(),
+  doneAt: z.literal(null),
+});
+export type ReopenThreadResponse = z.infer<typeof ReopenThreadResponse>;

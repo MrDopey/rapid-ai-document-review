@@ -1,0 +1,82 @@
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useThreadStore } from '../../stores/thread.js';
+
+/**
+ * 011-linear-thread-mode (FR-005c): the send box mounted on exactly one segment per Thread —
+ * whichever `ThreadCard.vue` resolves as `isTipSegment: true` (`useThreadSegments.ts`). Every
+ * earlier, already-split-off segment renders no composer at all; this component's own existence on
+ * the page is itself the enforcement of "only a Thread's current tip may accept a new message".
+ * Deliberately simpler than `ConversationView.vue`'s composer (no Refresh+Send/Retry/Close — none
+ * of those canvas-mode concepts apply to a Thread, per FR-015's "reuse... except where this
+ * feature's requirements explicitly call for different behavior").
+ */
+const props = defineProps<{ threadId: string; disabled?: boolean }>();
+
+const store = useThreadStore();
+const draft = ref('');
+const sending = ref(false);
+
+async function onSend(): Promise<void> {
+  const text = draft.value.trim();
+  if (!text || sending.value || props.disabled) return;
+  draft.value = '';
+  sending.value = true;
+  try {
+    await store.send(props.threadId, text);
+  } finally {
+    sending.value = false;
+  }
+}
+
+function onComposerKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+    return;
+  }
+  event.preventDefault();
+  void onSend();
+}
+</script>
+
+<template>
+  <form class="thread-composer" @submit.prevent="onSend">
+    <label class="visually-hidden" :for="`thread-composer-${threadId}`">Continue this thread</label>
+    <textarea
+      :id="`thread-composer-${threadId}`"
+      v-model="draft"
+      placeholder="Continue this thread…"
+      :disabled="disabled || sending"
+      @keydown="onComposerKeydown"
+    />
+    <button
+      type="submit"
+      class="thread-send-button"
+      :disabled="!draft.trim() || sending || disabled"
+    >
+      {{ sending ? 'Sending…' : 'Send' }}
+    </button>
+  </form>
+</template>
+
+<style scoped>
+.thread-composer {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  padding: 0.4rem 0;
+}
+.thread-composer textarea {
+  flex: 1 1 auto;
+  min-height: 2.4rem;
+  resize: vertical;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 6px;
+  background: var(--panel-bg, #f7f7f8);
+  color: inherit;
+}
+.thread-send-button {
+  flex: 0 0 auto;
+}
+</style>

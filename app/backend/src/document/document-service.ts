@@ -15,6 +15,7 @@ import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
 import { toConversationDto } from '../conversation/conversation-mapper.ts';
 import type { ConversationService } from '../conversation/conversation-service.ts';
+import type { ThreadService } from '../conversation/thread-service.ts';
 import type { PrimaryMutex } from '../pi/primary-mutex.ts';
 import { AutomergeStore } from './automerge-store.ts';
 import type { AutomergeStoreHolder } from './automerge-store-holder.ts';
@@ -78,6 +79,7 @@ function toDocumentDto(doc: {
   id: string;
   title: string;
   currentRevision: number;
+  documentType: 'canvas' | 'thread';
   createdAt: string;
   updatedAt: string;
 }): DocumentDto {
@@ -85,6 +87,7 @@ function toDocumentDto(doc: {
     id: doc.id,
     title: doc.title,
     currentRevision: doc.currentRevision,
+    documentType: doc.documentType,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -121,6 +124,10 @@ export class DocumentService {
   // Used only to seed a brand-new Main conversation's first message with the document (below) —
   // `create()` is only ever called well after server.ts has finished wiring both services.
   private conversationService: ConversationService | null = null;
+  /** Late-bound for the same construction-order reason as `conversationService` above —
+   *  `ThreadService` itself depends on `PiService`, constructed after `DocumentService`
+   *  (011-linear-thread-mode). Used only by `create()`'s `documentType: 'thread'` branch. */
+  private threadService: ThreadService | null = null;
 
   constructor(
     storage: StorageAdapter,
@@ -141,6 +148,10 @@ export class DocumentService {
 
   setConversationService(conversationService: ConversationService): void {
     this.conversationService = conversationService;
+  }
+
+  setThreadService(threadService: ThreadService): void {
+    this.threadService = threadService;
   }
 
   /**
@@ -178,6 +189,7 @@ export class DocumentService {
     return docs.map((doc, index) => ({
       id: doc.id,
       title: doc.title,
+      documentType: doc.documentType,
       isActive: index === 0,
       lastActiveAt: doc.lastActiveAt,
     }));
@@ -206,7 +218,11 @@ export class DocumentService {
     this.automerge.delete(documentId);
   }
 
-  create(content: string, title?: string): CreateDocumentResult {
+  create(
+    content: string,
+    title?: string,
+    documentType: 'canvas' | 'thread' = 'canvas',
+  ): CreateDocumentResult {
     const documentId = newId('doc');
     const now = new Date().toISOString();
     const resolvedTitle = deriveTitle(content, title);
@@ -216,6 +232,7 @@ export class DocumentService {
       id: documentId,
       title: resolvedTitle,
       piSessionDir,
+      documentType,
       createdAt: now,
       updatedAt: now,
       lastActiveAt: now,
@@ -238,6 +255,24 @@ export class DocumentService {
       origin: 'creation',
     });
 
+    // 011-linear-thread-mode: a threaded-conversation document gets its single auto-created root
+    // Thread instead of a canvas-mode Main conversation — FR-001/FR-003/FR-004. `ThreadService`
+    // is late-bound (see the comment on `threadService` above) but is always set by the time any
+    // real request reaches here (server.ts wires it before the app starts listening).
+    if (documentType === 'thread') {
+      const threadRootRow = this.threadService!.createRoot(documentId);
+      return {
+        document: toDocumentDto({ ...documentRow, currentRevision: revisionRow.revision }),
+        content,
+        mainConversation: toConversationDto(
+          this.storage,
+          threadRootRow,
+          revisionRow.revision,
+          content,
+        ),
+      };
+    }
+
     const mainConversationRow = this.storage.createConversation({
       id: newId('conv'),
       documentId,
@@ -253,6 +288,9 @@ export class DocumentService {
       branchDepth: 0,
       seedSelection: null,
       forkedFromMessageId: null,
+      piLeafEntryId: null,
+      doneAt: null,
+      seedExcerptText: null,
       createdAt: now,
       updatedAt: now,
       closedAt: null,

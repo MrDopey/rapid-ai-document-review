@@ -33,6 +33,7 @@ interface DocumentDbRow {
   title: string;
   current_revision: number;
   pi_session_dir: string;
+  document_type: string;
   created_at: string;
   updated_at: string;
   last_active_at: string;
@@ -44,6 +45,7 @@ function mapDocument(row: DocumentDbRow): DocumentRow {
     title: row.title,
     currentRevision: row.current_revision,
     piSessionDir: row.pi_session_dir,
+    documentType: row.document_type as DocumentRow['documentType'],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastActiveAt: row.last_active_at,
@@ -97,6 +99,9 @@ interface ConversationDbRow {
   branch_depth: number;
   seed_selection: string | null;
   forked_from_message_id: string | null;
+  pi_leaf_entry_id: string | null;
+  done_at: string | null;
+  seed_excerpt_text: string | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -118,6 +123,9 @@ function mapConversation(row: ConversationDbRow): ConversationRow {
     branchDepth: row.branch_depth,
     seedSelection: row.seed_selection ? JSON.parse(row.seed_selection) : null,
     forkedFromMessageId: row.forked_from_message_id,
+    piLeafEntryId: row.pi_leaf_entry_id,
+    doneAt: row.done_at,
+    seedExcerptText: row.seed_excerpt_text,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     closedAt: row.closed_at,
@@ -242,14 +250,15 @@ export class SqliteStorageAdapter implements StorageAdapter {
     this.db
       .prepare(
         `INSERT INTO document
-           (id, title, current_revision, pi_session_dir, created_at, updated_at, last_active_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, current_revision, pi_session_dir, document_type, created_at, updated_at, last_active_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
         row.title,
         currentRevision,
         row.piSessionDir,
+        row.documentType,
         row.createdAt,
         row.updatedAt,
         row.lastActiveAt,
@@ -433,8 +442,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         `INSERT INTO conversation
            (id, document_id, parent_id, name, kind, pi_session_path, status, error_message,
             is_primary, is_current_main, context_revision, branch_depth, seed_selection, forked_from_message_id,
+            pi_leaf_entry_id, done_at, seed_excerpt_text,
             created_at, updated_at, closed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -451,6 +461,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         row.branchDepth,
         row.seedSelection ? JSON.stringify(row.seedSelection) : null,
         row.forkedFromMessageId,
+        row.piLeafEntryId,
+        row.doneAt,
+        row.seedExcerptText,
         row.createdAt,
         row.updatedAt,
         row.closedAt,
@@ -480,6 +493,13 @@ export class SqliteStorageAdapter implements StorageAdapter {
       .prepare(
         `SELECT * FROM conversation WHERE document_id = ? AND kind = 'main' AND is_current_main = 1 LIMIT 1`,
       )
+      .get(documentId) as ConversationDbRow | undefined;
+    return row ? mapConversation(row) : null;
+  }
+
+  getThreadRoot(documentId: string): ConversationRow | null {
+    const row = this.db
+      .prepare(`SELECT * FROM conversation WHERE document_id = ? AND kind = 'thread-root' LIMIT 1`)
       .get(documentId) as ConversationDbRow | undefined;
     return row ? mapConversation(row) : null;
   }
@@ -543,7 +563,8 @@ export class SqliteStorageAdapter implements StorageAdapter {
         `UPDATE conversation SET
            parent_id = ?, name = ?, kind = ?, pi_session_path = ?, status = ?, error_message = ?,
            is_primary = ?, is_current_main = ?, context_revision = ?, branch_depth = ?, seed_selection = ?,
-           forked_from_message_id = ?, updated_at = ?, closed_at = ?
+           forked_from_message_id = ?, pi_leaf_entry_id = ?, done_at = ?, seed_excerpt_text = ?,
+           updated_at = ?, closed_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -559,6 +580,9 @@ export class SqliteStorageAdapter implements StorageAdapter {
         merged.branchDepth,
         merged.seedSelection ? JSON.stringify(merged.seedSelection) : null,
         merged.forkedFromMessageId,
+        merged.piLeafEntryId,
+        merged.doneAt,
+        merged.seedExcerptText,
         merged.updatedAt,
         merged.closedAt,
         id,

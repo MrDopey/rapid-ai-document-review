@@ -30,6 +30,10 @@ export interface DocumentRow {
   title: string;
   currentRevision: number;
   piSessionDir: string;
+  /** Fixed at creation (FR-001/FR-014, 011-linear-thread-mode); no storage method ever changes it
+   *  post-creation. `NOT NULL DEFAULT 'canvas'` so every pre-existing document is `'canvas'` after
+   *  migration. */
+  documentType: 'canvas' | 'thread';
   createdAt: string;
   updatedAt: string;
   lastActiveAt: string;
@@ -86,8 +90,23 @@ export interface ConversationRow {
   branchDepth: number;
   seedSelection: SeedSelection | null;
   /** Message-level fork anchor (005-canvas-conversation-threads) — see `Conversation.forkedFromMessageId`
-   *  in the shared domain model for the full contract. */
+   *  in the shared domain model for the full contract. Reused as-is by a `thread-branch` row
+   *  (011-linear-thread-mode) as the id of the parent Thread's message whose highlighted passage
+   *  triggered the branch. */
   forkedFromMessageId: string | null;
+  /** This Thread's own current tip within its shared session file (011-linear-thread-mode) — the
+   *  entry id `SessionManager.branch()` repositions the leaf to before this Thread accepts its
+   *  next message. `null` for a `thread-root` that has not yet received its first message, and
+   *  always `null` for `'main' | 'branch' | 'review'` rows. */
+  piLeafEntryId: string | null;
+  /** Non-`null` once a reviewer marks this Thread done (011-linear-thread-mode, FR-008/FR-009);
+   *  orthogonal to `status` — a pure visibility/declutter flag, not a lifecycle terminal state.
+   *  Always `null` for `'main' | 'branch' | 'review'` rows. */
+  doneAt: string | null;
+  /** The exact highlighted substring that seeded a `thread-branch` (011-linear-thread-mode,
+   *  FR-005a) — stored so the frontend can render the seed banner without re-deriving it from the
+   *  raw Pi session. `null` for `thread-root` and every non-thread `kind`. */
+  seedExcerptText: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -182,6 +201,9 @@ export interface StorageAdapter {
   // match `ids`; callers should index the result by `id`.
   getConversationsByIds(ids: string[]): ConversationRow[];
   getMainConversation(documentId: string): ConversationRow | null;
+  /** The single `kind: 'thread-root'` row for a `documentType: 'thread'` document, or `null`
+   *  (011-linear-thread-mode) — mirrors `getMainConversation`. */
+  getThreadRoot(documentId: string): ConversationRow | null;
   getPrimaryConversation(documentId: string): ConversationRow | null;
   listConversations(documentId: string, options: ConversationListOptions): Page<ConversationRow>;
   listAllConversations(documentId: string): ConversationRow[];
