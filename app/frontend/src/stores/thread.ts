@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import type {
   BranchThreadRequest,
   ConversationDto,
+  ExportThreadSessionResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
   buildThreadBranchSeedMessage,
@@ -118,6 +119,24 @@ export const useThreadStore = defineStore('thread', {
       }
     },
 
+    /** Per-Thread "Expand all"/"Collapse all" (`ThreadCard.vue`'s own sticky header) — the scoped
+     *  counterpart of `anyMessageCollapsed`/`toggleAllMessages` above, built on the exact same
+     *  `expandableMessages.ts` primitives (`anyCollapsed`) but applied to a single thread's own
+     *  message list only, rather than folding every mounted Thread's messages into one combined
+     *  answer. Unlike the document-wide pair, this one has an obvious single scope to use (this
+     *  Thread's own `messagesFor(threadId)`), so it needs no special-casing the way
+     *  `anyMessageCollapsed`'s own doc comment explains for the document-wide version. */
+    anyMessageCollapsedForThread(threadId: string): boolean {
+      const forThread = this.expandedByMessage[threadId] ?? {};
+      return anyCollapsed(this.messagesFor(threadId), forThread);
+    },
+
+    toggleAllMessagesForThread(threadId: string): void {
+      const nextExpanded = this.anyMessageCollapsedForThread(threadId);
+      const entries = buildExpandedEntries(this.messagesFor(threadId), nextExpanded);
+      this.setMessagesExpanded(threadId, entries);
+    },
+
     async load(): Promise<void> {
       const page = await httpClient.listThreads(activeDocumentId());
       this.threads = page.conversations;
@@ -221,6 +240,19 @@ export const useThreadStore = defineStore('thread', {
       await httpClient.reopenThread(activeDocumentId(), threadId);
       const thread = this.findThread(threadId);
       if (thread) thread.doneAt = null;
+    },
+
+    /** User Story 4/FR-013: a fresh, on-demand genuine Pi-native session export — ephemeral
+     *  (data-model.md's "Exported session"), so this returns the result directly rather than
+     *  mutating any store state (there is nothing to cache; a second call produces a new export). */
+    async exportThread(threadId: string): Promise<ExportThreadSessionResponse> {
+      return httpClient.exportThread(activeDocumentId(), threadId);
+    },
+
+    /** User Story 4/FR-013b: the whole-document counterpart of `exportThread` — also ephemeral
+     *  (data-model.md's "Exported document session"), returning the raw HTML text directly. */
+    async exportDocumentSession(): Promise<string> {
+      return httpClient.exportDocumentSession(activeDocumentId());
     },
 
     messagesFor(threadId: string): ConversationMessageState[] {

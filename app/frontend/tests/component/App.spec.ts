@@ -81,6 +81,9 @@ vi.mock('../../src/transport/http-client.js', () => ({
     createDocument: vi.fn(),
     renameDocument: vi.fn(),
     deleteDocument: vi.fn(),
+    // Used only by the "Thread-mode header" suite below (011-linear-thread-mode).
+    listThreads: vi.fn(),
+    exportDocumentSession: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status: number;
@@ -1792,5 +1795,132 @@ describe('App.vue — Document switcher (multi-document)', () => {
       'Cannot delete the only remaining document.',
     );
     confirmSpy.mockRestore();
+  });
+});
+
+// 011-linear-thread-mode: "History"/"Export all" placement fix + relocation. Both are document-level
+// actions (not scoped to the thread tree the way ThreadModeView's own Expand-all/Done are), so both
+// now render together in App.vue's own Thread-mode title bar rather than History floating alone in
+// its own row below the title, and Export all living in ThreadModeView's HUD. This suite mounts the
+// real `App.vue` against a `documentType: 'thread'` document (stubbing `ThreadModeView`/
+// `HistoryPanel` themselves — their own internals are covered by ThreadModeView.spec.ts/
+// HistoryPanel.spec.ts, not re-tested here) and checks only the header's own structure/wiring.
+describe('App.vue — Thread-mode header: History + Export all placement', () => {
+  let pinia: Pinia;
+
+  const threadDocumentFixture: DocumentDto = {
+    id: 'thread-doc-1',
+    title: 'Thread Document',
+    currentRevision: 1,
+    documentType: 'thread',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const THREAD_STUBS = {
+    ThreadModeView: true,
+    HistoryPanel: true,
+    KeyboardShortcutsDialog: true,
+    HelpDialog: true,
+    SystemPromptDialog: true,
+  };
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    stubMatchMedia(true);
+    // A prior suite in this file (`App.vue — Document switcher`) leaves `httpClient.listDocuments`'s
+    // mock resolved value pointing at its own `docA`/`docB` fixtures — `vi.clearAllMocks()` only
+    // clears call history, not a mock's `mockResolvedValue`, so this suite must set its own value
+    // rather than relying on the module-level mock's default, or `store.load()`'s
+    // `documents.find((d) => d.isActive) ?? documents[0]` would pick up a stale, mismatched id.
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [
+        {
+          id: threadDocumentFixture.id,
+          title: threadDocumentFixture.title,
+          documentType: 'thread',
+          isActive: true,
+          lastActiveAt: threadDocumentFixture.updatedAt,
+        },
+      ],
+    });
+    vi.mocked(httpClient.getDocument).mockResolvedValue({
+      document: threadDocumentFixture,
+      content: '# Thread document',
+      eventSequence: 0,
+    });
+    vi.mocked(httpClient.listThreads).mockResolvedValue({
+      currentRevision: 1,
+      conversations: [],
+      nextCursor: null,
+    });
+    vi.mocked(httpClient.exportDocumentSession).mockResolvedValue('<html>exported</html>');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  async function mountThreadApp(): Promise<VueWrapper> {
+    const wrapper = mount(App, { global: { plugins: [pinia], stubs: THREAD_STUBS } });
+    await flushPromises();
+    return wrapper;
+  }
+
+  it('renders History and Export all together in .thread-mode-header-actions, nested inside .document-title-bar alongside the title-bar icons', async () => {
+    const wrapper = await mountThreadApp();
+
+    const titleBar = wrapper.find('.document-title-bar');
+    expect(titleBar.exists()).toBe(true);
+
+    const actions = titleBar.find('.thread-mode-header-actions');
+    expect(actions.exists()).toBe(true);
+
+    const buttonLabels = actions.findAll('button').map((b) => b.text());
+    expect(buttonLabels).toEqual(['History', 'Export all']);
+
+    // Source order within `.document-title-bar`: switcher, then the icon row, then this actions
+    // box — i.e. it sits in the *same* row as the title/icons (flush right, after them), not on a
+    // separate row underneath.
+    const topLevelChildren = Array.from(titleBar.element.children).map((el) =>
+      el.className.toString(),
+    );
+    const iconsIndex = topLevelChildren.findIndex((c) => c.includes('title-bar-icons'));
+    const actionsIndex = topLevelChildren.findIndex((c) =>
+      c.includes('thread-mode-header-actions'),
+    );
+    expect(iconsIndex).toBeGreaterThanOrEqual(0);
+    expect(actionsIndex).toBeGreaterThan(iconsIndex);
+  });
+
+  it('does not render "Export all" inside the stubbed ThreadModeView (it only lives in the header now)', async () => {
+    const wrapper = await mountThreadApp();
+    expect(wrapper.find('.thread-mode-layout').exists()).toBe(true);
+    expect(wrapper.find('.thread-mode-export-all').exists()).toBe(false);
+  });
+
+  it('clicking "Export all" calls threadStore.exportDocumentSession for the active document and opens the result in a new tab', async () => {
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    const wrapper = await mountThreadApp();
+    const exportButton = wrapper
+      .findAll('.thread-mode-header-actions button')
+      .find((b) => b.text().includes('Export all'));
+    if (!exportButton) throw new Error('"Export all" button not found in the header');
+
+    await exportButton.trigger('click');
+    await flushPromises();
+
+    expect(httpClient.exportDocumentSession).toHaveBeenCalledWith(threadDocumentFixture.id);
+    expect(openSpy).toHaveBeenCalledWith('blob:mock-url', '_blank');
+
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+    openSpy.mockRestore();
   });
 });

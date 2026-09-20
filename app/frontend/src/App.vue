@@ -7,6 +7,7 @@ import { useThreadStore } from './stores/thread.js';
 import { useSettingsStore } from './stores/settings.js';
 import { useEditsStore } from './stores/edits.js';
 import { WsClient } from './transport/ws-client.js';
+import { ApiError } from './transport/http-client.js';
 import { mountLiveRegions } from './a11y/live-regions.js';
 import DocumentCanvas from './components/canvas/DocumentCanvas.vue';
 import ThreadModeView from './components/thread/ThreadModeView.vue';
@@ -14,8 +15,9 @@ import DocumentSwitcherDropdown from './components/header/DocumentSwitcherDropdo
 import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
 import ReconnectingIndicator from './components/hud/ReconnectingIndicator.vue';
-import HudPanel, { type ConversationFilter } from './components/hud/HudPanel.vue';
+import HudPanel, { type ConversationFilter, type HudItem } from './components/hud/HudPanel.vue';
 import ConversationDetailPanel from './components/conversation/ConversationDetailPanel.vue';
+import ConversationStatusBadges from './components/conversation/ConversationStatusBadges.vue';
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
 import SystemPromptDialog from './components/toolbar/SystemPromptDialog.vue';
@@ -98,6 +100,20 @@ const orderedVisibleConversations = computed(() => {
   const byId = new Map(all.map((c) => [c.id, c]));
   return orderConversationsByAnchor(filtered, byId);
 });
+
+// 011-linear-thread-mode: `HudPanel.vue` was generalized to take its item list via a plain `items`
+// prop (see that file's own top doc comment) rather than reading `useConversationsStore()`
+// directly — this is that mapping, built on the exact same ordered/filtered list
+// `orderedVisibleConversations` above already computes (so canvas mode's HUD ordering and its
+// Ctrl+Alt+1..9 targeting can never disagree, same guarantee as before this refactor).
+const hudItems = computed<HudItem[]>(() =>
+  orderedVisibleConversations.value.map((c) => ({
+    id: c.id,
+    name: c.name,
+    depth: c.branchDepth,
+    isPrimary: c.isPrimary,
+  })),
+);
 
 // Live cap = clamp(env default 3, [1, however-many-panels-fit-side-by-side-in-`.panes`]) — see
 // `focusConfig.ts`. `panesWidth` is tracked via a `ResizeObserver` on `.panes` (the same element
@@ -354,6 +370,15 @@ const resizeHandleGridColumn = computed(() => (isDesktop.value ? '2 / 3' : undef
 const canvasGridColumn = computed(() => (isDesktop.value ? '3 / 4' : undefined));
 const historyGridColumn = computed(() => (isDesktop.value ? '4 / 5' : undefined));
 
+// Thread mode's own, much simpler `.thread-mode-panes` grid (see the template): just
+// `ThreadModeView` (column 1, always) plus an optional History column (column 2, only while
+// `historyOpen` — same reserved-column convention as `historyGridColumn` above), reusing the same
+// "pin every pane's `grid-column` explicitly" defense `canvasGridColumn`/`historyGridColumn`
+// document on their own doc comment above, so History mounting/unmounting can never shift
+// `ThreadModeView` out of column 1.
+const threadContentGridColumn = computed(() => (isDesktop.value ? '1 / 2' : undefined));
+const threadHistoryGridColumn = computed(() => (isDesktop.value ? '2 / 3' : undefined));
+
 // `.conversation-detail-overlay` below is `position: absolute` with no explicit `grid-column` of
 // its own, so per the CSS Grid spec its containing block for that absolute positioning falls back
 // to `.panes`' entire padding box — Preview + the resize handle + Canvas (+ History's reserved
@@ -381,6 +406,17 @@ const historyGridColumn = computed(() => (isDesktop.value ? '4 / 5' : undefined)
 const conversationOverlayStyle = computed(() =>
   isDesktop.value ? { gridColumn: '3 / 4' } : undefined,
 );
+
+// Thread mode's own analogue of `panesStyle` above, minus everything that's specific to the
+// Preview|Canvas split (no Preview track, no splitter, no slide transition) — just `ThreadModeView`
+// plus History's own reserved `HISTORY_PANEL_WIDTH_PX` column, exactly as wide as it is in canvas
+// mode, when open.
+const threadPanesStyle = computed(() => {
+  if (!isDesktop.value) return undefined;
+  return {
+    gridTemplateColumns: historyOpen.value ? `1fr ${HISTORY_PANEL_WIDTH_PX}px` : '1fr',
+  };
+});
 
 /** Pointer-driven + keyboard-operable resize for the horizontal Preview|Canvas split:
  *  converts a horizontal drag/step delta into a preview/canvas `fr` split, clamped to a sane
@@ -781,6 +817,43 @@ async function onToggleReasoning(event: Event): Promise<void> {
   const checked = (event.target as HTMLInputElement).checked;
   await settingsStore.update({ thinkingVisible: checked });
 }
+
+/**
+ * User Story 4/FR-013b (011-linear-thread-mode): exports the ENTIRE Thread-mode document's shared
+ * Pi session tree (every thread/branch together) as one self-contained HTML artifact
+ * (`GET .../threads/export`, contracts/thread-mode.md) — additional to, not a replacement for, each
+ * `ThreadCard.vue`'s own single-thread "Export" (`ThreadExportViewer.vue`). Relocated here verbatim
+ * from `ThreadModeView.vue` (which used to render this trigger in its HUD `#actions` slot, alongside
+ * the tree-scoped Expand-all/Done actions) so it sits next to the equally document-level History
+ * button in the title bar instead — `threadStore.exportDocumentSession()` itself (and every other
+ * store action) is untouched by this move. Opened in a new tab via a `Blob` object URL rather than
+ * rendered inline: the SDK designs this artifact as a standalone document with its own interactive
+ * branch-navigation JS, not something meant to be embedded inside a Vue component.
+ */
+const exportingDocument = ref(false);
+const exportDocumentError = ref<string | null>(null);
+
+async function onExportDocument(): Promise<void> {
+  exportDocumentError.value = null;
+  exportingDocument.value = true;
+  try {
+    const html = await threadStore.exportDocumentSession();
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank');
+    // Revoked after a delay, not immediately: the newly opened tab reads the blob URL
+    // asynchronously, so revoking synchronously here risks the tab seeing it gone before it loads.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    exportDocumentError.value =
+      err instanceof ApiError && err.code === 'EMPTY_DOCUMENT_EXPORT'
+        ? 'This document has no thread messages yet, so there is nothing to export.'
+        : err instanceof Error
+          ? err.message
+          : 'Failed to export this document.';
+  } finally {
+    exportingDocument.value = false;
+  }
+}
 </script>
 
 <template>
@@ -807,32 +880,194 @@ async function onToggleReasoning(event: Event): Promise<void> {
 
   <!-- 011-linear-thread-mode (FR-002/FR-014): a genuinely separate top-level view, not a
        variant rendering path through `.editor-layout` below — see `isThreadDocument`'s own doc
-       comment in <script>. Only the document switcher (needed to switch away/back, FR-014's
-       persistence guarantee) and the same conflict-banner convention are shared; every
-       canvas-specific surface (HudPanel, DocumentCanvas, Preview/Editor, History, the multi-focus
-       overlay) is entirely absent here rather than conditionally hidden, so canvas mode's own
-       markup/behavior below is never touched by this branch existing. -->
+       comment in <script>. Every canvas-specific surface that has no real Thread-mode counterpart
+       (the Preview/Editor split, DocumentCanvas, the multi-focus overlay, and the toolbar's own
+       "Conversations (HUD)"/Global-Actions two-column row — sync scroll and Preview/Editor
+       visibility literally don't apply with no such panes here, and "Show reasoning" has no effect
+       since `ThreadCard.vue` never reads `settingsStore.thinkingVisible`) is deliberately left out
+       rather than faked with an inert lookalike. What canvas mode's shell *does* have that's
+       genuinely mode-agnostic — the title bar's icon row (Keyboard shortcuts/Help/System prompt,
+       none of which are canvas-specific) and the History revision panel (`store.revisions` isn't
+       gated by `documentType` on the backend, and `HistoryPanel.vue`'s only canvas-only reads —
+       `conversationsStore`/`editsStore`, for the restore-reconciliation notice — degrade to a no-op
+       against Thread mode's always-empty `conversationsStore`, never throwing) — is reused here
+       verbatim, `.toolbar`/`.panes` classes included so the padding/structure actually matches
+       canvas mode's rather than an approximation of it. This also fixes History's
+       Ctrl+Alt+Shift+H global hotkey, which previously toggled `historyOpen` with nothing ever
+       reading it in this branch. `ThreadModeView` itself (HUD + tree, untouched by this change)
+       now occupies the same grid position canvas mode's Preview+Canvas content occupies, with
+       History free to take the same right-hand column canvas mode reserves for it. -->
   <div v-else-if="isThreadDocument" class="thread-mode-layout">
-    <header class="document-title-bar thread-mode-title-bar">
-      <DocumentSwitcherDropdown
-        @switch="switchDocument"
-        @create="onCreateNewDocument"
-        @rename="onRenameDocument"
-        @delete="onDeleteDocument"
-      />
+    <header class="toolbar thread-mode-title-bar">
+      <div class="document-title-bar">
+        <DocumentSwitcherDropdown
+          @switch="switchDocument"
+          @create="onCreateNewDocument"
+          @rename="onRenameDocument"
+          @delete="onDeleteDocument"
+        />
+        <!-- Identical to the icon-only controls in `.editor-layout`'s title bar below (same
+             buttons, same dialogs) — these are generic app actions, not tied to the
+             Preview/Canvas/History grid, so canvas mode and Thread mode share them unchanged. -->
+        <div class="title-bar-icons">
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts"
+            @click="shortcutsOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <rect
+                x="2"
+                y="5"
+                width="20"
+                height="14"
+                rx="2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <path
+                d="M5.5 9h1M9 9h1M12.5 9h1M16 9h1M5.5 12h1M9 12h1M12.5 12h1M16 12h1M7 15h10"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Help"
+            title="Help"
+            @click="helpOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <circle
+                cx="12"
+                cy="12"
+                r="9.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <path
+                d="M9.6 9.3a2.4 2.4 0 1 1 3.4 2.18c-.7.34-1 .8-1 1.42v.4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle cx="12" cy="16.7" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="System prompt"
+            title="System prompt"
+            @click="systemPromptOpen = true"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <path
+                d="M4 5.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3.5v-3.5H6a2 2 0 0 1-2-2z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M7.5 8.5h9M7.5 12h6"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <!-- History/Export all: both document-level actions (not thread-tree-scoped, unlike
+             Expand-all/Done in ThreadModeView's own HUD), so they live in this title bar rather
+             than the tree's HUD. Previously rendered as its own row below `.document-title-bar`
+             (right-aligned there via `align-self: flex-end` on `.toolbar`'s column axis) — that put
+             it on a lone, otherwise-empty row disconnected from the title/icons above it. Moving it
+             inside `.document-title-bar` itself makes it a sibling of `.title-bar-icons` in the same
+             flex row: `.document-title-bar`'s own `align-items: center` now vertically centers it
+             with the title and icons, and sitting last in source order after the icons (both
+             `flex: 0 0 auto`, following `.document-switcher`'s `flex: 1 1 auto` spacer) pins it
+             flush right with a single `gap` matching the icons' own spacing, immediately after them
+             rather than overlapping or floating in a separate row. See `.thread-mode-header-actions`
+             below for the (now much simpler) CSS. -->
+        <div class="thread-mode-header-actions">
+          <button
+            type="button"
+            :title="
+              historyOpen
+                ? 'Hide the History panel. Keyboard shortcut: Ctrl+Alt+Shift+H'
+                : 'Show the History panel. Keyboard shortcut: Ctrl+Alt+Shift+H'
+            "
+            @click="historyOpen = !historyOpen"
+          >
+            {{ historyOpen ? 'Hide history' : 'History' }}
+          </button>
+          <!-- Relocated from `ThreadModeView.vue`'s HUD `#actions` slot (011-linear-thread-mode):
+               "Export all" exports the whole document's shared Pi session (every thread/branch
+               together), same document-level scope as History, unlike Expand-all/Done which stay in
+               the HUD since they're scoped to the currently-rendered thread tree. `onExportDocument`/
+               `exportingDocument`/`exportDocumentError` below are this same relocated logic, moved
+               verbatim (still calling `threadStore.exportDocumentSession()`) rather than reimplemented. -->
+          <button
+            type="button"
+            title="Export the whole document's Pi session as a self-contained HTML file"
+            :disabled="exportingDocument"
+            @click="onExportDocument"
+          >
+            {{ exportingDocument ? 'Exporting…' : 'Export all' }}
+          </button>
+        </div>
+      </div>
+      <p v-if="exportDocumentError" class="thread-mode-export-error" role="alert">
+        {{ exportDocumentError }}
+      </p>
+      <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
+        <span>{{ store.conflictMessage }}</span>
+        <button
+          type="button"
+          class="dismiss-notice-button"
+          aria-label="Dismiss conflict notice"
+          @click="store.clearConflictMessage()"
+        >
+          Dismiss
+        </button>
+      </div>
     </header>
-    <div v-if="store.conflictMessage" class="toolbar-conflict-banner" role="alert">
-      <span>{{ store.conflictMessage }}</span>
-      <button
-        type="button"
-        class="dismiss-notice-button"
-        aria-label="Dismiss conflict notice"
-        @click="store.clearConflictMessage()"
-      >
-        Dismiss
-      </button>
+
+    <Transition name="modal">
+      <div v-if="shortcutsOpen" class="modal-overlay blocking-overlay">
+        <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
+      </div>
+    </Transition>
+    <Transition name="modal">
+      <div v-if="helpOpen" class="modal-overlay blocking-overlay">
+        <HelpDialog @close="helpOpen = false" />
+      </div>
+    </Transition>
+    <Transition name="modal">
+      <div v-if="systemPromptOpen" class="modal-overlay blocking-overlay">
+        <SystemPromptDialog @close="systemPromptOpen = false" />
+      </div>
+    </Transition>
+
+    <div class="thread-mode-panes" :style="threadPanesStyle">
+      <ThreadModeView class="thread-mode-body" :style="{ gridColumn: threadContentGridColumn }" />
+      <HistoryPanel
+        v-if="historyOpen"
+        class="history-drawer"
+        :style="{ gridColumn: threadHistoryGridColumn }"
+        @close="historyOpen = false"
+      />
     </div>
-    <ThreadModeView class="thread-mode-body" />
   </div>
 
   <div v-else class="editor-layout">
@@ -939,6 +1174,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
           <div class="hud-box">
             <HudPanel
               class="toolbar-hud"
+              :items="hudItems"
               :active-id="lastInteractedId"
               :focused-ids="focusedConversationIds"
               :focus-cap="focusCap"
@@ -946,7 +1182,11 @@ async function onToggleReasoning(event: Event): Promise<void> {
               @update:filter="conversationFilter = $event"
               @toggle-focus="onHudToggleFocus"
               @cycle-focus="onHudCycleFocus"
-            />
+            >
+              <template #badge="{ item }">
+                <ConversationStatusBadges :conversation-id="item.id" />
+              </template>
+            </HudPanel>
           </div>
         </div>
         <div class="toolbar-right">
@@ -1157,21 +1397,82 @@ async function onToggleReasoning(event: Event): Promise<void> {
   flex-direction: column;
   height: 100vh;
 }
-/* 011-linear-thread-mode: deliberately much simpler than `.editor-layout` above — no
-   Preview/Canvas/History grid concept applies to this mode (contracts/thread-mode.md). */
+/* 011-linear-thread-mode: same outer shell as `.editor-layout` above (this class is now just an
+   additional hook for Thread-mode-only overrides — every actual sizing/spacing declaration lives
+   in the shared `.toolbar`/`.panes` rules the header/body below now reuse, so the two modes'
+   padding can never quietly drift apart the way two independently-maintained rule sets could). */
 .thread-mode-layout {
   display: flex;
   flex-direction: column;
   height: 100vh;
   min-height: 0;
 }
-.thread-mode-title-bar {
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border-color, #ddd);
+/* `.thread-mode-title-bar` sits alongside `.toolbar` (not instead of it) on the header element —
+   `.toolbar`'s own padding/border/gap already apply; nothing thread-mode-specific to add there
+   today, but the hook stays for the same reason `.thread-mode-layout` above does. */
+/* Deliberately its own small rule rather than reusing `.actions-group`/`.actions-col` (built for
+   canvas mode's two-column checkboxes|buttons split — see the template's own doc comment above) —
+   same bordered-box look (`.hud-box`/`.actions-group`'s shared border/radius/padding). Now a plain
+   flex row of buttons living *inside* `.document-title-bar` (a sibling of `.title-bar-icons`, see
+   the template) rather than `.toolbar`'s own column-axis child: it no longer needs `align-self` at
+   all to end up flush right and vertically centered — `.document-title-bar`'s own
+   `align-items: center` + `.document-switcher`'s `flex: 1 1 auto` spacer already produce exactly
+   that for every fixed-size child after it (this box included), the same way they already do for
+   `.title-bar-icons`. `flex: 0 0 auto` keeps this box sized to its own content instead of sharing
+   `.document-switcher`'s growth. */
+.thread-mode-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+/* Relocated from `ThreadModeView.vue` alongside the "Export all" button itself — plain inline text,
+   same tone as `.load-error p`, placed as its own full-width row beneath `.document-title-bar`
+   (inside `.toolbar`'s own column flow) rather than centered/width-capped the way it was when it
+   lived inside `.thread-mode-content`'s narrower reading column. */
+.thread-mode-export-error {
+  margin: 0;
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.8rem;
 }
 .thread-mode-body {
-  flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
+}
+/* Thread mode's own analogue of `.panes` below — see `threadPanesStyle`'s doc comment in <script>
+   for why this is a separate class (not `.panes` reused wholesale) rather than sharing every one of
+   `.panes`' own responsive rules, which assume a Preview/Canvas *pair* of content columns Thread
+   mode doesn't have. */
+.thread-mode-panes {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 0;
+}
+.thread-mode-panes > * {
+  min-width: 0;
+  min-height: 0;
+}
+.thread-mode-panes :deep(.history-drawer) {
+  height: 100%;
+  min-height: 0;
+  border-left: 2px solid var(--border-color, #ccc);
+}
+@media (max-width: 960px) {
+  .thread-mode-panes {
+    grid-template-columns: 1fr;
+    grid-auto-rows: minmax(300px, auto);
+  }
+  .thread-mode-panes :deep(.history-drawer) {
+    grid-column: 1 / -1;
+    border-left: none;
+    border-top: 1px solid var(--border-color, #ddd);
+    height: 480px;
+  }
 }
 /* 006-toolbar-reorg (confirmed layout): `.toolbar` is now a column — `.toolbar-columns` (the
    80/20 title+HUD | Primary+Global-Actions row) on top, and (only while there's an error) the

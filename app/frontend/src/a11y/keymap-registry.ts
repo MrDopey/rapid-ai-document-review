@@ -25,8 +25,17 @@ export interface KeyboardShortcut {
   /** Human-readable key combination, matching how it's described in the owning component. */
   keys: string;
   description: string;
-  /** Where the shortcut is active. */
-  scope: 'Document editor' | 'Conversation composer' | 'Dialogs' | 'Conversation list' | 'Global';
+  /** Where the shortcut is active. `'Thread list'` (011-linear-thread-mode) is Thread mode's own
+   *  equivalent of `'Conversation list'` — the two are mutually exclusive (App.vue mounts either
+   *  the canvas view or Thread mode's view, never both — see `reachableTogether`'s own doc comment
+   *  further down for why this lets them safely reuse the same key combos). */
+  scope:
+    | 'Document editor'
+    | 'Conversation composer'
+    | 'Dialogs'
+    | 'Conversation list'
+    | 'Thread list'
+    | 'Global';
 }
 
 export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
@@ -112,6 +121,22 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
       'Select the previous conversation in the conversation list, within the current filter (active-only or ' +
       'all). Wraps to the last conversation from the first.',
     scope: 'Conversation list',
+  },
+  {
+    keys: 'Ctrl+Alt+J',
+    description:
+      "Move the active selection to the next thread in Thread mode's own HUD list (tree/DFS order, matching " +
+      'the tree layout left to right, top to bottom). Wraps to the first thread from the last, and scrolls/' +
+      "highlights the corresponding thread card. Thread mode's equivalent of the Conversation list binding " +
+      'above — the two are mutually exclusive views, never active at the same time.',
+    scope: 'Thread list',
+  },
+  {
+    keys: 'Ctrl+Alt+K',
+    description:
+      "Move the active selection to the previous thread in Thread mode's own HUD list (tree/DFS order). Wraps " +
+      'to the last thread from the first, and scrolls/highlights the corresponding thread card.',
+    scope: 'Thread list',
   },
   {
     keys: 'Ctrl+Alt+R',
@@ -335,6 +360,16 @@ export interface HotkeyBinding {
    * listener.
    */
   composerExempt?: boolean;
+  /**
+   * Semantic action this binding performs, for a caller that dispatches by a generic verb rather
+   * than this binding's own (scope-unique but otherwise arbitrary) `id` — added for the shared
+   * `HudPanel.vue` (011-linear-thread-mode's generalization of the canvas-only HUD into a
+   * component both canvas mode's `'Conversation list'` scope and Thread mode's own `'Thread list'`
+   * scope instantiate): both scopes' `cycle-next`/`cycle-prev`/`toggle-filter` bindings carry this
+   * same `action`, so `HudPanel.vue`'s own dispatch table only has to know these three verbs once,
+   * regardless of which scope (and which distinct `id`s) it was handed.
+   */
+  action?: 'toggle-filter' | 'cycle-next' | 'cycle-prev';
 }
 
 // Ctrl+Alt+1..9 (`focus-toggle-1`..`focus-toggle-9`): generated from a range rather than
@@ -490,6 +525,7 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     code: 'KeyA',
     scope: 'Conversation list',
     description: 'Toggle the conversation list between "Active only" and "All".',
+    action: 'toggle-filter',
   },
   {
     id: 'cycle-next',
@@ -497,6 +533,7 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     code: 'KeyJ',
     scope: 'Conversation list',
     description: 'Select the next conversation in the conversation list (wraps).',
+    action: 'cycle-next',
   },
   {
     id: 'cycle-prev',
@@ -504,6 +541,30 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     code: 'KeyK',
     scope: 'Conversation list',
     description: 'Select the previous conversation in the conversation list (wraps).',
+    action: 'cycle-prev',
+  },
+  // 011-linear-thread-mode: Thread mode's own equivalent of the two bindings directly above —
+  // same physical combo (Ctrl+Alt+J/K), same `action` verbs, but a distinct scope, since
+  // `HudPanel.vue` filters `HOTKEY_BINDINGS` down to whichever single scope it was mounted with.
+  // Safe to reuse the exact same combo: `reachableTogether` below special-cases 'Conversation
+  // list' vs 'Thread list' as mutually exclusive, since App.vue only ever mounts one of canvas
+  // mode's or Thread mode's whole view tree at a time (never both), matching the same rationale
+  // already used for 'Document editor'.
+  {
+    id: 'thread-cycle-next',
+    modifiers: { ctrl: true, alt: true, shift: false },
+    code: 'KeyJ',
+    scope: 'Thread list',
+    description: 'Select the next thread in the thread list (tree/DFS order, wraps).',
+    action: 'cycle-next',
+  },
+  {
+    id: 'thread-cycle-prev',
+    modifiers: { ctrl: true, alt: true, shift: false },
+    code: 'KeyK',
+    scope: 'Thread list',
+    description: 'Select the previous thread in the thread list (tree/DFS order, wraps).',
+    action: 'cycle-prev',
   },
 ];
 
@@ -542,9 +603,28 @@ export interface HotkeyConflict {
  * bubbles to the very same `document`-level listeners as everything else (see `App.vue`'s
  * `onGlobalKeydown`), so a composer-reachable combo is checked against every other scope here too,
  * not carved out into its own conflict-free bucket.
+ *
+ * 011-linear-thread-mode adds a second such isolated pair: `'Conversation list'` (canvas mode's
+ * `HudPanel.vue`) and `'Thread list'` (Thread mode's own instance of that same, now-generalized
+ * component) are never simultaneously reachable either — not because they use a separate keymap
+ * system like CodeMirror, but because App.vue mounts canvas mode's whole view tree (which is the
+ * only place a `'Conversation list'`-scoped listener is ever registered) and Thread mode's whole
+ * view tree (the only place a `'Thread list'`-scoped listener is ever registered) exclusively, per
+ * `isThreadDocument` — so exactly one of the two document-level listeners actually exists in the
+ * DOM at any moment, regardless of what this static list alone would suggest. This is what lets
+ * both scopes reuse the exact same Ctrl+Alt+J/K combo for the same "cycle the active
+ * selection" concept without it being a real conflict.
  */
+const MUTUALLY_EXCLUSIVE_VIEW_SCOPES = new Set<KeyboardShortcut['scope']>([
+  'Conversation list',
+  'Thread list',
+]);
+
 function reachableTogether(a: KeyboardShortcut['scope'], b: KeyboardShortcut['scope']): boolean {
   if (a === 'Document editor' || b === 'Document editor') return a === b;
+  if (a !== b && MUTUALLY_EXCLUSIVE_VIEW_SCOPES.has(a) && MUTUALLY_EXCLUSIVE_VIEW_SCOPES.has(b)) {
+    return false;
+  }
   return true;
 }
 

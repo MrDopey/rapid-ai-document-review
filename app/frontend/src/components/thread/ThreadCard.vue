@@ -8,18 +8,41 @@ import ConversationActionButtons from '../conversation/ConversationActionButtons
 import MessageBubble from '../conversation/MessageBubble.vue';
 import ThreadComposer from './ThreadComposer.vue';
 import HighlightBranchMenu from './HighlightBranchMenu.vue';
+import ThreadExportViewer from './ThreadExportViewer.vue';
 
 /**
  * 011-linear-thread-mode: renders one Thread as one or more stacked, read-only
  * "segment" boxes (`useThreadSegments.ts`), each split at a point some other Thread branched from
  * (FR-005b). Recursive: whenever a segment has active child branches, this mounts one nested
- * `ThreadCard` per child, indented one level deeper (`depth + 1`) — since there is exactly one root
- * Thread per document (FR-003), the whole document's Thread tree renders from a single top-level
- * `ThreadModeView.vue` invocation of this component. Only the final segment of a Thread
- * (`isTipSegment`) ever mounts `ThreadComposer` (FR-005c); every earlier segment offers only
- * highlight-to-branch (`HighlightBranchMenu`).
+ * `ThreadCard` per child — since there is exactly one root Thread per document (FR-003), the whole
+ * document's Thread tree renders from a single top-level `ThreadModeView.vue` invocation of this
+ * component. Only the final segment of a Thread (`isTipSegment`) ever mounts `ThreadComposer`
+ * (FR-005c); every earlier segment offers only highlight-to-branch (`HighlightBranchMenu`).
+ *
+ * Layout (root template element is `.thread-node`, a flex ROW, not the bordered box itself): a
+ * branch is a tree SIBLING of the segment it forked from, never a box nested inside its parent's
+ * own border — so this thread's own bordered box (`.thread-card`, holding just this Thread's own
+ * header + segments) and its branch children (`.thread-branches`, one column further right, one
+ * `.thread-branch-group` per segment that has any, each holding one `.thread-branch-fork` — and so
+ * one recursively-nested `.thread-node` — per active child) are flex-row SIBLINGS of each other,
+ * connected by a `.thread-branch-fork::before`/`::after` line+arrowhead rather than one being
+ * nested inside the other's padding. Recursion still grows the DOM to the right (a branch's own
+ * branches render inside ITS `.thread-branches`, one more flex row deep), it just no longer grows
+ * the visual border nesting.
  */
-const props = withDefaults(defineProps<{ threadId: string; depth?: number }>(), { depth: 0 });
+const props = withDefaults(
+  defineProps<{
+    threadId: string;
+    depth?: number;
+    /** 011-linear-thread-mode: Thread mode's own HUD cursor (`threadFocusState.ts`'s
+     *  `activeThreadId`), threaded down through every recursive `ThreadCard` the same way `depth`
+     *  already is, so whichever card matches gets the `.thread-card--active` highlight — see this
+     *  file's own template for where. `null`/`undefined` (no active selection yet) highlights
+     *  nothing. */
+    activeThreadId?: string | null;
+  }>(),
+  { depth: 0, activeThreadId: null },
+);
 
 const store = useThreadStore();
 
@@ -63,6 +86,15 @@ function activeChildIds(childBranchIds: readonly string[]): string[] {
   return childBranchIds.filter((id) => store.findThread(id)?.doneAt === null);
 }
 
+/** Only segments with at least one active child branch render a `.thread-branch-group` at all —
+ *  see the layout doc comment above: branches render in their own `.thread-branches` column,
+ *  sibling to (not nested inside) `.thread-card`, one group per source segment, in the same
+ *  top-to-bottom order as the segments themselves so each group still reads as roughly across from
+ *  the segment it forked from. */
+const branchSegments = computed(() =>
+  segments.value.filter((s) => activeChildIds(s.childBranchIds).length > 0),
+);
+
 const tipMessageId = computed(() => messages.value.at(-1)?.id ?? null);
 
 /** The branch's very first message is the auto-delivered `<branch-seed-excerpt>`-wrapped
@@ -78,6 +110,19 @@ function isSeedMessage(index: number): boolean {
   );
 }
 
+/** The id of this Thread's own seed message (`isSeedMessage(0)`'s target), or `null` for a root
+ *  Thread (which has none). Highlighting a passage *within* the very excerpt that already seeded
+ *  this branch to spin off another branch, or to quote it right back into this same Thread's own
+ *  composer, doesn't make sense either way — both actions read on the ANCHOR passage's own prior
+ *  content, and the seed message's whole content already *is* that anchor passage, just wrapped in
+ *  `<branch-seed-excerpt>`. Deliberately blanket, not tip-relative: even the edge case where the
+ *  seed is *also* still this Thread's current tip (no reply sent yet) must not offer "Quote from
+ *  here" either, so this is checked ahead of (not folded into) the tip/earlier-message split below. */
+const seedMessageId = computed(() => {
+  const first = messages.value[0];
+  return first && isSeedMessage(0) ? first.id : null;
+});
+
 // ---------------------------------------------------------------------------------------------
 // Highlight-to-branch (FR-005/FR-005a) and "Quote from here". Both start from the same captured
 // selection; which action(s) apply is decided purely by whether the selection's message is the
@@ -89,6 +134,9 @@ function isSeedMessage(index: number): boolean {
 //  - Quote from here: only the tip message itself — it seeds this same Thread's own next composer
 //    message (`store.quoteHighlightIntoComposer`), so "the latest message" is the only sensible
 //    scope; it never creates a branch.
+// Both are further excluded outright for this Thread's own seed message (`seedMessageId` above) —
+// a branch thread's first message is never a valid anchor for either action, regardless of whether
+// it also happens to be the tip.
 // ---------------------------------------------------------------------------------------------
 interface PendingSelection {
   messageId: string;
@@ -104,7 +152,10 @@ const composerRef = ref<InstanceType<typeof ThreadComposer> | null>(null);
 function onMessageMouseUp(messageId: string): void {
   const sel = window.getSelection();
   const text = sel?.toString().trim() ?? '';
-  if (!text || sel!.rangeCount === 0) {
+  // A selection inside this Thread's own seed message never has anything to offer (neither
+  // action ever applies — see `seedMessageId`'s own doc comment) — skip showing the popover at
+  // all rather than mounting `HighlightBranchMenu` just for it to render zero buttons.
+  if (!text || sel!.rangeCount === 0 || messageId === seedMessageId.value) {
     selection.value = null;
     return;
   }
@@ -113,10 +164,16 @@ function onMessageMouseUp(messageId: string): void {
 }
 
 const canBranchFromSelection = computed(
-  () => selection.value != null && selection.value.messageId !== tipMessageId.value,
+  () =>
+    selection.value != null &&
+    selection.value.messageId !== tipMessageId.value &&
+    selection.value.messageId !== seedMessageId.value,
 );
 const canQuoteFromSelection = computed(
-  () => selection.value != null && selection.value.messageId === tipMessageId.value,
+  () =>
+    selection.value != null &&
+    selection.value.messageId === tipMessageId.value &&
+    selection.value.messageId !== seedMessageId.value,
 );
 
 function dismissSelection(): void {
@@ -187,6 +244,13 @@ async function onReopen(): Promise<void> {
   await store.reopen(props.threadId);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Export (User Story 4/FR-013): an always-available utility action, folded into this same
+// `headerActions` row below (which already combines the per-Thread bulk-toggle action with Mark
+// done/Reopen) rather than a fourth hand-rolled `<button>`.
+// ---------------------------------------------------------------------------------------------
+const exportOpen = ref(false);
+
 // Same `ActionDescriptor` + `ConversationActionButtons.vue` renderer canvas mode's own
 // `ConversationThreadBox.vue`/`ConversationView.vue` header actions already use (its own doc
 // comment: "consolidated from the near-identical `.thread-action-button` rule ... in both" prior
@@ -206,71 +270,137 @@ const doneActions = computed<ActionDescriptor[]>(() => {
   }
   return [{ key: 'reopen', label: 'Reopen', onClick: () => void onReopen() }];
 });
+
+/** This Thread's own "Expand all"/"Collapse all" — the per-branch complement of
+ *  `ThreadModeView.vue`'s document-wide toolbar button, scoped to just THIS Thread's own messages
+ *  via `stores/thread.ts`'s `anyMessageCollapsedForThread`/`toggleAllMessagesForThread` (built on
+ *  the same shared `expandableMessages.ts` primitives the document-wide pair already uses). Kept as
+ *  its own `ActionDescriptor` — folded into this header's existing `ConversationActionButtons` row
+ *  alongside Mark done/Reopen rather than a separate hand-rolled `<button>` — so it gets the exact
+ *  same real-button styling for free, matching every other header action in this row. */
+const threadBulkToggleLabel = computed(() =>
+  store.anyMessageCollapsedForThread(props.threadId) ? 'Expand all' : 'Collapse all',
+);
+function onToggleThreadMessages(): void {
+  store.toggleAllMessagesForThread(props.threadId);
+}
+const headerActions = computed<ActionDescriptor[]>(() => [
+  {
+    key: 'bulk-toggle',
+    label: threadBulkToggleLabel.value,
+    ariaLabel: `${threadBulkToggleLabel.value} messages in this thread`,
+    onClick: onToggleThreadMessages,
+  },
+  {
+    key: 'export',
+    label: 'Export',
+    ariaLabel: `Export ${thread.value?.name ?? 'thread'}'s Pi session`,
+    onClick: () => {
+      exportOpen.value = true;
+    },
+  },
+  ...doneActions.value,
+]);
+
+/** FR-005b's "branch boxes don't need full reading width" (Thread mode layout redesign): every box
+ *  at depth 0 (the trunk of whichever tree this is) keeps the original full comfortable reading
+ *  width, but a branch box's own width cap shrinks the deeper it nests — a branch is typically a
+ *  short, focused side-exchange, not a full transcript, and a tree with 2+ branch levels otherwise
+ *  blows well past a typical laptop viewport at a *uniform* 640px per box (the previous behavior,
+ *  which left horizontal scrolling as the only mitigation). Concretely (see this component's own
+ *  `<style>` doc comment on `.thread-branches`'/`.thread-branch-fork`'s widths for the full budget):
+ *  a single depth-1 branch (or several depth-1 siblings, which stack vertically in one column
+ *  rather than each costing their own width) adds trunk(640) + connector(28) + branch(420) = 1088px
+ *  — comfortably under a 1280–1440px viewport even before `ThreadModeView.vue`'s own container-width
+ *  fix. A depth-2 branch-of-a-branch adds another connector(28) + 300px, for 1416px total — still
+ *  under ~1440px, though it can start to press a 1280px-wide window; deeper/wider trees than that
+ *  fall back to `.thread-mode-list`'s own `overflow-x: auto`, exactly as intended (scroll as a last
+ *  resort for genuinely wide/deep trees, not as the routine experience for 1–2 levels). */
+const CARD_MAX_WIDTH_PX: Record<number, number> = { 0: 640, 1: 420 };
+const DEEPER_CARD_MAX_WIDTH_PX = 300;
+const cardStyle = computed(() => ({
+  width: `min(${CARD_MAX_WIDTH_PX[props.depth] ?? DEEPER_CARD_MAX_WIDTH_PX}px, calc(100vw - 2.5rem))`,
+}));
 </script>
 
 <template>
-  <article
-    v-if="thread"
-    class="thread-card"
-    :data-thread-id="threadId"
-    :data-thread-kind="thread.kind"
-  >
-    <header class="thread-card-header">
-      <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
-      <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
-      <span class="thread-card-actions">
-        <ConversationActionButtons :actions="doneActions" />
-      </span>
-    </header>
-    <span v-if="doneError" class="thread-error" role="alert">{{ doneError }}</span>
-
-    <!-- `useThreadSegments` returns no segments at all for a Thread with zero messages yet (a
-         freshly created root — thread-branches always get an auto-seeded first message) — without
-         this, a brand-new Thread could never render a composer to send its own first message. -->
-    <ThreadComposer
-      v-if="messages.length === 0"
-      ref="composerRef"
-      :thread-id="threadId"
-      :disabled="thread.doneAt !== null"
-    />
-
-    <div
-      v-for="segment in segments"
-      :key="`${segment.startIndex}-${segment.endIndex}`"
-      class="thread-segment"
-      :class="{ 'is-tip-segment': segment.isTipSegment }"
+  <div v-if="thread" class="thread-node">
+    <article
+      class="thread-card"
+      :class="{ 'thread-card--active': threadId === activeThreadId }"
+      :style="cardStyle"
+      :data-thread-id="threadId"
+      :data-thread-kind="thread.kind"
     >
-      <div
-        v-for="(message, offset) in messages.slice(segment.startIndex, segment.endIndex + 1)"
-        :key="message.id"
-        class="thread-segment-message"
-        @mouseup="onMessageMouseUp(message.id)"
-      >
-        <MessageBubble
-          :message="message"
-          :seed="isSeedMessage(segment.startIndex + offset)"
-          :expanded="expandedByMessage[message.id] ?? false"
-          @update:expanded="(value) => setMessageExpanded(message.id, value)"
-        />
-      </div>
+      <header class="thread-card-header">
+        <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
+        <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
+        <span class="thread-card-actions">
+          <ConversationActionButtons :actions="headerActions" />
+        </span>
+      </header>
+      <span v-if="doneError" class="thread-error" role="alert">{{ doneError }}</span>
 
+      <!-- `useThreadSegments` returns no segments at all for a Thread with zero messages yet (a
+           freshly created root — thread-branches always get an auto-seeded first message) —
+           without this, a brand-new Thread could never render a composer to send its own first
+           message. -->
       <ThreadComposer
-        v-if="segment.isTipSegment"
+        v-if="messages.length === 0"
         ref="composerRef"
         :thread-id="threadId"
         :disabled="thread.doneAt !== null"
       />
 
       <div
-        v-for="childId in activeChildIds(segment.childBranchIds)"
-        :key="childId"
-        class="thread-branch-fork"
+        v-for="segment in segments"
+        :key="`${segment.startIndex}-${segment.endIndex}`"
+        class="thread-segment"
+        :class="{ 'is-tip-segment': segment.isTipSegment }"
       >
-        <ThreadCard :thread-id="childId" :depth="depth + 1" />
+        <div
+          v-for="(message, offset) in messages.slice(segment.startIndex, segment.endIndex + 1)"
+          :key="message.id"
+          class="thread-segment-message"
+          @mouseup="onMessageMouseUp(message.id)"
+        >
+          <MessageBubble
+            :message="message"
+            :seed="isSeedMessage(segment.startIndex + offset)"
+            :expanded="expandedByMessage[message.id] ?? false"
+            @update:expanded="(value) => setMessageExpanded(message.id, value)"
+          />
+        </div>
+
+        <ThreadComposer
+          v-if="segment.isTipSegment"
+          ref="composerRef"
+          :thread-id="threadId"
+          :disabled="thread.doneAt !== null"
+        />
+      </div>
+
+      <span v-if="branchError" class="thread-error" role="alert">{{ branchError }}</span>
+    </article>
+
+    <!-- Branches render as their own sibling column, connected by a line to the segment they
+         forked from — never nested inside `.thread-card`'s own border. See the layout doc comment
+         at the top of this file. -->
+    <div v-if="branchSegments.length > 0" class="thread-branches">
+      <div
+        v-for="segment in branchSegments"
+        :key="`branches-${segment.startIndex}-${segment.endIndex}`"
+        class="thread-branch-group"
+      >
+        <div
+          v-for="childId in activeChildIds(segment.childBranchIds)"
+          :key="childId"
+          class="thread-branch-fork"
+        >
+          <ThreadCard :thread-id="childId" :depth="depth + 1" :active-thread-id="activeThreadId" />
+        </div>
       </div>
     </div>
-
-    <span v-if="branchError" class="thread-error" role="alert">{{ branchError }}</span>
 
     <HighlightBranchMenu
       v-if="selection"
@@ -284,10 +414,34 @@ const doneActions = computed<ActionDescriptor[]>(() => {
       @quote="onQuoteFromSelection"
       @dismiss="dismissSelection"
     />
-  </article>
+
+    <Transition name="modal">
+      <div
+        v-if="exportOpen"
+        class="modal-overlay thread-export-overlay"
+        @click.self="exportOpen = false"
+      >
+        <ThreadExportViewer :thread-id="threadId" @close="exportOpen = false" />
+      </div>
+    </Transition>
+  </div>
 </template>
 
 <style scoped>
+/* The recursive unit: a flex ROW pairing this Thread's own bordered box (`.thread-card`, the
+   "trunk") with a further-right column of its branch children (`.thread-branches`), as tree
+   siblings rather than one nested inside the other's border — see this file's top-of-script doc
+   comment. `align-items: flex-start` (not the flex default `stretch`) is load-bearing: it lets
+   `.thread-node` size itself to its own content's natural width (trunk width, plus branch width
+   only when branches exist) instead of stretching to fill whatever width its own parent flex
+   column (`ThreadModeView.vue`'s `.thread-mode-list`, or a shallower `.thread-branches`) happens to
+   have — which is what lets a deep/wide tree grow rightward past that ancestor's own box and get
+   picked up by `.thread-mode-list`'s `overflow-x: auto` instead of stretching every ancestor's
+   assigned width to match. */
+.thread-node {
+  display: flex;
+  align-items: flex-start;
+}
 .thread-card {
   display: flex;
   flex-direction: column;
@@ -296,11 +450,47 @@ const doneActions = computed<ActionDescriptor[]>(() => {
   border: 1px solid var(--border-color, #ccc);
   border-radius: 8px;
   background: var(--panel-bg, #f7f7f8);
+  /* Thread mode's HUD cursor highlight (011-linear-thread-mode): the active `ThreadCard`, set by
+     `ThreadModeView.vue` from `threadFocusState.ts`'s `activeThreadId` (Ctrl+Alt+J/K cycling, or a
+     HUD row click). Reuses `--accent-color`, the same token `HudPanel.vue`'s own `.is-focused`
+     bottom-border and `.selected` border already key off, so a "this is the current
+     selection" cue reads consistently across both HUD surfaces. `box-shadow` (an outer ring, not a
+     border swap) so it layers over this card's own `border`/`background` without shifting layout
+     or fighting `[data-thread-kind]`-based styling elsewhere. */
+  transition: box-shadow 0.15s ease;
+  /* Width itself is set inline (`cardStyle`, script above) rather than here — it depends on this
+     card's own `depth` prop (trunk vs. branch vs. branch-of-a-branch), which a static class rule
+     can't express. A percentage/`100%` cap here would also be indeterminate the same way the old
+     comment on this rule explained: `.thread-node`'s own width, and so any percentage ancestor, is
+     itself content-driven, not fixed. */
+  flex: 0 0 auto;
+}
+.thread-card.thread-card--active {
+  border-color: var(--accent-color, #2563eb);
+  box-shadow: 0 0 0 2px var(--accent-color, #2563eb);
 }
 .thread-card-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* Sticks to the top of this Thread's own scroll context (`ThreadModeView.vue`'s `.thread-mode-view`,
+     the page's real scrolling ancestor — see that file's own `.thread-mode-toolbar` doc comment) as
+     the reviewer scrolls through THIS card's own messages, exactly the same `position: sticky`
+     pattern canvas mode's `ConversationThreadBox.vue` already uses for its own per-conversation
+     `.thread-header` (see that rule's doc comment for the full "sticky positions the margin edge,
+     not the painted box" rationale this copies: `margin: 0` + padding instead of margin for
+     breathing room, `background` matching this card's own `--panel-bg` so scrolling message content
+     can't show through underneath). Each `ThreadCard` (root and every branch alike) gets its own
+     independent sticky header this way — as one scrolls past a shorter card, the next card's own
+     header takes over the sticky slot, the same "stacking sticky headers" behavior a plain vertical
+     list of `ConversationThreadBox`es already exhibits, which continues to hold with this layout's
+     branches sitting beside their trunk (a row of siblings) rather than only stacked below it. */
+  margin: 0;
+  padding: 0.15rem 0;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised, 1);
+  background: var(--panel-bg, #f7f7f8);
 }
 .thread-card-title {
   font-weight: 600;
@@ -335,11 +525,68 @@ const doneActions = computed<ActionDescriptor[]>(() => {
   border-top: none;
   padding-top: 0;
 }
-/* FR-005b: each branch renders indented to the right of the segment it forks from, so it's
-   visually distinguishable from the source thread's own continuation at a glance. */
+/* FR-005b: the sibling column of branch boxes to the right of `.thread-card` (never nested inside
+   it — see this file's top doc comment). One `.thread-branch-group` per source segment that has
+   any active children, stacked top-to-bottom in the same order as the segments themselves so a
+   group still reads as roughly across from the segment it forked from; `align-items: flex-start`
+   for the same fit-content-not-stretch reason as `.thread-node` above. */
+.thread-branches {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding-top: 0.25rem;
+}
+/* Multiple sibling branches forked from the very same segment (FR-005b's "these are siblings of
+   each other, not nested") stack vertically within one group, each getting its own connector via
+   `.thread-branch-fork` below rather than one shared border wrapping all of them. */
+.thread-branch-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+/* Each branch box's own connector line + arrowhead back to the segment it forked from
+   (mockup's "───▶"). `padding-left` reserves the room the line/arrowhead draw into, so this
+   completely owns its own spacing from `.thread-card`'s right edge — `.thread-node`'s row has no
+   extra `gap` of its own (see below), meaning it's this padding alone, not a shared gap, that keeps
+   the whole tree's per-branch connector self-contained no matter how many groups/forks stack up. */
 .thread-branch-fork {
-  margin: 0.4rem 0 0 1.5rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--border-color, #ccc);
+  position: relative;
+  padding-left: 1.75rem;
+}
+.thread-branch-fork::before {
+  content: '';
+  position: absolute;
+  top: 1.15rem;
+  left: 0;
+  width: 1.75rem;
+  height: 0;
+  border-top: 2px solid var(--neutral-muted-color, #4b5563);
+}
+.thread-branch-fork::after {
+  content: '';
+  position: absolute;
+  top: calc(1.15rem - 5px);
+  left: 1.75rem;
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-left-color: var(--neutral-muted-color, #4b5563);
+  border-right-width: 0;
+  transform: translateX(-1px);
+}
+/* `.modal-overlay`'s shared base rule (see its own comment in style.css) deliberately leaves
+   z-index to each caller, since overlays nest. `.thread-export-overlay` needs an explicit z-index
+   here: at `z-index: auto`, this `position: fixed` overlay wouldn't establish its own stacking
+   context and would paint in plain tree order within the page's root stacking context — where
+   `.thread-card-header` above (`position: sticky`, `--z-raised`) DOES establish one and paints
+   above any unstyled (auto) content in that same root context, regardless of DOM order, letting
+   every ThreadCard's own sticky header render on top of this export modal instead of behind it
+   (the exact bug this fixes). `--z-overlay-blocking`, not `--z-overlay`, matches this file's own
+   `HistoryPanel.vue`'s `.diff-overlay` precedent: this is an independent, page-level "simple" modal
+   with no nesting relationship to any other overlay in this mode, so it must always render above
+   every sticky header/toolbar/popover tier below `--z-indicator`, no exceptions. */
+.thread-export-overlay {
+  z-index: var(--z-overlay-blocking, 70);
 }
 </style>

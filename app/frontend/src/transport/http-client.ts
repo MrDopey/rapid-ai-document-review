@@ -17,6 +17,8 @@ import {
   DropRemainingResponse,
   ErrorEnvelope,
   ExportDocumentQuery,
+  ExportDocumentSessionQuery,
+  ExportThreadSessionResponse,
   GetConversationResponse,
   GetDocumentResponse,
   ListConversationsResponse,
@@ -363,6 +365,40 @@ export const httpClient = {
     return request(`/api/documents/${documentId}/threads/${id}/reopen`, { method: 'POST' }, (j) =>
       ReopenThreadResponse.parse(j),
     );
+  },
+
+  async exportThread(documentId: string, id: string) {
+    return request(`/api/documents/${documentId}/threads/${id}/export`, undefined, (j) =>
+      ExportThreadSessionResponse.parse(j),
+    );
+  },
+
+  /** User Story 4/FR-013b: the whole-document counterpart of `exportThread` — returns raw HTML text
+   *  (not a JSON DTO), following `exportDocument`'s own raw-text-response pattern rather than the
+   *  JSON-DTO `request()` helper every other method here uses, since the response body itself is a
+   *  self-contained HTML artifact (`GET .../threads/export`, contracts/thread-mode.md). */
+  async exportDocumentSession(documentId: string, query: { download?: boolean } = {}) {
+    const parsed = ExportDocumentSessionQuery.parse(query);
+    const params = new URLSearchParams();
+    if (parsed.download) params.set('download', '1');
+    const qs = params.toString();
+    const response = await fetch(
+      `/api/documents/${documentId}/threads/export${qs ? `?${qs}` : ''}`,
+    );
+    if (!response.ok) {
+      const json = await response.json().catch(() => undefined);
+      const envelope = ErrorEnvelope.safeParse(json);
+      if (envelope.success) {
+        throw new ApiError(
+          response.status,
+          envelope.data.error.code,
+          envelope.data.error.message,
+          envelope.data.error.details,
+        );
+      }
+      throw new ApiError(response.status, 'UNKNOWN', 'Document export failed');
+    }
+    return response.text();
   },
 
   async getSettings() {
