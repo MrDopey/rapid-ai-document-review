@@ -1,15 +1,22 @@
 <!--
 Sync Impact Report
-Version change: 2.2.0 → 2.3.0
-Rationale: MINOR — removed "multiple documents" from the v1 non-goals list (Technology & Platform
-Constraints) because specs/010-multi-document-support now implements it. The schema/service-
-boundary guarantee that previously kept this open ("MUST NOT preclude multiple documents") is now
-exercised rather than merely reserved. This loosens an existing scope boundary rather than removing
-or redefining a Core Principle, and does not make any previously-compliant plan non-compliant, so it
-is versioned as MINOR (materially expanded guidance) rather than MAJOR.
+Version change: 2.4.0 → 2.5.0
+Rationale: MINOR — further extends the "Pi export viewing" carve-out established in v2.4.0
+(Technology & Platform Constraints) so it also permits rendering the ENTIRE shared Pi session tree
+for a threaded-conversation document — every thread/branch together, not just one thread's own
+root-to-leaf path — in the browser. This whole-tree view MUST be obtained exclusively via the Pi
+SDK's own whole-tree export primitive (`AgentSession.exportToHtml()`); the boundary the v2.4.0
+carve-out already drew is otherwise unchanged and continues to apply in full: the application still
+MUST NOT read or write Pi's underlying session storage format directly (Principle II is unaffected),
+and this still does not license fabricating, reformatting, or otherwise reconstructing a substitute
+for Pi's own export by any other means. This is a further loosening of the same existing scope
+boundary, not a new principle and not a redefinition of one, and does not make any previously-
+compliant plan non-compliant, so it is versioned as MINOR (materially expanded guidance), consistent
+with the prior 2.2.0 → 2.3.0 and 2.3.0 → 2.4.0 amendments to this same non-goals list.
 Modified principles: n/a (no existing Core Principle redefined)
-Modified sections: Technology & Platform Constraints → v1 non-goals bullet (narrowed, rationale
-added); Deployment/Users bullet (updated to reflect multi-document support landing)
+Modified sections: Technology & Platform Constraints → v1 non-goals bullet ("Pi export viewing"
+rationale extended to also cover a document-wide, whole-session-tree export via
+`AgentSession.exportToHtml()`, alongside the existing single-thread export carve-out)
 Added sections: none
 Removed sections: none
 Deferred items: none
@@ -112,8 +119,8 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
 * Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): storage
   backends beyond SQLite, additional agent tools beyond document read/edit/web-search/web-fetch,
   additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
-  integration, partial tool-call acceptance, a Pi extension (Principle VII), Pi export viewing,
-  importable contextual reference material, and multi-user/multi-account support.
+  integration, partial tool-call acceptance, a Pi extension (Principle VII), importable contextual
+  reference material, and multi-user/multi-account support.
   **Rationale**: `web_search` and `web_fetch` are carved out of the "no additional agent tools"
   non-goal because both are read-only, information-gathering tools registered as ordinary
   `customTools` — the same mechanism as `read_document` — so they neither require a Pi extension
@@ -122,6 +129,20 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
   it earns its own carve-out the same way. "Multiple documents" is removed from this list entirely,
   rather than merely narrowed, because specs/010-multi-document-support implements it for the
   single local user; multi-user/multi-account support remains a distinct, still-excluded non-goal.
+  "Pi export viewing" is likewise removed from this list entirely, rather than merely narrowed,
+  because rendering a thread's own genuine, native Pi session export in the browser
+  (specs/011-linear-thread-mode, User Story 4 / FR-013) is read-only viewing of an export that Pi
+  itself produces via the Pi SDK; Principle II is unaffected by this carve-out — the application
+  still MUST NOT read or write Pi's underlying session storage format directly, and MUST continue
+  to obtain any such export exclusively through the Pi SDK, never by reading Pi's storage directly.
+  This carve-out does not license the application to fabricate, reformat, or otherwise reconstruct
+  a substitute for Pi's own export by any other means; only rendering Pi's genuine export, unaltered
+  in substance, is in scope. The carve-out extends to rendering the ENTIRE shared Pi session tree for
+  a threaded-conversation document — every thread/branch together, not only one thread's own
+  root-to-leaf path — obtained exclusively via the Pi SDK's own whole-tree export primitive
+  (`AgentSession.exportToHtml()`); the same boundary applies unchanged — no direct reading/writing of
+  Pi's underlying session storage format, and no fabricated/reconstructed substitute for what that
+  SDK primitive itself produces.
 * Environment variable naming: every application-defined environment variable (backend or frontend)
   MUST be prefixed with `RADR_` (the project's acronym, AI Document Review). Exempt: variables that
   are not application-defined, namely third-party SDK/provider credential variables (e.g.
@@ -209,4 +230,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.3.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-15
+**Version**: 2.5.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-20

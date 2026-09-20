@@ -1,5 +1,8 @@
 import { join } from 'node:path';
-import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
+import type {
+  ConversationDto,
+  ExportThreadSessionResponse,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { DocumentNotFoundError } from '../document/document-service.ts';
 import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
@@ -20,6 +23,12 @@ import { deriveBranchName, normalizeForHighlightMatch } from './seed-excerpt.ts'
 
 export class InvalidHighlightError extends Error {}
 export class AnchorIsTipError extends Error {}
+/** User Story 4/FR-013: a Thread with no message history yet has nothing genuine to export
+ *  (`PiService.exportThreadSession` would otherwise fail on an empty root-to-leaf path). */
+export class EmptyThreadExportError extends Error {}
+/** User Story 4/FR-013b: a threaded-conversation document with no message history in ANY of its
+ *  Threads has nothing genuine to export as a whole-tree artifact either. */
+export class EmptyDocumentExportError extends Error {}
 export class PendingEditsBlockDoneError extends Error {
   readonly pendingEditIds: string[];
 
@@ -233,6 +242,60 @@ export class ThreadService {
       doneAt: null,
     });
     return { threadId, doneAt: null };
+  }
+
+  /**
+   * Produces a fresh, on-demand genuine Pi-native session export of `threadId`'s own history
+   * (User Story 4/FR-013, research.md R9, data-model.md's "Exported session"). Refused for a
+   * Thread with no message history yet — there is nothing genuine to export.
+   */
+  exportSession(threadId: string): ExportThreadSessionResponse {
+    const thread = this.getThreadOrThrow(threadId);
+    const appMessages = buildConversationMessages(this.storage, threadId);
+    if (appMessages.length === 0) {
+      throw new EmptyThreadExportError(`Thread ${threadId} has no message history to export`);
+    }
+    const { jsonl, messages } = this.piService.exportThreadSession(thread);
+    return {
+      threadId,
+      exportedAt: new Date().toISOString(),
+      jsonl,
+      messages: messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        text: m.text,
+        createdAt: m.timestamp,
+      })),
+    };
+  }
+
+  /**
+   * Produces a fresh, on-demand genuine Pi-native whole-document session export (User Story
+   * 4/FR-013b, research.md R10, data-model.md's "Exported document session") — the whole-tree
+   * counterpart of `exportSession` above, covering every Thread in `documentId` at once. Refused
+   * when no Thread in the document has any message history yet.
+   */
+  async exportDocumentSession(
+    documentId: string,
+  ): Promise<{ documentId: string; exportedAt: string; html: string }> {
+    const document = this.storage.getDocument(documentId);
+    if (!document) throw new DocumentNotFoundError(`Document not found: ${documentId}`);
+
+    const threads = this.storage
+      .listAllConversations(documentId)
+      .filter((c) => c.kind === 'thread-root' || c.kind === 'thread-branch');
+    // Every `thread-branch` gets a non-null `piLeafEntryId` at creation time (its resolved anchor
+    // entry), so its mere existence already implies the document has message history somewhere —
+    // only an untouched `thread-root` with no branches yet has every Thread's `piLeafEntryId` null.
+    const hasAnyMessages = threads.some((t) => t.piLeafEntryId !== null);
+    if (!hasAnyMessages) {
+      throw new EmptyDocumentExportError(
+        `Document ${documentId} has no thread message history to export`,
+      );
+    }
+
+    const html = await this.piService.exportDocumentSession(threads);
+    return { documentId, exportedAt: new Date().toISOString(), html };
   }
 
   private getThreadOrThrow(threadId: string): ConversationRow {

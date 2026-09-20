@@ -1,4 +1,6 @@
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   createAgentSession,
@@ -26,12 +28,16 @@ import type { PrimaryMutex } from './primary-mutex.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 
 /**
- * Best-effort extraction of readable text from a raw Pi `AgentMessage` entry (`session-manager.ts`
- * `SessionMessageEntry.message`), for seeding a review conversation's transcript (FR-036). Only
- * `user`/`assistant` roles are surfaced — tool calls, custom messages and other internal entry
- * kinds are skipped, since this is a human-readable digest, not a faithful replay.
+ * Best-effort extraction of `{ role, text }` from a raw Pi `AgentMessage` entry
+ * (`session-manager.ts` `SessionMessageEntry.message`). Only `user`/`assistant` roles are
+ * surfaced — tool calls, custom messages and other internal entry kinds are skipped, since this is
+ * a human-readable digest, not a faithful replay. Shared by `extractPlainMessageText` (FR-036's
+ * role-prefixed transcript line) and `exportThreadSession` (FR-013's unprefixed message text, for
+ * rendering through the same `MessageBubble.vue` a live thread already uses).
  */
-function extractPlainMessageText(message: unknown): string | null {
+function extractPlainMessageParts(
+  message: unknown,
+): { role: 'user' | 'assistant'; text: string } | null {
   if (!message || typeof message !== 'object') return null;
   const m = message as { role?: unknown; content?: unknown };
   if (m.role !== 'user' && m.role !== 'assistant') return null;
@@ -50,7 +56,14 @@ function extractPlainMessageText(message: unknown): string | null {
       .join('\n');
   }
   if (!text || !text.trim()) return null;
-  return `${m.role}: ${text}`;
+  return { role: m.role, text };
+}
+
+/** Role-prefixed digest line built from `extractPlainMessageParts` — used for seeding a review
+ *  conversation's transcript (FR-036), where a single flat line per message is wanted. */
+function extractPlainMessageText(message: unknown): string | null {
+  const parts = extractPlainMessageParts(message);
+  return parts ? `${parts.role}: ${parts.text}` : null;
 }
 
 /** The minimal shape `PiService` needs from a registered custom tool, satisfied structurally by
@@ -222,8 +235,20 @@ export class PiService {
   private async getOrCreateSession(
     conversation: ConversationRow,
     sessionManagerOverride?: SessionManager,
+    options?: {
+      /** `exportDocumentSession` (011-linear-thread-mode, research.md R10) needs a brand-new,
+       *  uncached `AgentSession` on every call, never one already cached under `this.sessions` for
+       *  some other Thread — a cached session's own `SessionManager` only reflects entries appended
+       *  through THAT SAME instance (the SDK never re-syncs `fileEntries` from disk after its own
+       *  initial open), so another Thread's separately-cached session may since have appended
+       *  further entries straight to the shared on-disk file that this one's in-memory copy would
+       *  never observe, silently understating a whole-document export. Skipping both the read AND
+       *  the write of `this.sessions` guarantees a fresh, current-as-of-now view without disturbing
+       *  whatever turn-execution session may already be cached for `conversation.id`. */
+      skipCache?: boolean;
+    },
   ): Promise<AgentSessionLike> {
-    const cached = this.sessions.get(conversation.id);
+    const cached = options?.skipCache ? undefined : this.sessions.get(conversation.id);
     if (cached) return cached;
 
     const tools = this.buildTools(conversation);
@@ -296,7 +321,9 @@ export class PiService {
       this.storage.updateConversation(conversation.id, { piSessionPath: actualPath });
     }
 
-    this.sessions.set(conversation.id, agentSession);
+    if (!options?.skipCache) {
+      this.sessions.set(conversation.id, agentSession);
+    }
     return agentSession;
   }
 
@@ -542,6 +569,123 @@ export class PiService {
 
     const clampedIndex = Math.min(Math.max(anchorIndex, 0), pathEntries.length - 1);
     return pathEntries[clampedIndex]?.id ?? parent.piLeafEntryId ?? anchorMessageId;
+  }
+
+  /**
+   * Produces a genuine, on-demand Pi-native session export of `thread`'s own root-to-leaf history
+   * (User Story 4/FR-013, research.md R9). `SessionManager.createBranchedSession()` is Pi's own
+   * public "extract a single conversation path from a branched session" primitive, and it mutates
+   * the CALLING instance in place (repointing its `sessionFile`/`sessionId`/entries at the newly
+   * created file) rather than leaving it untouched — so this always opens a throwaway
+   * `SessionManager.open(thread.piSessionPath)`, never `this.threadSessionManagers`'s cached
+   * instance, to avoid corrupting every other Thread's shared-tree bookkeeping for this document.
+   * The resulting standalone file is read back byte-for-byte (`jsonl` — Pi's own genuine export,
+   * not a re-derived approximation) and parsed via `extractPlainMessageParts` (the same extraction
+   * `readClosedTranscript` uses) into a friendly `messages` list, then deleted — nothing is
+   * persisted (data-model.md's "Exported session ... produced on demand").
+   */
+  exportThreadSession(thread: ConversationRow): {
+    jsonl: string;
+    messages: { id: string; role: 'user' | 'assistant'; text: string; timestamp: string }[];
+  } {
+    if (!thread.piLeafEntryId) {
+      throw new Error(`Thread ${thread.id} has no message history to export`);
+    }
+    const throwaway = SessionManager.open(thread.piSessionPath);
+    const exportedPath = throwaway.createBranchedSession(thread.piLeafEntryId);
+    if (!exportedPath) {
+      throw new Error(`Failed to export thread ${thread.id}: no session file was produced`);
+    }
+    try {
+      const jsonl = readFileSync(exportedPath, 'utf8');
+      const reader = SessionManager.open(exportedPath);
+      const messages: {
+        id: string;
+        role: 'user' | 'assistant';
+        text: string;
+        timestamp: string;
+      }[] = [];
+      for (const entry of reader.getEntries()) {
+        if (entry.type !== 'message') continue;
+        const parts = extractPlainMessageParts(entry.message);
+        if (!parts) continue;
+        messages.push({
+          id: entry.id,
+          role: parts.role,
+          text: parts.text,
+          timestamp: entry.timestamp,
+        });
+      }
+      return { jsonl, messages };
+    } finally {
+      unlinkSync(exportedPath);
+    }
+  }
+
+  /**
+   * Produces a genuine, on-demand whole-document Pi-native session export (User Story 4/FR-013b,
+   * research.md R10, constitution v2.5.0): unlike `exportThreadSession` above (one Thread's own
+   * root-to-leaf path, extracted into a new standalone file via `createBranchedSession`), this
+   * renders the ENTIRE shared per-document session file — every Thread's own branch together — as
+   * one self-contained, interactive HTML artifact, via the Pi SDK's own whole-tree export primitive,
+   * `AgentSession.exportToHtml()`.
+   *
+   * Always builds a brand-new, uncached `AgentSession` for the document's `thread-root` (via
+   * `getOrCreateSession(..., { skipCache: true })`), rather than reusing whatever Thread's session
+   * may already be cached in `this.sessions` — see `getOrCreateSession`'s own doc comment on
+   * `skipCache` for why reusing a cached one would risk silently missing another Thread's more
+   * recently-appended entries. `exportToHtml()` is otherwise read-only with respect to the session/
+   * `SessionManager` it's called on (no analogue of `exportThreadSession`'s mutating-instance
+   * gotcha), so the fresh session is simply disposed afterward rather than left cached — there is no
+   * ongoing turn-execution need for it the way an ordinary send's cold-started session has.
+   */
+  async exportDocumentSession(threads: ConversationRow[]): Promise<string> {
+    const root = threads.find((t) => t.kind === 'thread-root');
+    if (!root) {
+      throw new Error('exportDocumentSession requires the document to have a thread-root Thread');
+    }
+
+    if (config.piFakeSessions) {
+      // FakeAgentSession (test-mode only, never used in production) has no live AgentSession/
+      // exportToHtml() to call — there is no model/tool-rendering machinery here worth faking the
+      // way prompt()/sendCustomMessage() are faked for turn execution. A FRESH `SessionManager.open`
+      // (never `this.threadSessionManagers`'s per-Thread cached instance) is required here for the
+      // same staleness reason `getOrCreateSession`'s `skipCache` option exists: re-opening reads the
+      // file's current, complete on-disk state, rather than whatever a long-lived cached instance's
+      // own in-memory copy happened to hold as of whenever IT was first opened.
+      const sessionManager = SessionManager.open(root.piSessionPath);
+      return this.buildFakeDocumentExportHtml(sessionManager);
+    }
+
+    const session = await this.getOrCreateSession(root, undefined, { skipCache: true });
+    try {
+      if (typeof session.exportToHtml !== 'function') {
+        throw new Error('The active Pi session does not support whole-document HTML export.');
+      }
+      const outputPath = join(tmpdir(), `radr-document-export-${randomUUID()}.html`);
+      const exportedPath = await session.exportToHtml(outputPath);
+      try {
+        return readFileSync(exportedPath, 'utf8');
+      } finally {
+        unlinkSync(exportedPath);
+      }
+    } finally {
+      session.dispose();
+    }
+  }
+
+  /** Test-only stand-in for `exportDocumentSession`'s real `AgentSession.exportToHtml()` branch
+   *  (see that method's doc comment) — a minimal, deterministic HTML document embedding every
+   *  message on the shared session's own branch, just enough for a contract test to assert the
+   *  whole-document export path is genuinely wired end to end without a live model in the loop. */
+  private buildFakeDocumentExportHtml(sessionManager: SessionManager): string {
+    const lines = sessionManager
+      .getEntries()
+      .filter((entry) => entry.type === 'message')
+      .map((entry) => extractPlainMessageText((entry as { message: unknown }).message))
+      .filter((text): text is string => text !== null);
+    const escaped = lines.map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
+    return `<!doctype html><html><body><pre data-radr-fake-document-export="1">${escaped.join('\n')}</pre></body></html>`;
   }
 
   /** Test-only accessor: the cached session for `conversationId`, if one has been created —

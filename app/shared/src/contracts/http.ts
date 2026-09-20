@@ -63,6 +63,8 @@ export const ErrorCode = z.enum([
   'PENDING_EDITS_BLOCK_DONE',
   'ROOT_THREAD_UNDELETABLE',
   'DOCUMENT_WRONG_TYPE',
+  'EMPTY_THREAD_EXPORT',
+  'EMPTY_DOCUMENT_EXPORT',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -551,3 +553,27 @@ export const ReopenThreadResponse = z.object({
   doneAt: z.literal(null),
 });
 export type ReopenThreadResponse = z.infer<typeof ReopenThreadResponse>;
+
+// User Story 4/FR-013 (research.md R9, data-model.md's "Exported session"): a fresh, on-demand
+// genuine Pi-native session export — `jsonl` is the literal bytes Pi's own
+// `SessionManager.createBranchedSession()` wrote; `messages` is a friendly parse of the same
+// export, reusing `MessageDto` so the frontend can render it through the existing `MessageBubble`
+// pipeline unchanged.
+export const ExportThreadSessionResponse = z.object({
+  threadId: z.string(),
+  exportedAt: z.string(),
+  jsonl: z.string(),
+  messages: z.array(MessageDto),
+});
+export type ExportThreadSessionResponse = z.infer<typeof ExportThreadSessionResponse>;
+
+// User Story 4/FR-013b (research.md R10, data-model.md's "Exported document session"): the
+// whole-tree counterpart of `ExportThreadSessionResponse` — the query schema for
+// `GET /api/documents/:documentId/threads/export`. That route's actual response body is the raw
+// self-contained HTML text itself (`Content-Type: text/html`), not a JSON DTO — this schema exists
+// only for the query string, mirroring `ExportDocumentQuery`'s own precedent for
+// `GET /api/documents/:documentId/export`.
+export const ExportDocumentSessionQuery = z.object({
+  download: z.coerce.boolean().optional(),
+});
+export type ExportDocumentSessionQuery = z.infer<typeof ExportDocumentSessionQuery>;

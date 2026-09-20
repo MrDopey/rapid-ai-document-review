@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import {
   CreateDocumentResponse,
+  ExportThreadSessionResponse,
   GetConversationResponse,
   ListConversationsResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -413,5 +414,152 @@ describe('User Story 3: marking a thread done declutters without deleting', () =
     const branchEntry = threads.conversations.find((c) => c.id === branchId);
     expect(rootEntry?.doneAt).toBeTruthy();
     expect(branchEntry?.doneAt).toBeNull();
+  });
+});
+
+describe('User Story 4: a genuine Pi-native session export renders in the browser', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  async function exportThread(threadId: string): Promise<{ status: number; json: unknown }> {
+    return call(ctx.app, 'GET', `/api/documents/${ctx.documentId}/threads/${threadId}/export`);
+  }
+
+  it('exports a thread with message history as genuine Pi session JSONL matching its actual messages', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+    await sendOnThread(ctx, rootId, 'First exported message.');
+    await sendOnThread(ctx, rootId, 'Second exported message.');
+
+    const liveDetail = await getThreadMessages(ctx, rootId);
+
+    const res = await exportThread(rootId);
+    expect(res.status).toBe(200);
+    const parsed = ExportThreadSessionResponse.parse(res.json);
+    expect(parsed.threadId).toBe(rootId);
+    expect(parsed.exportedAt).toBeTruthy();
+
+    // `jsonl` is Pi's own genuine session export (research.md R9): a header line followed by
+    // message entries, each a real, parseable Pi session-manager entry — not a fabricated
+    // approximation of one.
+    const lines = parsed.jsonl
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string });
+    expect(lines[0]?.type).toBe('session');
+    expect(lines.some((l) => l.type === 'message')).toBe(true);
+
+    // The friendly parse matches the thread's actual message history at export time (SC-005).
+    expect(parsed.messages.map((m) => m.text)).toEqual(liveDetail.messages.map((m) => m.text));
+    expect(parsed.messages.map((m) => m.role)).toEqual(liveDetail.messages.map((m) => m.role));
+  });
+
+  it('refuses to export a thread with no message history yet', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+
+    const res = await exportThread(rootId);
+    expect(res.status).toBe(409);
+    expect((res.json as { error: { code: string } }).error.code).toBe('EMPTY_THREAD_EXPORT');
+  });
+
+  it('does not corrupt the shared per-document session bookkeeping for later sends/branches', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+    await sendOnThread(ctx, rootId, 'Message before export.');
+
+    // `PiService.exportThreadSession` must open its own throwaway `SessionManager`, never the
+    // cached, shared one (research.md R9's gotcha) — exporting twice in a row here, before
+    // proving a subsequent send still works, is a stronger check that no shared state was mutated.
+    expect((await exportThread(rootId)).status).toBe(200);
+    expect((await exportThread(rootId)).status).toBe(200);
+
+    await sendOnThread(ctx, rootId, 'Message after export.');
+    const detail = await getThreadMessages(ctx, rootId);
+    expect(detail.messages.some((m) => m.text === 'Message after export.')).toBe(true);
+
+    const anchor = detail.messages[0]!;
+    const branchRes = await call(
+      ctx.app,
+      'POST',
+      `/api/documents/${ctx.documentId}/threads/${rootId}/branch`,
+      { anchorMessageId: anchor.id, highlightedText: 'Message before' },
+    );
+    expect(branchRes.status).toBe(201);
+  });
+});
+
+describe('User Story 4/FR-013b: a genuine whole-document Pi-native session export renders in the browser', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  async function exportDocument(): Promise<{
+    status: number;
+    body: string;
+    contentType: string | undefined;
+  }> {
+    const res = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/documents/${ctx.documentId}/threads/export`,
+    });
+    return {
+      status: res.statusCode,
+      body: res.body,
+      contentType: res.headers['content-type'] as string | undefined,
+    };
+  }
+
+  it("exports the whole document tree as HTML containing every thread's content", async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+    await sendOnThread(ctx, rootId, 'Root message unique text.');
+
+    const detail = await getThreadMessages(ctx, rootId);
+    const anchor = detail.messages[0]!;
+    const branchRes = await call(
+      ctx.app,
+      'POST',
+      `/api/documents/${ctx.documentId}/threads/${rootId}/branch`,
+      { anchorMessageId: anchor.id, highlightedText: 'Root message unique text.' },
+    );
+    expect(branchRes.status).toBe(201);
+    const branchId = (branchRes.json as { id: string }).id;
+    await sendOnThread(ctx, branchId, 'Branch message unique text.');
+
+    const res = await exportDocument();
+    expect(res.status).toBe(200);
+    expect(res.contentType).toContain('text/html');
+    expect(res.body).toContain('Root message unique text.');
+    expect(res.body).toContain('Branch message unique text.');
+  });
+
+  it('refuses to export a document with no message history in any thread', async () => {
+    await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const res = await exportDocument();
+    expect(res.status).toBe(409);
+    expect((JSON.parse(res.body) as { error: { code: string } }).error.code).toBe(
+      'EMPTY_DOCUMENT_EXPORT',
+    );
+  });
+
+  it("does not corrupt any thread's ability to keep sending messages afterward", async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+    await sendOnThread(ctx, rootId, 'Message before whole-document export.');
+
+    expect((await exportDocument()).status).toBe(200);
+    expect((await exportDocument()).status).toBe(200);
+
+    await sendOnThread(ctx, rootId, 'Message after whole-document export.');
+    const detail = await getThreadMessages(ctx, rootId);
+    expect(detail.messages.some((m) => m.text === 'Message after whole-document export.')).toBe(
+      true,
+    );
   });
 });

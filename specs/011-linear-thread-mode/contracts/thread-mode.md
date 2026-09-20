@@ -1,6 +1,6 @@
 # Contracts: Linear Thread Mode
 
-Scope: User Stories 1-3 only (FR-001 through FR-012, FR-014, FR-015). User Story 4 / FR-013 (Pi-native export rendering) is out of scope for this plan (research.md R8) and has no contract here.
+Scope: User Stories 1-4 (FR-001 through FR-015). User Story 4 / FR-013 (Pi-native export rendering) was added in a follow-up planning pass (research.md R8/R9) once the constitution amendment removing the "Pi export viewing" non-goal landed (v2.4.0).
 
 This feature extends the existing document/conversation contracts (`app/shared/src/contracts/http.ts`) rather than introducing a parallel API surface, per FR-015.
 
@@ -15,6 +15,8 @@ This feature extends the existing document/conversation contracts (`app/shared/s
 | POST | `/api/documents/:documentId/threads/:id/reopen` | **NEW**. Clears a Thread's done state (symmetric with `.../done`, research.md R3). No-op (`200`) if already active. |
 | GET | `/api/documents/:documentId/threads/:id/messages` | **Reuses** `GET .../conversations/:id` (`GetConversationResponse`) verbatim — a Thread's message list is fetched exactly like any conversation's. |
 | POST | `/api/documents/:documentId/threads/:id/send` | **Reuses** `POST .../conversations/:id/send` (`SendMessageResponse`) verbatim, routed internally to `PiService.sendOnThread` instead of `PiService.send` based on `conversation.kind` (data-model.md). |
+| GET | `/api/documents/:documentId/threads/:id/export` | **NEW** (User Story 4/FR-013). Produces a fresh, on-demand `ExportThreadSessionResponse` (below) from the Thread's genuine Pi session history (research.md R9 — `SessionManager.createBranchedSession()` on a throwaway instance, never the cached shared one). `409`/`EMPTY_THREAD_EXPORT` if the Thread has no message history yet. Nothing is persisted server-side; a second call produces a new `exportedAt`. |
+| GET | `/api/documents/:documentId/threads/export` | **NEW** (User Story 4/FR-013b). Whole-document export: renders the document's ENTIRE shared Pi session tree (every Thread/branch together) as one self-contained HTML artifact via `AgentSession.exportToHtml()` (research.md R10), returned as `Content-Type: text/html` (not JSON — this is a rendered artifact, matching `GET /api/documents/:documentId/export`'s own raw-body convention, not the JSON-DTO convention every other route on this table uses). Accepts `?download=1` for `Content-Disposition: attachment`, same convention as that same document-export route. `409`/`EMPTY_DOCUMENT_EXPORT` if no Thread in the document has any message history yet. A distinct, non-colliding path from the per-thread `.../threads/:id/export` above (different segment count — no routing ambiguity). Nothing is persisted server-side; a second call produces a fresh export. |
 
 Existing routes deliberately **not** reused for thread-kind conversations: `POST .../:id/refresh-send` (no per-conversation `contextRevision` re-seeding concept defined for this feature — Assumptions/FRs never mention it), `POST .../:id/close` and `.../review` (canvas-specific lifecycle — "done" is not "closed," research.md R3), `POST .../:id/primary` (research.md R6 — no Primary concept in threaded-conversation documents).
 
@@ -40,9 +42,27 @@ BranchThreadRequest = z.object({
 
 MarkThreadDoneResponse = z.object({ threadId: z.string(), doneAt: z.string() });
 ReopenThreadResponse = z.object({ threadId: z.string(), doneAt: z.literal(null) });
+
+// User Story 4 / FR-013 (research.md R9, data-model.md's Exported session)
+ExportThreadSessionResponse = z.object({
+  threadId: z.string(),
+  exportedAt: z.string(),
+  jsonl: z.string(),        // the literal bytes Pi's own SessionManager.createBranchedSession() wrote
+  messages: z.array(MessageDto), // friendly parse of the same export, for MessageBubble.vue reuse
+});
 ```
 
-Add to `ErrorCode`: `INVALID_HIGHLIGHT` (highlighted text not found in the anchor message), `ANCHOR_IS_TIP` (FR-007 — anchor message is the source thread's current tip), `PENDING_EDITS_BLOCK_DONE` (FR-010), `ROOT_THREAD_UNDELETABLE` (Edge Cases — no delete route is ever offered for `thread-root`, but the code is reserved in case a generic conversation-delete path is ever extended to reach it).
+Add to `ErrorCode`: `INVALID_HIGHLIGHT` (highlighted text not found in the anchor message), `ANCHOR_IS_TIP` (FR-007 — anchor message is the source thread's current tip), `PENDING_EDITS_BLOCK_DONE` (FR-010), `ROOT_THREAD_UNDELETABLE` (Edge Cases — no delete route is ever offered for `thread-root`, but the code is reserved in case a generic conversation-delete path is ever extended to reach it), `EMPTY_THREAD_EXPORT` (User Story 4/FR-013 — exporting a Thread with no message history yet), `EMPTY_DOCUMENT_EXPORT` (User Story 4/FR-013b — exporting a document with no message history in any of its Threads yet).
+
+```ts
+// User Story 4/FR-013b (research.md R10, data-model.md's "Exported document session"). The HTTP
+// response body for `GET .../threads/export` is the raw HTML text itself (`Content-Type: text/html`),
+// not this shape — this schema exists only for the query string, matching
+// `ExportDocumentQuery`'s own precedent for `GET /api/documents/:documentId/export`.
+ExportDocumentSessionQuery = z.object({
+  download: z.coerce.boolean().optional(),
+});
+```
 
 ## WebSocket (`/events`)
 
@@ -53,3 +73,5 @@ Add to `ErrorCode`: `INVALID_HIGHLIGHT` (highlighted text not found in the ancho
 
 - A `documentType: 'thread'` document renders `ThreadModeView.vue` (new) in place of the existing canvas/App shell's Preview+Canvas+History grid — this is a full alternate top-level view, not a toggle within the existing canvas layout (Clarifications: separate thread sets, fixed at document creation).
 - The document-switcher dropdown (spec 010) shows a document-type indicator (e.g. a small icon/badge) next to each entry so the reviewer can tell, before switching, which view they'll land in.
+- User Story 4/FR-013: each Thread's header offers an "Export" action (a small, always-available utility action — not mutually exclusive with, and rendered alongside, the Mark done/Reopen primary action per plan.md's Post-Design Constitution Check note that `ThreadCard.vue`'s header is a new view not strictly bound to the existing single-primary-slot convention) opening a read-only modal (`ThreadExportViewer.vue`) that fetches and renders `GET .../export`'s response: the parsed transcript through `MessageBubble.vue`, plus the raw `jsonl` in a collapsible plain-text block.
+- User Story 4/FR-013b: `ThreadModeView.vue`'s toolbar (alongside its existing "Expand all"/"Done (N)" controls) offers an "Export all" action that fetches `GET .../threads/export` and opens the returned self-contained HTML in a new browser tab (`Blob` + `URL.createObjectURL` + `window.open` — the SDK designs this artifact as a standalone document with its own interactive navigation JS, not something meant to be embedded inline in a Vue component). This is a distinct trigger from FR-013's per-thread "Export," not a replacement for it.

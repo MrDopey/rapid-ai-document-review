@@ -50,6 +50,35 @@ Computed per render pass from a Thread's own message list plus every sibling Thr
 | `isTipSegment` | `boolean` | `true` only for the last segment of a Thread (the one ending at its actual current tip) — only this segment accepts a compose action (FR-005c). |
 | `childBranchIds` | `string[]` | Other Threads whose `forkedFromMessageId` equals this segment's last message — rendered as sibling forks immediately after this segment (FR-005b, User Story 2 scenario 9). |
 
+## Exported session (User Story 4, FR-013 — not persisted, no schema change)
+
+Produced entirely on demand by `PiService.exportThreadSession`/`ThreadService.exportSession` (research.md R9) — never stored in the `conversation` table or any new table, consistent with FR-015's reuse mandate and the constitution amendment's "read-only rendering" framing (nothing about FR-013 requires durable storage of a past export).
+
+| Field | Type | Notes |
+|---|---|---|
+| `threadId` | `string` | The Thread this export was produced from. |
+| `exportedAt` | `string` (ISO timestamp) | When this on-demand export was generated — not a stored/reusable identifier; a second export of the same Thread produces a new one. |
+| `jsonl` | `string` | The literal byte contents Pi's own `SessionManager.createBranchedSession()` wrote for this Thread's root-to-leaf path, read back and returned verbatim (research.md R9) — this is "the underlying Pi session export itself" (spec's User Story 4 framing), not a re-derived approximation. |
+| `messages` | `MessageDto[]` (existing shared type, reused as-is) | A friendly `{ role, text, ... }` parse of the same exported entries, for rendering through the existing `MessageBubble.vue` pipeline (FR-015 reuse) — built with the same entry-to-text extraction `PiService.readClosedTranscript` already uses, not a new extraction algorithm. |
+
+**Validation rules**: Exporting a Thread with no message history yet (`piLeafEntryId === null`) is refused (`EmptyThreadExportError` → `409`/`EMPTY_THREAD_EXPORT`) — there is nothing to export (Independent Test: "From a thread with message history").
+
+**Relationships**: Derived transiently from a Thread's own root-to-leaf path within the shared per-document Pi session file (research.md R1) — the same `piSessionPath`/`piLeafEntryId` pair every other Thread operation already uses; introduces no new relationship or foreign key.
+
+## Exported document session (User Story 4, FR-013b — not persisted, no schema change)
+
+Produced entirely on demand by `PiService.exportDocumentSession`/`ThreadService.exportDocumentSession` (research.md R10) — the whole-tree counterpart of "Exported session" above, covering every Thread in a threaded-conversation document at once rather than one Thread's own path. Never stored in any table.
+
+| Field | Type | Notes |
+|---|---|---|
+| `documentId` | `string` | The threaded-conversation document this export was produced from. |
+| `exportedAt` | `string` (ISO timestamp) | When this on-demand export was generated — a second export produces a new one, same convention as the per-thread export. |
+| `html` | `string` | The literal, self-contained HTML bytes Pi's own `AgentSession.exportToHtml()` wrote for the document's entire shared session tree, read back and returned verbatim (research.md R10) — genuinely "the whole tree, Pi's own export," not an application-fabricated multi-branch view. |
+
+**Validation rules**: Exporting a document with no message history in any of its Threads is refused (`EmptyDocumentExportError` → `409`/`EMPTY_DOCUMENT_EXPORT`) — determined by whether any Thread row in the document has a non-null `piLeafEntryId` (every `thread-branch` gets one at creation time from its resolved anchor, so its mere existence already implies the document is non-empty; only an untouched `thread-root` with no branches yet has every Thread's `piLeafEntryId` null).
+
+**Relationships**: Derived transiently from the document's single shared Pi session file (research.md R1) — the same file every Thread in the document already points at via `piSessionPath`; introduces no new relationship or foreign key.
+
 ## Done state (conceptual, backed by `doneAt` above)
 
 A non-destructive, reversible visibility flag on a Thread (`doneAt !== null`); excluded from the default top-down list (FR-008) but otherwise fully intact and actionable (branchable, per Edge Cases) — see research.md R3 for why this is not a repurposed `status: 'closed'`.

@@ -4,7 +4,7 @@
 
 **Input**: Feature specification from `/specs/011-linear-thread-mode/spec.md`
 
-**Scope note**: This plan covers User Stories 1-3 (FR-001 through FR-012, FR-014, FR-015) only. User Story 4 / FR-013 (genuine Pi-native session export rendered in the browser) remains blocked on a constitution amendment removing the "Pi export viewing" v1 non-goal (spec Clarifications/Assumptions); no research, data model, contract, or task is produced for it here (research.md R8). A follow-up `/speckit-plan` run extends this plan once that amendment lands.
+**Scope note**: This plan now covers all four User Stories (FR-001 through FR-015). User Stories 1-3 (FR-001 through FR-012, FR-014, FR-015) were planned and implemented first; User Story 4 / FR-013 (genuine Pi-native session export rendered in the browser) was added in this follow-up planning pass once the constitution amendment removing the "Pi export viewing" v1 non-goal landed (v2.4.0) — see research.md R8 (original exclusion) and R9 (the actual US4 design).
 
 ## Summary
 
@@ -37,7 +37,7 @@ Add a second document type — "threaded conversation" — chosen once at docume
 | Principle / Constraint | Status | Notes |
 |---|---|---|
 | I. The Application Owns the Document | PASS | Threads are conversations, not document content; no new source of truth for document state is introduced. |
-| II. Pi Owns Agent Conversations | PASS | All new Pi surface (`SessionManager.branch()`, shared per-document session file, leaf-entry tracking) is added inside `PiService` only (`PiService.sendOnThread`, data-model.md) — still the sole module importing the Pi SDK. The application never reads/writes the session file directly; it only calls SDK methods. |
+| II. Pi Owns Agent Conversations | PASS | All new Pi surface (`SessionManager.branch()`, shared per-document session file, leaf-entry tracking, and — User Story 4 — `SessionManager.createBranchedSession()` for export, research.md R9) is added inside `PiService` only (`PiService.sendOnThread`/`exportThreadSession`) — still the sole module importing the Pi SDK. The application never reads/writes the session file directly; it only calls SDK methods. |
 | III. Agent Edits Are Proposals, Not Direct Writes | PASS | Unchanged pipeline; no thread is ever `isPrimary`, so no thread's proposals are ever auto-applied (research.md R6) — every proposal in this mode goes through ordinary manual review, a strictly *more* conservative posture than canvas mode's, not a weaker one. |
 | IV. CRDT-Mediated Merging, Revisions Separate | PASS | Not touched — this feature is entirely about conversation structure, not document content/revisions. |
 | V. Configurable Limits Are Enforced, Not Advisory | PASS | `maxConversationDepth` applies unchanged to Thread branching (FR-012); no second, competing depth limit is introduced. |
@@ -45,13 +45,13 @@ Add a second document type — "threaded conversation" — chosen once at docume
 | VII. No Pi Extension Without Demonstrated Necessity | PASS | No Pi extension — `SessionManager.branch()`/`getEntries()`/`getTree()` are ordinary public SDK methods, already exported. |
 | VIII. Comments Are Durable, Not Historical | PASS | Applies at implementation time; no plan-level concern. |
 | Tech Constraints: SQLite via abstracted storage layer | PASS | New columns only, same `StorageAdapter` interface, no new backing store. |
-| Tech Constraints: v1 non-goals | PASS for US1-3 / **BLOCKED for US4** | "Pi export viewing" remains an explicit non-goal until amended (spec Assumptions). This plan excludes User Story 4/FR-013 entirely rather than violating the non-goal (research.md R8) — not a violation requiring Complexity Tracking, since the corresponding work simply isn't part of this plan. |
+| Tech Constraints: v1 non-goals | PASS | "Pi export viewing" is no longer a non-goal (constitution v2.4.0's narrow carve-out): US4's export is obtained exclusively via the Pi SDK (`SessionManager.createBranchedSession()`, research.md R9), never by reading Pi's session storage format directly, and renders Pi's own genuine export unaltered — no fabricated/reformatted substitute. |
 | Quality Gate: idempotent retryable operations | PASS | `ThreadService.markDone`/`.reopen` are simple, idempotent state flips (already-done → done is a no-op 200, per contracts/thread-mode.md). |
 | Quality Gate: conversation not closable with unresolved staged edits | PASS (adapted) | The same guard is reused for "cannot mark done with unresolved staged edits" (FR-010), extracted into a shared check rather than duplicated (research.md R3). |
 | UI Conventions: 3-section conversation row/header layout | PASS | `ThreadModeView` is a new, distinct view (not the existing `HudPanel`/`ConversationView` header layout), so this convention doesn't directly apply; where a Thread's row does show title/action/status (e.g. the done/history list), it follows the same 3-section convention rather than inventing a new one. |
 | UI Conventions: Keyboard Shortcuts registry | PASS | If implementation introduces any new bound shortcut (e.g. jump-to-next-thread), it MUST be added to `app/frontend/src/a11y/keymap-registry.ts` per existing convention; no shortcut is mandated by the spec itself. |
 
-No unjustified violations for the in-scope User Stories 1-3 — Complexity Tracking table is not needed for them. User Story 4/FR-013 is excluded from scope rather than planned non-compliantly.
+No unjustified violations for any of the four in-scope User Stories — Complexity Tracking table is not needed.
 
 ## Project Structure
 
@@ -90,11 +90,14 @@ app/backend/src/
 │   └── pi-service.ts           # add sendOnThread(thread, message, bridge): opens the thread's shared
 │                                 #      session, SessionManager.branch(thread.piLeafEntryId), appends,
 │                                 #      records the new leaf entry id (research.md R1) — still the only
-│                                 #      module importing the Pi SDK
+│                                 #      module importing the Pi SDK; add exportThreadSession(thread)
+│                                 #      (research.md R9): throwaway SessionManager.open() +
+│                                 #      .createBranchedSession(leafId), read back, delete temp file
 ├── api/http/
 │   ├── document.ts             # POST /api/documents accepts documentType
 │   └── threads.ts              # NEW: POST .../threads/:id/{branch,done,reopen}; GET/send delegate to
-│                                 #      existing conversation routes' handlers (contracts/thread-mode.md)
+│                                 #      existing conversation routes' handlers (contracts/thread-mode.md);
+│                                 #      GET .../threads/:id/export (User Story 4/FR-013)
 └── events/event-publisher.ts    # add conversation_done_changed event
 
 app/shared/src/
@@ -110,8 +113,9 @@ app/frontend/src/
 │   ├── ThreadModeView.vue       #      ThreadCard.vue (one segment's worth of rendering), ThreadComposer.vue
 │   ├── ThreadCard.vue           #      (compose box, only mounted on a tip segment per FR-005c),
 │   ├── ThreadComposer.vue       #      HighlightBranchMenu.vue (selection popover -> branch action),
-│   ├── HighlightBranchMenu.vue  #      DoneThreadsPanel.vue (the done/history list, User Story 3)
-│   └── DoneThreadsPanel.vue
+│   ├── HighlightBranchMenu.vue  #      DoneThreadsPanel.vue (the done/history list, User Story 3),
+│   ├── DoneThreadsPanel.vue     #      ThreadExportViewer.vue (User Story 4 — genuine Pi export viewer)
+│   └── ThreadExportViewer.vue
 ├── composables/
 │   └── useThreadSegments.ts     # NEW: derives Thread segments from a document's Thread list + messages
 │                                 #      (research.md R5/data-model.md's frontend-only ThreadSegment)
@@ -136,6 +140,8 @@ tests/e2e/                                       # NEW: usN.spec.ts covering qui
 
 No new concerns emerged during design. The one item flagged as needing a considered decision going in — how "done" relates to the existing "closed" status — was resolved in research.md R3 (a new, orthogonal `doneAt` field, not a reuse of `status: 'closed'`) precisely because reusing `closed` would have silently pulled in canvas-specific behavior (branch-from-closed refusal, fold-summary, review flows) that this feature's Edge Cases explicitly rule out. The Pi-session strategy (research.md R1 — one shared session file per threaded-conversation document, `SessionManager.branch()` leaf-repositioning per Thread) is a genuine, deliberate divergence from canvas mode's per-conversation-session-file model; it stays fully inside `PiService`, so Principle II remains satisfied without exception. No Complexity Tracking entry is needed because this divergence isn't a violation of any principle — it's the specific mechanism FR-006 requires, isolated behind the same single Pi-integration module the constitution already mandates.
 
+**Follow-up (User Story 4)**: The one new design decision this pass required — how to obtain "Pi's genuine export" without a live model/tool session and without leaving the feature untestable under `RADR_BE_PI_FAKE_SESSIONS=1` — was resolved in research.md R9: `SessionManager.createBranchedSession()` on a throwaway (never cached) `SessionManager` instance, reusing the always-real per-Thread `SessionManager` bookkeeping this plan's own US1-3 design (R1) already established. This stays entirely inside `PiService`, so Principle II is unaffected, and the constitution's Tech Constraints carve-out (v2.4.0) is satisfied exactly as scoped: obtained via the Pi SDK, never by reading session storage directly, never fabricated.
+
 ## Complexity Tracking
 
-*No Constitution Check violations requiring justification for the in-scope User Stories 1-3 — table intentionally omitted. User Story 4/FR-013 is excluded from this plan's scope entirely (see Scope note above) rather than justified as a violation.*
+*No Constitution Check violations requiring justification for any of the four in-scope User Stories — table intentionally omitted.*

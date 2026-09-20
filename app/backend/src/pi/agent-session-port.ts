@@ -129,4 +129,12 @@ export interface AgentSessionLike {
   getActiveToolNames(): string[];
   waitForIdle(): Promise<void>;
   dispose(): void;
+  /** The real SDK's whole-tree export primitive (011-linear-thread-mode, User Story 4/FR-013b,
+   * research.md R10): renders `SessionManager.getEntries()` — every branch in this session's
+   * underlying file, not just the current path — as one self-contained, interactive HTML file,
+   * writes it to `outputPath` (or a default location), and resolves its path. Optional: unlike
+   * every other member here, `FakeAgentSession` (test-mode only, never used in production) does not
+   * implement this — there is no live model/tool-rendering machinery to fake meaningfully for an
+   * HTML exporter the way `prompt()`/`sendCustomMessage()` are faked for turn execution. */
+  exportToHtml?(outputPath?: string): Promise<string>;
 }

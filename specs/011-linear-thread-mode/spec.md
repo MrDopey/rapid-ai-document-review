@@ -86,11 +86,15 @@ A reviewer wants to view a thread's full, native Pi session export, rendered in 
 
 **Independent Test**: From a thread with message history, trigger the export action and verify the native Pi session export renders in the browser, matching the thread's actual message history.
 
+A reviewer may also want the whole document's conversation tree at once — every thread and branch together, not just one thread's own path — for sharing or archival as a single artifact. They trigger a document-wide export and see the entire shared Pi session tree rendered as one interactive, self-contained view, distinct from (and in addition to) a single thread's own export.
+
 **Acceptance Scenarios**:
 
 1. **Given** a thread with message history, **When** the reviewer exports it, **Then** a rendered view of that thread's native Pi session export displays in the browser.
 2. **Given** an exported, rendered session, **When** the reviewer compares it to the live thread, **Then** the content matches the thread's actual history at the time of export.
 3. **Given** the constitution's current "Pi export viewing" non-goal has not yet been amended, **When** planning for this story begins, **Then** planning is blocked until that amendment lands (see Clarifications and Assumptions).
+4. **Given** a threaded-conversation document with more than one thread (a root plus at least one branch), **When** the reviewer triggers the document-wide export action, **Then** a single rendered artifact displays in the browser containing every thread's content, with the ability to navigate between threads/branches within that one artifact.
+5. **Given** a threaded-conversation document with no messages in any of its threads, **When** the reviewer triggers the document-wide export action, **Then** the export is refused with a message explaining there is nothing to export yet.
 
 ---
 
@@ -127,6 +131,7 @@ A reviewer wants to view a thread's full, native Pi session export, rendered in 
 - **FR-011**: Marking a parent thread done MUST NOT affect the visibility, active state, or availability of any of its still-active branch threads.
 - **FR-012**: Linear thread mode MUST enforce the same configured maximum conversation branching depth already enforced elsewhere in the application (Constitution Principle V), rather than introducing a separate limit.
 - **FR-013**: Users MUST be able to export a thread's genuine, native Pi session export and have it render in the browser, matching that thread's actual message history at export time. This requires the constitution's existing "Pi export viewing" non-goal (Technology & Platform Constraints) to be amended before this requirement can be planned or implemented (see Clarifications, Assumptions).
+- **FR-013b**: Users MUST also be able to export an entire threaded-conversation document's shared Pi session tree — every thread and branch together, not just one thread's own path — and have it render in the browser as a single, self-contained interactive artifact, obtained exclusively via the Pi SDK's own whole-tree export primitive. This is additional to, not a replacement for, FR-013's per-thread export, and depends on the same constitution amendment being further extended to cover a document-wide, whole-tree export (see Assumptions). Exporting a document with no message history in any of its threads MUST be refused.
 - **FR-014**: A document's type (canvas-mode or threaded-conversation) MUST be fixed at creation time and MUST NOT be changeable afterward; switching the active document (per spec 010's document switcher) between documents of either type MUST preserve each document's thread state (including any done/active status) without resetting or discarding it.
 - **FR-015**: Linear thread mode MUST reuse the application's existing conversation, document, and edit-proposal machinery (storage, event streaming, edit pipeline) rather than introducing a parallel implementation of capabilities that already exist for the canvas mode, except where this feature's requirements above (top-down layout, single root thread, done/declutter) explicitly call for different behavior.
 
@@ -138,6 +143,7 @@ A reviewer wants to view a thread's full, native Pi session export, rendered in 
 - **Thread segment**: The visually rendered slice of a Thread's message history between two consecutive branch points (or between the thread's start/a branch point and its current tip). A purely presentational subdivision, not a separate stored entity — a Thread with no branches off its own history renders as a single segment; each additional branch point along a Thread's history produces one more stacked segment (FR-005b). Only the final segment (ending at the thread's current tip) accepts new messages composed directly in the thread; every earlier segment is read-only history, actionable only via highlight-to-branch (FR-005c).
 - **Done state**: A non-destructive, reversible-by-retrieval visibility state on a thread; a done thread is excluded from the default top-down list but remains fully intact.
 - **Exported session**: A browser-rendered view of a thread's genuine, native Pi session export, produced on demand (FR-013).
+- **Exported document session**: A browser-rendered view of an entire threaded-conversation document's shared Pi session tree — every thread/branch together — produced on demand via the Pi SDK's whole-tree export primitive (FR-013b), distinct from a single thread's own Exported session.
 
 ## Success Criteria *(mandatory)*
 
@@ -148,6 +154,7 @@ A reviewer wants to view a thread's full, native Pi session export, rendered in 
 - **SC-003**: Marking a thread done removes it from the default view in exactly one user action, and a user can retrieve its full, unchanged history afterward in a bounded number of additional actions (e.g., opening a "done" list).
 - **SC-004**: In a document with multiple active and multiple done threads, a user can identify, from the default top-down list alone, that every visible thread is still active — no done thread appears there.
 - **SC-005**: A user can export any thread and view its rendered transcript in the browser, with the rendered content matching the thread's message history at the time of export.
+- **SC-006**: A user can export an entire threaded-conversation document and view one rendered artifact in the browser containing every thread's content, without needing to export each thread individually.
 
 ## Assumptions
 
@@ -159,3 +166,4 @@ A reviewer wants to view a thread's full, native Pi session export, rendered in 
 - Sanitization of any rendered thread content (including the native Pi session export view) continues to go through the application's existing abstracted sanitization layer (Constitution Principle VI); this feature does not introduce a second, unsanitized rendering path.
 - Zooming, spatial positioning, and highlight-anchoring from the canvas mode (specs/005) are explicitly out of scope for linear thread mode's top-down list — its ordering is purely chronological/activity-based, not spatial.
 - **Blocking prerequisite**: the constitution's Technology & Platform Constraints currently list "Pi export viewing" as an explicit v1 non-goal. Per Clarifications, the project is now past v1 and this feature requires that non-goal removed via a constitution amendment (`/speckit-constitution`) before FR-013/User Story 4 can be planned; Stories 1-3 (FR-001 through FR-012) do not depend on this amendment and can be planned independently of it.
+- FR-013b's document-wide export similarly depended on the same carve-out being further extended (constitution v2.5.0) to explicitly cover a whole-tree export via `AgentSession.exportToHtml()`, alongside the single-thread export the v2.4.0 amendment already covered; that extension has landed, so FR-013b was planned in the same follow-up pass as FR-013.

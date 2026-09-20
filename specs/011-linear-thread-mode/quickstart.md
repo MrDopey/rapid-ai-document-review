@@ -2,7 +2,7 @@
 
 Prerequisites: repo installed (`npm install` at root), backend + frontend dev servers runnable per the project's existing README/debugging instructions. No new environment variables or services are required by this feature (`RADR_BE_PI_FAKE_SESSIONS=1` works exactly as it does for canvas mode, since `ThreadService`/`PiService.sendOnThread` reuse the same fake-session path).
 
-Scope: this validates User Stories 1-3 (FR-001 through FR-012, FR-014, FR-015). User Story 4 (Pi-native export rendering, FR-013) has no validation scenario here — it is out of scope for this plan pending a constitution amendment (research.md R8).
+Scope: this validates User Stories 1-4 (FR-001 through FR-015).
 
 ## Setup
 
@@ -52,6 +52,11 @@ Open the app; use the document switcher (spec 010) to create a new document, cho
 
 **Expected**: SC-003/SC-004; done is reversible and never affects unrelated threads.
 
-## Out of scope for this quickstart
+## Scenario 5 — Genuine Pi-native session export renders in the browser (User Story 4, FR-013)
 
-- Exporting a thread's native Pi session export and rendering it in the browser (User Story 4/FR-013) — blocked on a constitution amendment (see spec Assumptions and research.md R8); validate in a follow-up plan once that lands.
+1. In a thread with at least a couple of exchanged messages, click "Export" on its header.
+2. Confirm a viewer opens showing a rendered transcript matching that thread's actual message history, plus a raw, collapsible Pi session export (JSONL) panel.
+3. Compare the rendered transcript against the live thread's own messages; confirm they match (SC-005).
+4. Try exporting a brand-new thread with no messages yet; confirm the action is refused (`EMPTY_THREAD_EXPORT`).
+
+**Expected**: SC-005 — the export renders in the browser and matches the thread's history at export time; it is Pi's own genuine export (the raw JSONL panel), not a fabricated substitute.

@@ -4,7 +4,7 @@
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/thread-mode.md, quickstart.md (all present)
 
-**Scope**: User Stories 1-3 only (FR-001–FR-012, FR-014, FR-015), per plan.md's Scope note. User Story 4 / FR-013 (Pi-native export viewer) is out of scope until the constitution amendment removing the "Pi export viewing" non-goal lands — no tasks are generated for it.
+**Scope**: All four user stories (FR-001–FR-015). User Stories 1-3 (Phases 1-6 below) were planned and implemented first. User Story 4 / FR-013 (Pi-native export viewer) was added in a follow-up planning pass (Phase 7) once the constitution amendment removing the "Pi export viewing" non-goal landed (v2.4.0) — see research.md R8 (original exclusion) and R9 (the actual design).
 
 **Tests**: Not explicitly requested as TDD in the spec. Following this repo's established convention (specs 005/010's tasks.md), test/integration coverage is included as required implementation work within each phase, not as a separate optional section.
 
@@ -164,6 +164,69 @@
 
 ---
 
+## Phase 7: User Story 4 - Render a genuine Pi-native session export in the browser (Priority: P4)
+
+**Goal**: A reviewer can trigger, for any thread with message history, a genuine native Pi session export and see it rendered in the browser (a parsed transcript plus the raw exported Pi session bytes), matching that thread's actual message history at export time; exporting a thread with no messages yet is refused.
+
+**Independent Test**: From a thread with message history, click "Export"; verify a viewer renders a transcript matching the thread's actual messages and a raw Pi session export (JSONL) panel; verify exporting a thread with zero messages is refused.
+
+### Backend
+
+- [X] T054 [US4] In `app/backend/src/pi/pi-service.ts`, add `exportThreadSession(thread: ConversationRow): { jsonl: string; messages: { id: string; role: 'user' | 'assistant'; text: string }[] }` (research.md R9): open a **fresh, throwaway** `SessionManager.open(thread.piSessionPath)` (never `this.threadSessionManagers`'s cached instance — `createBranchedSession` mutates the calling instance in place, so reusing the shared one would corrupt every other Thread's shared-tree bookkeeping); call `.createBranchedSession(thread.piLeafEntryId!)` to produce a new, genuine standalone Pi session file containing exactly this Thread's root-to-leaf path; read the new file's raw bytes via `readFileSync(path, 'utf8')` for `jsonl`; reopen it read-only (`SessionManager.open(newPath)`) and walk `getEntries()` through the existing private `extractPlainMessageText` helper (already used by `readClosedTranscript`) to build `messages`; delete the temporary file via `unlinkSync` before returning (ephemeral, per data-model.md's "Exported session" — nothing is persisted). Still the only module importing `@earendil-works/pi-coding-agent` (Constitution Principle II unchanged).
+- [X] T055 [US4] In `app/backend/src/conversation/thread-service.ts`, add `export class EmptyThreadExportError extends Error {}` and implement `exportSession(threadId: string): { threadId: string; exportedAt: string; jsonl: string; messages: MessageDto[] }`: loads the thread via `getThreadOrThrow`, calls `buildConversationMessages(this.storage, threadId)` and throws `EmptyThreadExportError` if it has zero messages (data-model.md's Exported session validation rule: "Exporting a Thread with no message history yet ... is refused"), otherwise calls `piService.exportThreadSession(thread)` and returns `{ threadId, exportedAt: new Date().toISOString(), jsonl: result.jsonl, messages: result.messages.map((m) => ({ id: m.id, role: m.role, text: m.text, createdAt: new Date().toISOString() })) }`.
+- [X] T056 [US4] In `app/shared/src/contracts/http.ts`, add `ExportThreadSessionResponse = z.object({ threadId: z.string(), exportedAt: z.string(), jsonl: z.string(), messages: z.array(MessageDto) })` (contracts/thread-mode.md) and add `'EMPTY_THREAD_EXPORT'` to `ErrorCode` (line ~64, alongside the other 011-linear-thread-mode codes).
+- [X] T057 [US4] In `app/backend/src/api/http/threads.ts`: add `EmptyThreadExportError` to `handleThreadError`'s dispatch table, mapping to `409`/`EMPTY_THREAD_EXPORT`; add `GET /api/documents/:documentId/threads/:id/export` calling `requireDocumentType`/`requireThreadInDocument` then `threadService.exportSession(request.params.id)`, replying `200` with the `ExportThreadSessionResponse`-shaped result (contracts/thread-mode.md).
+- [X] T058 [P] [US4] In `app/frontend/src/transport/http-client.ts`, add `async exportThread(documentId: string, id: string)` calling `GET /api/documents/${documentId}/threads/${id}/export` and parsing the response with `ExportThreadSessionResponse.parse(j)`, following the exact same `request(...)` pattern as `getThreadMessages`/`markThreadDone` immediately above it.
+
+### Frontend
+
+- [X] T059 [US4] In `app/frontend/src/stores/thread.ts`, add an `async exportThread(threadId: string): Promise<ExportThreadSessionResponse>` action calling `httpClient.exportThread(activeDocumentId(), threadId)` and returning the result directly (no store-state mutation needed — the export is ephemeral/on-demand per data-model.md, not part of `ThreadsState`).
+- [X] T060 [US4] Create `app/frontend/src/components/thread/ThreadExportViewer.vue`: a modal (same `dialog-box`/`.modal-overlay` pattern as `DoneThreadsPanel.vue`/`ThreadModeView.vue`) that, on open, calls `store.exportThread(threadId)` and renders: (a) the parsed `messages` through `MessageBubble.vue` (reusing `composables/expandableMessages.ts`'s `seedExpandedForEntity`/`setExpandedForEntity` for local expand/collapse state, exactly as `ThreadCard.vue` does for its own live transcript — no new expand/collapse logic); (b) a collapsible `<details>` section showing the raw `jsonl` in a `<pre>{{ jsonl }}</pre>` block (plain text interpolation only, never `v-html` — the raw bytes are untrusted LLM-influenced content with no sanitization pass applied, so this must never be inserted as markup). Shows a loading state while the request is in flight and surfaces `EMPTY_THREAD_EXPORT`/other `ApiError`s inline, same convention as `onBranchFromSelection`'s `branchError` in `ThreadCard.vue`.
+- [X] T061 [US4] In `app/frontend/src/components/thread/ThreadCard.vue`, read the current on-disk file first (it may have moved further since this task was written by a parallel in-flight change) and add an "Export" trigger next to the existing Mark done/Reopen action in `.thread-card-actions` — a small always-available utility button (not part of the mutually-exclusive `doneActions` single-primary-slot list; plan.md's Post-Design Constitution Check already notes `ThreadCard.vue`'s header isn't strictly bound to the existing single-primary-slot convention) that sets a local `exportOpen` ref to `true`, mounting `ThreadExportViewer.vue` (T060) with `:thread-id="threadId"` and `@close="exportOpen = false"`.
+
+### Tests
+
+- [X] T062 [P] [US4] In `app/backend/tests/integration/`, add a test that: creates a threaded document, sends 2+ messages in the root thread, calls `threadService.exportSession(rootId)`, and asserts the result's `jsonl` parses as valid Pi session JSONL (a `type: 'session'` header entry followed by `type: 'message'` entries) and that `messages` matches the thread's actual sent/received text.
+- [X] T063 [P] [US4] In `app/backend/tests/integration/`, add a test asserting `threadService.exportSession(rootId)` throws `EmptyThreadExportError` for a freshly created root thread with no messages yet, and that the *shared* `PiService.threadSessionManagers` bookkeeping instance for that thread is unaffected afterward (a subsequent `sendOnThread` call on the same thread still appends to the correct leaf) — proving the throwaway-`SessionManager` isolation in T054 actually holds.
+- [X] T064 [P] [US4] In `app/backend/tests/contract/`, add a test asserting `GET .../threads/:id/export` returns `409`/`EMPTY_THREAD_EXPORT` for a messageless thread and `200`/`ExportThreadSessionResponse` for one with history.
+- [X] T065 [P] [US4] In `app/frontend/tests/component/` (or `unit/`, matching this repo's existing convention for `ThreadCard`-adjacent components), add a test for `ThreadExportViewer.vue` asserting it renders `MessageBubble` per exported message and the raw `jsonl` text verbatim in a `<pre>`.
+- [X] T066 [US4] Run `quickstart.md` Scenario 5 manually (or as a `tests/e2e/us11.spec.ts` addition) and confirm it passes.
+
+**Checkpoint**: All four user stories are independently functional; a thread's genuine Pi-native session export renders in the browser, matching its history at export time, without ever corrupting the shared per-document Pi session bookkeeping US1-3 rely on.
+
+---
+
+## Phase 8: User Story 4 (continued) - Render the whole document's shared Pi session tree in the browser (FR-013b)
+
+**Goal**: A reviewer can trigger, for an entire threaded-conversation document, a genuine whole-tree Pi-native session export (every thread/branch together, one self-contained interactive HTML artifact) and open it in the browser — additional to, not a replacement for, Phase 7's per-thread export. Refused when no thread in the document has any message history yet. Depends on constitution v2.5.0's further extension of the FR-013 carve-out to a document-wide, whole-tree export via `AgentSession.exportToHtml()`.
+
+**Independent Test**: In a document with a root thread and at least one branch, both with message history, click "Export all"; verify a new browser tab opens a self-contained HTML artifact containing both threads' content. Verify triggering it on a document with zero thread messages anywhere is refused.
+
+### Backend
+
+- [X] T067 [US4] In `app/backend/src/pi/agent-session-port.ts`, add an optional `exportToHtml?(outputPath?: string): Promise<string>;` member to `AgentSessionLike` — the real SDK's `AgentSession.exportToHtml()` signature (writes a self-contained HTML file and resolves its path, per research.md R10); optional because `FakeAgentSession` does not implement it (test-mode only, never used in production — research.md R10's fake-session caveat).
+- [X] T068 [US4] In `app/backend/src/pi/pi-service.ts`, add `async exportDocumentSession(threads: ConversationRow[]): Promise<string>` (research.md R10): finds the document's `thread-root` row among `threads`; under `config.piFakeSessions`, opens a FRESH `SessionManager.open()` for that root's shared file and renders a minimal deterministic HTML stand-in from its `getEntries()` (test-only branch — no live `AgentSession`/`exportToHtml()` exists to fake meaningfully here); otherwise always builds a brand-new, uncached `AgentSession` via `getOrCreateSession(root, undefined, { skipCache: true })` (a new `getOrCreateSession` option added by this task) — never reusing a Thread's already-cached turn-execution session, since its `SessionManager` may be stale relative to a sibling Thread's more recently-flushed appends (research.md R10's staleness gotcha) — calls `.exportToHtml(outputPath)` with a `node:os` `tmpdir()` path, reads the written file back via `readFileSync`, deletes it (`unlinkSync`), and disposes the fresh session before returning — nothing persisted, matching `exportThreadSession`'s own ephemeral convention. Still the only module importing `@earendil-works/pi-coding-agent` (Constitution Principle II unchanged).
+- [X] T069 [US4] In `app/backend/src/conversation/thread-service.ts`, add `export class EmptyDocumentExportError extends Error {}` and implement `async exportDocumentSession(documentId: string): Promise<{ documentId: string; exportedAt: string; html: string }>`: loads the document (`DocumentNotFoundError` if missing), lists its thread-kind conversation rows, throws `EmptyDocumentExportError` if none has a non-null `piLeafEntryId` (data-model.md's "Exported document session" validation rule), otherwise calls `piService.exportDocumentSession(threads)` and returns `{ documentId, exportedAt: new Date().toISOString(), html }`.
+- [X] T070 [US4] In `app/shared/src/contracts/http.ts`, add `ExportDocumentSessionQuery = z.object({ download: z.coerce.boolean().optional() })` and add `'EMPTY_DOCUMENT_EXPORT'` to `ErrorCode`.
+- [X] T071 [US4] In `app/backend/src/api/http/threads.ts`: add `EmptyDocumentExportError` to `handleThreadError`'s dispatch table, mapping to `409`/`EMPTY_DOCUMENT_EXPORT`; add `GET /api/documents/:documentId/threads/export` (registered alongside, and distinct in path shape from, the existing per-thread `.../threads/:id/export` — different segment count, no routing ambiguity) validating `ExportDocumentSessionQuery` against the request query, calling `threadService.exportDocumentSession(documentId)`, setting `Content-Type: text/html; charset=utf-8`, and — when `?download=1` — `Content-Disposition: attachment` (mirroring `document.ts`'s own `GET .../export` convention), replying with the raw `html` string body (not a JSON DTO).
+- [X] T072 [P] [US4] In `app/frontend/src/transport/http-client.ts`, add `async exportDocumentSession(documentId: string, query: { download?: boolean } = {})` calling `GET /api/documents/${documentId}/threads/export`, parsing an error-envelope response the same way `request()`'s own `ErrorEnvelope` handling does (so `EMPTY_DOCUMENT_EXPORT` is distinguishable by the caller), and returning `response.text()` on success — following `exportDocument`'s own raw-text-response pattern, not the JSON-DTO `request()` helper every other method here uses.
+
+### Frontend
+
+- [X] T073 [US4] In `app/frontend/src/stores/thread.ts`, add an `async exportDocumentSession(): Promise<string>` action calling `httpClient.exportDocumentSession(activeDocumentId())` and returning the raw HTML text directly (ephemeral/on-demand, same convention as `exportThread` — no store-state mutation).
+- [X] T074 [US4] In `app/frontend/src/components/thread/ThreadModeView.vue`, add an "Export all" button to `.thread-mode-toolbar-actions` (alongside the existing bulk-toggle/"Done (N)" controls) that calls `store.exportDocumentSession()`, opens the result in a new browser tab via `Blob` + `URL.createObjectURL` + `window.open` (the SDK's HTML artifact is a standalone document with its own navigation JS, not meant to be embedded inline — contracts/thread-mode.md), and surfaces `EMPTY_DOCUMENT_EXPORT`/other `ApiError`s inline, same convention as `ThreadExportViewer.vue`'s own error handling. Deliberately minimal (a single toolbar button, no new modal/HUD styling) — a fuller HUD-styled trigger is separate follow-up work.
+
+### Tests
+
+- [X] T075 [P] [US4] In `app/backend/tests/contract/thread-mode.test.ts`, add a test that: creates a threaded document, sends a message in the root, branches, sends a message in the branch too, calls `GET .../threads/export`, and asserts `200`/`text/html` with a body containing both the root's and the branch's message text.
+- [X] T076 [P] [US4] In the same file, add a test asserting `GET .../threads/export` returns `409`/`EMPTY_DOCUMENT_EXPORT` for a freshly created threaded document with no messages in any thread.
+- [X] T077 [P] [US4] In the same file, add a test that calls `GET .../threads/export` and then sends a further message on the root thread afterward, asserting the send still succeeds and the new message appears in a subsequent `GET .../threads/:id/messages` — proving the whole-document export path does not corrupt any thread's own shared-session bookkeeping (mirroring T063's per-thread corruption-isolation pattern).
+- [X] T078 [US4] Manually verify: in a threaded-conversation document with a root and a branch, click "Export all" and confirm a new tab opens a self-contained HTML file containing both threads' content.
+
+**Checkpoint**: A reviewer can export either a single thread (Phase 7) or the whole document's shared session tree (this phase) as a genuine, native Pi export rendered in the browser — the two capabilities coexist without either affecting the other's behavior or tests.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -174,7 +237,8 @@
   - US1 has no dependency on US2/US3.
   - US2 depends on US1's `ThreadModeView`/`ThreadCard` scaffolding (T020-T021) existing to attach the highlight-branch UI to, and on US1's `sendOnThread` path (T010) for delivering seed messages — cannot be meaningfully tested standalone without a root thread to branch from.
   - US3 depends only on Foundational's `doneAt` column/`conversation_done_changed` event (Phase 2) and US1's `ThreadModeView` list to filter — does not require US2's branching to be implemented first (a document with only a root thread can still be marked done).
-- **Polish (Phase 6)**: Depends on all desired user stories being complete.
+  - US4 (Phase 7) depends only on Foundational's shared per-Thread `SessionManager`/`piSessionPath`/`piLeafEntryId` bookkeeping (Phase 2/US1's `PiService.prepareThreadSession`) and on a thread having message history — does not require US2's branching or US3's done state to be implemented first (exporting a plain, unbranched root thread is a complete, independent test of this story).
+- **Polish (Phase 6)**: Depends on all desired user stories being complete as of that phase; Phase 7 (US4) was added afterward and does not revisit it.
 
 ### Within Each User Story
 
@@ -217,4 +281,5 @@ Task: "Extend ConversationKind and add doneAt/seedExcerptText/documentType in ap
 2. Add User Story 1 → validate → demo (MVP).
 3. Add User Story 2 → validate → demo (highlight-to-branch, segments).
 4. Add User Story 3 → validate → demo (done/declutter).
-5. Each story adds value without breaking the previous ones — US2/US3 never modify US1's core send/list paths, only add to them.
+5. Add User Story 4 → validate → demo (genuine Pi-native export viewer).
+6. Each story adds value without breaking the previous ones — US2/US3/US4 never modify US1's core send/list paths, only add to them.

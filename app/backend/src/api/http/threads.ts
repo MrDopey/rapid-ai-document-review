@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   BranchThreadRequest,
+  ExportDocumentSessionQuery,
   SendMessageRequest,
   type ErrorCode,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -13,6 +14,8 @@ import {
 } from '../../conversation/conversation-service.ts';
 import {
   AnchorIsTipError,
+  EmptyDocumentExportError,
+  EmptyThreadExportError,
   InvalidHighlightError,
   PendingEditsBlockDoneError,
   type ThreadService,
@@ -60,6 +63,12 @@ function handleThreadError(
       code: 'PENDING_EDITS_BLOCK_DONE',
       details: { pendingEditIds: err.pendingEditIds },
     };
+  }
+  if (err instanceof EmptyThreadExportError) {
+    return { status: 409, code: 'EMPTY_THREAD_EXPORT' };
+  }
+  if (err instanceof EmptyDocumentExportError) {
+    return { status: 409, code: 'EMPTY_DOCUMENT_EXPORT' };
   }
   return null;
 }
@@ -116,6 +125,30 @@ export function registerThreadRoutes(
             (c) => c.kind === 'thread-root' || c.kind === 'thread-branch',
           ),
         });
+      });
+    },
+  );
+
+  // User Story 4/FR-013b (research.md R10): whole-document export — the entire shared Pi session
+  // tree (every Thread/branch together), not one Thread's own path. A distinct, non-colliding path
+  // from `.../threads/:id/export` below (different segment count — no routing ambiguity), returning
+  // raw HTML (not a JSON DTO), mirroring `document.ts`'s own `GET .../export` convention.
+  app.get<{ Params: { documentId: string } }>(
+    '/api/documents/:documentId/threads/export',
+    async (request, reply) => {
+      const data = parseOrFail(reply, ExportDocumentSessionQuery, request.query);
+      if (!data) return;
+      return withThreadErrors(reply, async () => {
+        requireDocumentType(storage, request.params.documentId, 'thread');
+        const result = await threadService.exportDocumentSession(request.params.documentId);
+        reply.header('Content-Type', 'text/html; charset=utf-8');
+        if (data.download) {
+          reply.header(
+            'Content-Disposition',
+            `attachment; filename="document-${result.documentId}-export.html"`,
+          );
+        }
+        return reply.send(result.html);
       });
     },
   );
@@ -183,6 +216,20 @@ export function registerThreadRoutes(
         requireDocumentType(storage, request.params.documentId, 'thread');
         requireThreadInDocument(storage, request.params.documentId, request.params.id);
         const result = threadService.reopen(request.params.id);
+        return reply.send(result);
+      });
+    },
+  );
+
+  // User Story 4/FR-013: a fresh, on-demand genuine Pi-native session export (research.md R9) —
+  // never persisted, so this is a plain read (GET), not an action route.
+  app.get<{ Params: { documentId: string; id: string } }>(
+    '/api/documents/:documentId/threads/:id/export',
+    async (request, reply) => {
+      return withThreadErrors(reply, async () => {
+        requireDocumentType(storage, request.params.documentId, 'thread');
+        requireThreadInDocument(storage, request.params.documentId, request.params.id);
+        const result = threadService.exportSession(request.params.id);
         return reply.send(result);
       });
     },
