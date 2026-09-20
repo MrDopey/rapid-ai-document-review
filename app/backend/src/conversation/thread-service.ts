@@ -15,7 +15,11 @@ import {
 } from './conversation-service.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { buildConversationMessages } from './message-log.ts';
-import { buildThreadBranchSeedMessage, deriveBranchName } from './seed-excerpt.ts';
+import {
+  buildThreadBranchSeedMessage,
+  deriveBranchName,
+  normalizeForHighlightMatch,
+} from './seed-excerpt.ts';
 
 export class InvalidHighlightError extends Error {}
 export class AnchorIsTipError extends Error {}
@@ -119,7 +123,14 @@ export class ThreadService {
       throw new InvalidHighlightError(`Message not found: ${request.anchorMessageId}`);
     }
     const anchorMessage = appMessages[anchorIndex]!;
-    if (!anchorMessage.text.includes(request.highlightedText)) {
+    // Compared post-Markdown-normalization, not as a raw substring check — a highlight is captured
+    // from the message bubble's *rendered* DOM (MessageBubble.vue), where Markdown syntax has
+    // already become real HTML elements. See `normalizeForHighlightMatch`'s doc comment.
+    if (
+      !normalizeForHighlightMatch(anchorMessage.text).includes(
+        normalizeForHighlightMatch(request.highlightedText),
+      )
+    ) {
       throw new InvalidHighlightError('Highlighted text was not found in the anchor message');
     }
     const tip = appMessages.at(-1);

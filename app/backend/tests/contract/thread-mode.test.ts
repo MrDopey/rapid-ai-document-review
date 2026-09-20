@@ -16,14 +16,6 @@ import type { PiService } from '../../src/pi/pi-service.js';
  * `RADR_BE_PI_FAKE_SESSIONS=1`).
  */
 
-const PROPOSE_EDIT_DIRECTIVE = '__PROPOSE_DOCUMENT_EDIT__';
-function proposeDirective(
-  summary: string,
-  operations: { old_string: string; new_string: string }[],
-): string {
-  return PROPOSE_EDIT_DIRECTIVE + JSON.stringify({ summary, operations });
-}
-
 interface Ctx {
   app: FastifyInstance;
   storage: StorageAdapter;
@@ -345,16 +337,29 @@ describe('User Story 3: marking a thread done declutters without deleting', () =
     const created = await createThreadDoc(ctx, '# Doc\n\nOriginal sentence to edit.');
     const rootId = created.mainConversation.id;
 
-    await sendOnThread(
-      ctx,
-      rootId,
-      proposeDirective('Tweak the sentence', [
-        { old_string: 'Original sentence to edit.', new_string: 'Edited sentence.' },
-      ]),
-    );
-    await waitFor(() =>
-      ctx.storage.listStagedEditsByConversation(rootId).some((e) => e.status === 'pending'),
-    );
+    // `propose_document_edit` is unavailable in a Thread (011-linear-thread-mode: a Thread has no
+    // document-offset context to edit — see `PiService.buildTools`), so a pending staged edit can
+    // no longer be produced via the live tool the way canvas-mode tests do. `markDone`'s guard
+    // (`getPendingStagedEditIds`, shared with `ConversationService.close()`) is otherwise identical
+    // regardless of how a staged edit came to exist, so this synthesizes one directly through
+    // storage to exercise that shared guard.
+    ctx.storage.createStagedEdit({
+      id: 'staged-thread-test',
+      documentId: ctx.documentId!,
+      conversationId: rootId,
+      piToolCallId: 'tool-call-thread-test',
+      sourceRevision: created.document.currentRevision,
+      summary: 'Tweak the sentence',
+      operations: [{ old_string: 'Original sentence to edit.', new_string: 'Edited sentence.' }],
+      status: 'pending',
+      autoApplied: false,
+      appliedRevision: null,
+      supersedesId: null,
+      conflictDetail: null,
+      replacementAttempt: 0,
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+    });
 
     const blockedRes = await call(
       ctx.app,

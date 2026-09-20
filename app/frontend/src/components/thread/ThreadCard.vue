@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useThreadSegments } from '../../composables/useThreadSegments.js';
 import { ApiError } from '../../transport/http-client.js';
@@ -29,6 +29,18 @@ onMounted(() => {
     void store.loadDetail(props.threadId);
   }
 });
+
+// Same shared, `localStorage`-backed expand/collapse wiring as canvas mode's own
+// `ConversationView.vue`/`ConversationThreadBox.vue` — see `stores/thread.ts`'s
+// `ensureMessageExpandedSeeded`/`setMessageExpanded` doc comments. Without this, `MessageBubble`
+// was rendered with a hardcoded `:expanded="true"` and no `@update:expanded` listener, so its
+// "Show more"/"Show less" toggle button rendered but every click emitted into the void.
+const expandedByMessage = computed(() => store.expandedByMessage[props.threadId] ?? {});
+watch(messages, () => store.ensureMessageExpandedSeeded(props.threadId), { immediate: true });
+
+function setMessageExpanded(messageId: string, expanded: boolean): void {
+  store.setMessageExpanded(props.threadId, messageId, expanded);
+}
 
 // Every OTHER Thread's fork anchor is what splits THIS Thread's own rendering into segments — see
 // `useThreadSegments.ts`'s own doc comment. Recomputed from the whole (reactive) `store.threads`
@@ -196,7 +208,8 @@ async function onReopen(): Promise<void> {
         <MessageBubble
           :message="message"
           :seed="isSeedMessage(segment.startIndex + offset)"
-          :expanded="true"
+          :expanded="expandedByMessage[message.id] ?? false"
+          @update:expanded="(value) => setMessageExpanded(message.id, value)"
         />
       </div>
 

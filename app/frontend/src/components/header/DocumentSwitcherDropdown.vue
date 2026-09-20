@@ -234,6 +234,12 @@ function onDelete(documentId: string, event: Event): void {
   max-width: min(24rem, 90vw);
   max-height: 60vh;
   overflow: auto;
+  /* `.dialog-box` (style.css) is tuned for a large, centered modal — its heavy
+     `0 10px 40px rgba(0, 0, 0, 0.3)` shadow reads as a dark, edgeless blob on a small anchored
+     dropdown like this one. A visible border plus a lighter, tighter shadow makes the panel's own
+     boundary obvious instead. */
+  border: 1px solid var(--border-color, #ccc);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 .document-switcher-row {
   display: flex;

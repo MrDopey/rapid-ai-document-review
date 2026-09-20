@@ -182,22 +182,31 @@ export class PiService {
    * for a too-deep conversation (FR-026's primary defense layer — see tools/propose-document-edit.ts
    * for the execution-time backstop). `web_search`/`web_fetch` are read-only and registered
    * unconditionally, regardless of branch/editing depth (Principle III N/A — neither can touch the
-   * document, specs/008-searxng-web-search). Shared by both the real SDK path and
+   * document, specs/008-searxng-web-search). 011-linear-thread-mode: a Thread has no document-offset
+   * context to read/edit (it never carries a `seedSelection`/document revision the way a canvas
+   * branch does) — `read_document` and `propose_document_edit` are both omitted for
+   * `thread-root`/`thread-branch` conversations. Shared by both the real SDK path and
    * `FakeAgentSession`, which invokes these same tool objects directly instead of a real model
    * deciding to call them. */
   private buildTools(conversation: ConversationRow): RegisteredToolLike[] {
+    const isThread = conversation.kind === 'thread-root' || conversation.kind === 'thread-branch';
+
     const tools: RegisteredToolLike[] = [
-      createReadDocumentTool({
-        storage: this.storage,
-        automerge: this.automerge,
-        conversationId: conversation.id,
-      }),
+      ...(isThread
+        ? []
+        : [
+            createReadDocumentTool({
+              storage: this.storage,
+              automerge: this.automerge,
+              conversationId: conversation.id,
+            }),
+          ]),
       createWebSearchTool({ searxngUrl: config.searxngUrl }),
       createWebFetchTool({}),
     ];
 
     const settings = this.storage.getSettings();
-    if (conversation.branchDepth <= settings.maxEditingDepth && this.editService) {
+    if (!isThread && conversation.branchDepth <= settings.maxEditingDepth && this.editService) {
       tools.push(
         createProposeDocumentEditTool({
           storage: this.storage,
@@ -500,8 +509,13 @@ export class PiService {
    * this walks the parent Thread's own path (`getBranch`) and matches by rendered text — the same
    * extraction `readClosedTranscript` already uses to read a closed conversation's transcript.
    * Falls back to the path entry at the same relative position when no exact text match exists
-   * (only possible for an assistant-authored anchor under fake sessions, where no real model ever
-   * generated that text) so a resolvable entry id is always returned.
+   * (e.g. an assistant-authored anchor under fake sessions, where no real model ever generated that
+   * text, or a tool-call-carrier anchor, whose app-level text is always empty) so a resolvable
+   * entry id is always returned. `role: 'toolResult'` entries are excluded from `pathEntries` (not
+   * just non-`'message'`-typed ones) — a tool round trip appends one of these per call with no
+   * counterpart `message_completed` row in `appMessages` (a completed tool call folds into its
+   * carrying message's own `toolCalls[]` instead), so counting them would drift the fallback's
+   * index alignment further out of sync with every tool call in the branch's history.
    */
   resolveThreadAnchorEntryId(
     parent: ConversationRow,
@@ -511,7 +525,11 @@ export class PiService {
     const { sessionManager } = this.prepareThreadSession(parent);
     const pathEntries = sessionManager
       .getBranch(parent.piLeafEntryId ?? undefined)
-      .filter((entry) => entry.type === 'message')
+      .filter((entry) => {
+        if (entry.type !== 'message') return false;
+        const role = (entry as { message?: { role?: unknown } }).message?.role;
+        return role === 'user' || role === 'assistant';
+      })
       .reverse();
 
     const anchorIndex = appMessages.findIndex((m) => m.id === anchorMessageId);

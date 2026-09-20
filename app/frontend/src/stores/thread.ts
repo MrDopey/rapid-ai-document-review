@@ -6,6 +6,7 @@ import type {
 import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
+import { loadMessageExpanded, persistMessageExpanded } from '../composables/messageDisplayState.js';
 import { useDocumentStore } from './document.js';
 import type { ConversationMessageState } from './conversations.js';
 import { ensureArray } from './util.js';
@@ -34,6 +35,12 @@ export interface ThreadsState {
   /** Mirrors `conversations.ts`'s `lastEventSequence`: the last persisted per-document WS
    *  `event.sequence` this store has observed, used for the same gap-detection/resync check. */
   lastEventSequence: number | null;
+  /** Per-message expand/collapse state, keyed by threadId then messageId — the same shared,
+   *  `localStorage`-backed pattern as `conversations.ts`'s own `expandedByMessage`. `ThreadCard.vue`
+   *  is the sole renderer of a Thread's messages, but it mounts recursively (once per branch), so
+   *  this still needs to live in the store rather than a local ref: a re-mount (e.g. after
+   *  `loadDetail`) must not forget a message the user already expanded. */
+  expandedByMessage: Record<string, Record<string, boolean>>;
   loaded: boolean;
 }
 
@@ -50,10 +57,61 @@ export const useThreadStore = defineStore('thread', {
     messagesByThread: {},
     refreshGeneration: {},
     lastEventSequence: null,
+    expandedByMessage: {},
     loaded: false,
   }),
 
   actions: {
+    /** Mirrors `conversations.ts`'s own `ensureMessageExpandedSeeded` — see that action's doc
+     *  comment for the full rationale. */
+    ensureMessageExpandedSeeded(threadId: string): void {
+      const forThread = (this.expandedByMessage[threadId] ??= {});
+      for (const message of this.messagesFor(threadId)) {
+        if (!(message.id in forThread)) {
+          forThread[message.id] = loadMessageExpanded(message.id, message.role === 'assistant');
+        }
+      }
+    },
+
+    /** Mirrors `conversations.ts`'s own `setMessageExpanded`. */
+    setMessageExpanded(threadId: string, messageId: string, expanded: boolean): void {
+      const forThread = (this.expandedByMessage[threadId] ??= {});
+      forThread[messageId] = expanded;
+      persistMessageExpanded({ [messageId]: expanded });
+    },
+
+    /** Mirrors `conversations.ts`'s own `setMessagesExpanded` — one `localStorage`
+     *  read-merge-write for every affected message, not one per message. */
+    setMessagesExpanded(threadId: string, entries: Record<string, boolean>): void {
+      const forThread = (this.expandedByMessage[threadId] ??= {});
+      Object.assign(forThread, entries);
+      persistMessageExpanded(entries);
+    },
+
+    /** Document-wide "Expand all"/"Collapse all" (`ThreadModeView.vue`'s toolbar) — unlike
+     *  canvas mode's `useBulkToggleAction`, which toggles one conversation at a time, a
+     *  threaded-conversation document has no single "current" Thread to scope this to: every
+     *  Thread currently mounted (every active Thread and branch — `ThreadCard.vue` mounts its
+     *  active children eagerly, so this covers the whole visible tree) toggles together. */
+    anyMessageCollapsed(): boolean {
+      for (const threadId of Object.keys(this.messagesByThread)) {
+        const forThread = this.expandedByMessage[threadId] ?? {};
+        if (this.messagesFor(threadId).some((m) => !forThread[m.id])) return true;
+      }
+      return false;
+    },
+
+    toggleAllMessages(): void {
+      const nextExpanded = this.anyMessageCollapsed();
+      for (const threadId of Object.keys(this.messagesByThread)) {
+        const entries: Record<string, boolean> = {};
+        for (const message of this.messagesFor(threadId)) {
+          entries[message.id] = nextExpanded;
+        }
+        this.setMessagesExpanded(threadId, entries);
+      }
+    },
+
     async load(): Promise<void> {
       const page = await httpClient.listThreads(activeDocumentId());
       this.threads = page.conversations;
@@ -65,7 +123,7 @@ export const useThreadStore = defineStore('thread', {
      *  left over from a document that is no longer the active one. */
     pruneStaleThreadState(): void {
       const liveIds = new Set(this.threads.map((t) => t.id));
-      for (const map of [this.messagesByThread, this.refreshGeneration]) {
+      for (const map of [this.messagesByThread, this.refreshGeneration, this.expandedByMessage]) {
         for (const id of Object.keys(map)) {
           if (!liveIds.has(id)) delete map[id];
         }

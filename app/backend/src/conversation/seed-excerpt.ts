@@ -280,6 +280,47 @@ export function buildThreadBranchSeedMessage(highlightedText: string): string {
   return [`<${tag}>`, '', highlightedText, '', `</${tag}>`].join('\n');
 }
 
+/**
+ * Strips the Markdown syntax `MessageBubble.vue`'s render pipeline converts into real HTML elements
+ * (bold/italic, headings, list markers, links, inline/fenced code, blockquotes) — none of which
+ * survives as literal characters in what a user can actually highlight in a rendered message
+ * bubble. `ThreadService.branchFromHighlight`'s FR-005a validation compares a browser selection
+ * against the *raw* stored message text; without this, any highlight spanning a Markdown-formatted
+ * boundary (overwhelmingly common in assistant replies, rare in user-typed messages) would fail a
+ * literal substring check even though the selection is entirely valid to a person reading the
+ * bubble.
+ */
+function stripMarkdownForHighlightMatch(text: string): string {
+  return text
+    .replace(/```[^\n]*\n?([\s\S]*?)```/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/(\*\*\*|___)([^*_]+)\1/g, '$2')
+    .replace(/(\*\*|__)([^*_]+)\1/g, '$2')
+    .replace(/(?<![*_\w])(\*|_)([^*_]+)\1(?![*_\w])/g, '$2')
+    .replace(/^>\s?/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '');
+}
+
+/** Collapses all whitespace runs (including newlines introduced by block-level HTML elements a
+ *  browser selection may traverse) to a single space, so a highlight spanning, e.g., a list item
+ *  boundary still matches its single-line Markdown source. */
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Normalizes stored (raw Markdown) message text into the form a browser selection of its *rendered*
+ * bubble would actually produce — see `stripMarkdownForHighlightMatch` above. `highlightedText`
+ * itself (already plain, rendered text) only needs the same whitespace normalization, not Markdown
+ * stripping.
+ */
+export function normalizeForHighlightMatch(text: string): string {
+  return normalizeWhitespace(stripMarkdownForHighlightMatch(text));
+}
+
 /** Generates a conversation name from the selection's first heading or leading words (FR-014). */
 export function deriveBranchName(seedExcerpt: string, selectionText: string): string {
   const headingLine = seedExcerpt.split('\n').find((l) => HEADING_RE.test(l.trim()));

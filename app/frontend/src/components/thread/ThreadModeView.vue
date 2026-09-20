@@ -35,23 +35,41 @@ const topLevelThreadIds = computed(() => {
 });
 
 const doneCount = computed(() => store.threads.filter((t) => t.doneAt !== null).length);
+
+/** Document-wide "Expand all"/"Collapse all" (`stores/thread.ts`'s own doc comment explains why
+ *  this is document-wide rather than per-Thread, unlike canvas mode's `useBulkToggleAction`). */
+const bulkToggleLabel = computed(() =>
+  store.anyMessageCollapsed() ? 'Expand all' : 'Collapse all',
+);
 </script>
 
 <template>
   <div class="thread-mode-view">
+    <!-- Sticky, same `EditorComponent.vue` `.editor-toolbar` pattern: `.thread-mode-view` below is
+         itself the scrolling ancestor (App.vue's `.thread-mode-body` gives it the remaining
+         viewport height), so this stays visible instead of scrolling away with a long thread. -->
     <div class="thread-mode-toolbar">
-      <span class="thread-mode-title">Threads</span>
-      <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
-        Done ({{ doneCount }})
-      </button>
+      <div class="thread-mode-toolbar-inner">
+        <span class="thread-mode-title">Threads</span>
+        <div class="thread-mode-toolbar-actions">
+          <button type="button" class="thread-mode-bulk-toggle" @click="store.toggleAllMessages()">
+            {{ bulkToggleLabel }}
+          </button>
+          <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
+            Done ({{ doneCount }})
+          </button>
+        </div>
+      </div>
     </div>
 
-    <p v-if="store.loaded && topLevelThreadIds.length === 0" class="thread-mode-empty">
-      No active threads.
-    </p>
+    <div class="thread-mode-content">
+      <p v-if="store.loaded && topLevelThreadIds.length === 0" class="thread-mode-empty">
+        No active threads.
+      </p>
 
-    <div class="thread-mode-list">
-      <ThreadCard v-for="id in topLevelThreadIds" :key="id" :thread-id="id" />
+      <div class="thread-mode-list">
+        <ThreadCard v-for="id in topLevelThreadIds" :key="id" :thread-id="id" />
+      </div>
     </div>
 
     <Transition name="modal">
@@ -66,21 +84,42 @@ const doneCount = computed(() => store.threads.filter((t) => t.doneAt !== null).
 .thread-mode-view {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
-  max-width: 900px;
-  margin: 0 auto;
-  width: 100%;
   overflow-y: auto;
 }
 .thread-mode-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky, 2);
+  background: var(--panel-bg, #f7f7f8);
+  border-bottom: 2px solid var(--border-color, #ddd);
+}
+.thread-mode-toolbar-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0.6rem 1rem;
+}
+.thread-mode-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .thread-mode-title {
   font-size: 1.1rem;
   font-weight: 600;
+}
+.thread-mode-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 1rem;
 }
 .thread-mode-empty {
   color: var(--neutral-muted-color, #4b5563);
