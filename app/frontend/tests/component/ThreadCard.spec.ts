@@ -679,3 +679,91 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     expect(branchNode.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
   });
 });
+
+// Regression test for the header containment bug (bug report: "the title and expand buttons render
+// outside the threaded conversation"): the Y-split redesign moved `.thread-card-header` out of the
+// single continuous `.thread-card` it used to be the first child of (needed so it stays sticky
+// across the WHOLE run-card chain, not just whichever run-card would otherwise contain it), but left
+// it a bare flex sibling of the run-card chain with no CSS relationship to it at all — so it read as
+// floating above the bordered box rather than as that box's own lid. The real visual fix is CSS
+// (`.thread-card-header`'s own border/padding, `.thread-run-chain > .thread-card:first-child`'s
+// squared-off top corners, and the `.thread-card-header + .thread-run-chain` zero-gap seam) — jsdom
+// doesn't compute layout, so what's actually checkable here is the STRUCTURAL precondition that CSS
+// depends on: every trunk box (the run-card chain, or the zero-message composer-only card) is now
+// grouped under one `.thread-run-chain` wrapper directly after the header, so `.thread-card-header +
+// .thread-run-chain` can match and `.thread-run-chain > .thread-card:first-child` unambiguously
+// identifies the one box the header is meant to sit flush against.
+describe('ThreadCard — header containment (bug fix)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string, activeThreadId: string | null = null) {
+    return mount(ThreadCard, {
+      props: { threadId, activeThreadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('wraps every run-card in one `.thread-run-chain` immediately after the header, so the header can sit flush against the first one', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+    const wrapper = mountCard('root-1');
+    const trunk = wrapper.find('.thread-trunk');
+    const header = trunk.find('.thread-card-header');
+    const runChain = trunk.find('.thread-run-chain');
+
+    expect(header.exists()).toBe(true);
+    expect(runChain.exists()).toBe(true);
+    // The header is immediately followed by the run-chain in the trunk's own DOM order — the exact
+    // adjacency `.thread-card-header + .thread-run-chain`'s CSS zero-gap rule depends on.
+    expect(trunk.element.children[0]).toBe(header.element);
+    expect(trunk.element.children[1]).toBe(runChain.element);
+    // Both of this thread's own run-cards (the fork anchor's, and its continuation's) live INSIDE
+    // the run-chain wrapper, not as bare trunk children beside the header.
+    expect(runChain.findAll('.thread-card').length).toBe(2);
+    expect(trunk.element.querySelectorAll(':scope > .thread-card').length).toBe(0);
+  });
+
+  it('a zero-message thread (composer-only card) still wraps that card in `.thread-run-chain`', () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', kind: 'thread-root' })];
+    store.messagesByThread['root-1'] = [];
+
+    const wrapper = mountCard('root-1');
+    const runChain = wrapper.find('.thread-trunk').find('.thread-run-chain');
+
+    expect(runChain.findAll('.thread-card').length).toBe(1);
+  });
+
+  it('marks the header active in lockstep with its own run-card, so the HUD cursor ring wraps the whole unified box', () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', kind: 'thread-root' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const activeWrapper = mountCard('root-1', 'root-1');
+    expect(activeWrapper.find('.thread-card-header').classes()).toContain(
+      'thread-card-header--active',
+    );
+
+    const inactiveWrapper = mountCard('root-1', 'some-other-thread');
+    expect(inactiveWrapper.find('.thread-card-header').classes()).not.toContain(
+      'thread-card-header--active',
+    );
+  });
+});

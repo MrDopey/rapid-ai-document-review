@@ -541,7 +541,26 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="thread" class="thread-node">
     <div ref="trunkRef" class="thread-trunk">
-      <header class="thread-card-header">
+      <!-- Header containment fix: the Y-split redesign (`fa163d9`) pulled this header out of the
+           single continuous `.thread-card` it used to be the first child of — needed so it can stay
+           sticky across the WHOLE trunk (every run-card, not just the first) rather than scrolling
+           away with whichever run-card happened to contain it — but left it a bare, unbordered flex
+           sibling of `.thread-run-chain` below, floating disconnected above the box chain instead of
+           reading as part of it (bug report: "the title and expand buttons render outside the
+           threaded conversation"). Fixed by giving the header its own top-rounded, bottom-borderless
+           border (`.thread-card-header`'s own CSS, below) and flushing it directly against
+           `.thread-run-chain`'s first box (`.thread-run-chain`'s own CSS zeroes exactly that one
+           seam) — together they read as one continuous bordered box again, header lid included, with
+           no change to the sticky scope that motivated pulling it out in the first place. This also
+           fixes a second symptom of the same regression: a branch's own connector arrow targets the
+           TOP of its nested `ThreadCard` (`.thread-branch-fork`'s `top: 0`), which — while the header
+           floated above the box, unbordered — was the header's own top, landing the arrowhead in the
+           middle of the title text instead of on a box edge; reattaching the header as this box's lid
+           makes that same top edge a real bordered corner again. -->
+      <header
+        class="thread-card-header"
+        :class="{ 'thread-card-header--active': threadId === activeThreadId }"
+      >
         <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
         <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
         <span class="thread-card-actions">
@@ -550,77 +569,87 @@ onBeforeUnmount(() => {
       </header>
       <span v-if="doneError" class="thread-error" role="alert">{{ doneError }}</span>
 
-      <!-- `useThreadSegments` returns no segments at all for a Thread with zero messages yet (a
-           freshly created root — thread-branches always get an auto-seeded first message) —
-           without this, a brand-new Thread could never render a composer to send its own first
-           message. -->
-      <article
-        v-if="messages.length === 0"
-        class="thread-card"
-        :class="{ 'thread-card--active': threadId === activeThreadId }"
-        :style="cardStyle"
-        :data-thread-id="threadId"
-        :data-thread-kind="thread.kind"
-      >
-        <ThreadComposer
-          ref="composerRef"
-          :thread-id="threadId"
-          :disabled="thread.doneAt !== null"
-        />
-      </article>
-
-      <!-- Y-split fork redesign (see `runs`' own doc comment, script above): every run gets its own
-           bordered box, so a fork visually disconnects the trunk here rather than continuing through
-           it unbroken — a `.thread-fork-connector` marks that break, dropping straight down into
-           this run's own continuation (the next run below), exactly the same shape a branch's own
-           connector already fans out sideways with (see `.thread-branches` below). -->
-      <template
-        v-for="(run, ri) in runs"
-        :key="`run-${run[0]!.startIndex}-${run[run.length - 1]!.endIndex}`"
-      >
+      <!-- Groups every bordered box this Thread's own trunk renders (the zero-message composer-only
+           card, or the run-card chain below) so exactly one of them — always the first — can be
+           singled out (`.thread-run-chain > .thread-card:first-child`, CSS below) to square off its
+           own top corners and sit flush against the header immediately above, forming one visual box
+           together with it. See the header's own doc comment above for the bug this fixes. -->
+      <div class="thread-run-chain">
+        <!-- `useThreadSegments` returns no segments at all for a Thread with zero messages yet (a
+             freshly created root — thread-branches always get an auto-seeded first message) —
+             without this, a brand-new Thread could never render a composer to send its own first
+             message. -->
         <article
-          :ref="(el) => setRunCardEl(run, el as Element | null)"
+          v-if="messages.length === 0"
           class="thread-card"
           :class="{ 'thread-card--active': threadId === activeThreadId }"
           :style="cardStyle"
           :data-thread-id="threadId"
           :data-thread-kind="thread.kind"
         >
-          <div
-            v-for="segment in run"
-            :key="`${segment.startIndex}-${segment.endIndex}`"
-            class="thread-segment"
-            :class="{ 'is-tip-segment': segment.isTipSegment }"
-          >
-            <div
-              v-for="(message, offset) in messages.slice(segment.startIndex, segment.endIndex + 1)"
-              :key="message.id"
-              class="thread-segment-message"
-              @mouseup="onMessageMouseUp(message.id)"
-            >
-              <MessageBubble
-                :message="message"
-                :seed="isSeedMessage(segment.startIndex + offset)"
-                :expanded="expandedByMessage[message.id] ?? false"
-                @update:expanded="(value) => setMessageExpanded(message.id, value)"
-              />
-            </div>
-
-            <ThreadComposer
-              v-if="segment.isTipSegment"
-              ref="composerRef"
-              :thread-id="threadId"
-              :disabled="thread.doneAt !== null"
-            />
-          </div>
+          <ThreadComposer
+            ref="composerRef"
+            :thread-id="threadId"
+            :disabled="thread.doneAt !== null"
+          />
         </article>
 
-        <div
-          v-if="ri < runs.length - 1"
-          class="thread-fork-connector is-terminal"
-          aria-hidden="true"
-        ></div>
-      </template>
+        <!-- Y-split fork redesign (see `runs`' own doc comment, script above): every run gets its own
+             bordered box, so a fork visually disconnects the trunk here rather than continuing through
+             it unbroken — a `.thread-fork-connector` marks that break, dropping straight down into
+             this run's own continuation (the next run below), exactly the same shape a branch's own
+             connector already fans out sideways with (see `.thread-branches` below). -->
+        <template
+          v-for="(run, ri) in runs"
+          :key="`run-${run[0]!.startIndex}-${run[run.length - 1]!.endIndex}`"
+        >
+          <article
+            :ref="(el) => setRunCardEl(run, el as Element | null)"
+            class="thread-card"
+            :class="{ 'thread-card--active': threadId === activeThreadId }"
+            :style="cardStyle"
+            :data-thread-id="threadId"
+            :data-thread-kind="thread.kind"
+          >
+            <div
+              v-for="segment in run"
+              :key="`${segment.startIndex}-${segment.endIndex}`"
+              class="thread-segment"
+              :class="{ 'is-tip-segment': segment.isTipSegment }"
+            >
+              <div
+                v-for="(message, offset) in messages.slice(
+                  segment.startIndex,
+                  segment.endIndex + 1,
+                )"
+                :key="message.id"
+                class="thread-segment-message"
+                @mouseup="onMessageMouseUp(message.id)"
+              >
+                <MessageBubble
+                  :message="message"
+                  :seed="isSeedMessage(segment.startIndex + offset)"
+                  :expanded="expandedByMessage[message.id] ?? false"
+                  @update:expanded="(value) => setMessageExpanded(message.id, value)"
+                />
+              </div>
+
+              <ThreadComposer
+                v-if="segment.isTipSegment"
+                ref="composerRef"
+                :thread-id="threadId"
+                :disabled="thread.doneAt !== null"
+              />
+            </div>
+          </article>
+
+          <div
+            v-if="ri < runs.length - 1"
+            class="thread-fork-connector is-terminal"
+            aria-hidden="true"
+          ></div>
+        </template>
+      </div>
 
       <span v-if="branchError" class="thread-error" role="alert">{{ branchError }}</span>
     </div>
@@ -695,6 +724,30 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   min-width: 0;
 }
+/* Groups the trunk's own bordered boxes (the run-card chain, or the zero-message composer-only
+   card) so the header immediately above (template) can flush directly against the first one — see
+   the header's own doc comment for the containment regression this, together with
+   `.thread-card-header + .thread-run-chain` below, fixes. Its own internal `gap` is the same 0.4rem
+   `.thread-trunk` already used for card-to-card/connector spacing before this wrapper existed. */
+.thread-run-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+/* Cancels `.thread-trunk`'s own `gap` for just the header-to-first-box seam — the adjacent-sibling
+   combinator only matches when the header is directly followed by the run-chain in the DOM, so an
+   optional `doneError` banner (a `.thread-error` span) sitting between them, when present, still
+   gets its own normal gap on both sides instead of being squeezed flush against the header too. */
+.thread-card-header + .thread-run-chain {
+  margin-top: -0.4rem;
+}
+/* The run-chain's own first box is the one the header sits directly on top of (previous rule) — its
+   top corners square off to meet the header's own rounded-top border exactly, rather than each
+   drawing its own independent rounded corner where they touch. Every other run-card down the chain
+   (a later fork's continuation) is a fully independent box, full rounding intact. */
+.thread-run-chain > .thread-card:first-child {
+  border-radius: 0 0 8px 8px;
+}
 .thread-card {
   display: flex;
   flex-direction: column;
@@ -737,13 +790,30 @@ onBeforeUnmount(() => {
      independent sticky header this way — as one scrolls past a shorter card, the next card's own
      header takes over the sticky slot, the same "stacking sticky headers" behavior a plain vertical
      list of `ConversationThreadBox`es already exhibits, which continues to hold with this layout's
-     branches sitting beside their trunk (a row of siblings) rather than only stacked below it. */
+     branches sitting beside their trunk (a row of siblings) rather than only stacked below it.
+     Bordered, rounded on top only, with no bottom border (`.thread-run-chain > .thread-card:first-
+     child`'s own squared-off top corners are this rule's exact counterpart) — together the two read
+     as one continuous box, header lid included, rather than the header floating disconnected above
+     it (bug report: "the title and expand buttons render outside the threaded conversation").
+     Horizontal padding now matches `.thread-card`'s own 0.75rem so the title lines up with message
+     content below it instead of touching this new border with no inset of its own. */
   margin: 0;
-  padding: 0.15rem 0;
+  padding: 0.15rem 0.75rem;
+  border: 1px solid var(--border-color, #ccc);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
   position: sticky;
   top: 0;
   z-index: var(--z-raised, 1);
   background: var(--panel-bg, #f7f7f8);
+}
+/* This header's own equivalent of `.thread-card.thread-card--active` (same tokens, same ring
+   treatment) — now that it visually reads as this box's own lid rather than a disconnected label
+   above it, leaving it unhighlighted while the box below carries the HUD cursor ring would make that
+   ring look like it started partway down a single box instead of wrapping the whole thing. */
+.thread-card-header.thread-card-header--active {
+  border-color: var(--accent-color, #2563eb);
+  box-shadow: 0 0 0 2px var(--accent-color, #2563eb);
 }
 .thread-card-title {
   font-weight: 600;
