@@ -18,21 +18,28 @@ import HighlightBranchMenu from './HighlightBranchMenu.vue';
  * component. Only the final segment of a Thread (`isTipSegment`) ever mounts `ThreadComposer`
  * (FR-005c); every earlier segment offers only highlight-to-branch (`HighlightBranchMenu`).
  *
- * Layout (root template element is `.thread-node`, a flex ROW, not the bordered box itself): a
- * branch is a tree SIBLING of the segment it forked from, never a box nested inside its parent's
- * own border — so this thread's own bordered box (`.thread-card`, holding just this Thread's own
- * header + segments) and its branch children (`.thread-branches`, one column further right, one
- * `.thread-branch-group` per segment that has any, each holding one `.thread-branch-fork` — and so
- * one recursively-nested `.thread-node` — per active child) are flex-row SIBLINGS of each other,
- * connected by a `.thread-branch-fork::before`/`::after` line+arrowhead rather than one being
- * nested inside the other's padding. Recursion still grows the DOM to the right (a branch's own
- * branches render inside ITS `.thread-branches`, one more flex row deep), it just no longer grows
- * the visual border nesting.
+ * Layout (root template element is `.thread-node`, a flex ROW, not a bordered box itself): a Y-split
+ * fork design — a branch is a tree SIBLING of the run it forked from, and so is that run's own
+ * CONTINUATION (drawn as if symmetric with a real branch, even though it's the same conversation),
+ * never one nested inside the other's border. This Thread's own trunk column (`.thread-trunk`, this
+ * Thread's sticky header plus a top-to-bottom chain of bordered `.thread-card` "run" boxes — see
+ * `runs`' own doc comment below for exactly where a run starts/ends) sits beside its branch children
+ * (`.thread-branches`, one column further right, one `.thread-branch-group` per run that forks, each
+ * holding one `.thread-branch-fork` — and so one recursively-nested `.thread-node` — per active
+ * child) as flex-row SIBLINGS. Every fork point (a run with 1+ active children) draws N diverging
+ * lines from that run's own bottom edge: one straight down (`.thread-fork-connector`) into this
+ * run's own continuation, if any messages follow, plus one per active branch
+ * (`.thread-branch-fork::before`/`::after`, chained by `.thread-branch-spine` when 2+ branches share
+ * one fork point) fanning out sideways — rather than either being nested inside the other's padding,
+ * and rather than the trunk silently continuing through the fork unbroken the way it used to.
+ * Recursion still grows the DOM to the right (a branch's own branches render inside ITS
+ * `.thread-branches`, one more flex row deep, getting this exact same Y-split treatment at
+ * depth + 1), it just no longer grows the visual border nesting.
  *
- * Because `.thread-card` and `.thread-branches` are two independently-stacking flex columns, this
- * component also has to keep a `.thread-branch-group` visually level with the `.thread-segment` it
- * forked from itself — see `syncBranchAlignment` below (bug fix: the connector used to only look
- * aligned by coincidence).
+ * Because `.thread-trunk` and `.thread-branches` are two independently-stacking flex columns, this
+ * component also has to keep a `.thread-branch-group` visually level with the run-card it forked
+ * from itself — see `syncBranchAlignment` below (bug fix: the connector used to only look aligned by
+ * coincidence).
  */
 const props = withDefaults(
   defineProps<{
@@ -98,6 +105,32 @@ function activeChildIds(childBranchIds: readonly string[]): string[] {
 const branchSegments = computed(() =>
   segments.value.filter((s) => activeChildIds(s.childBranchIds).length > 0),
 );
+
+/** Y-split fork redesign: the trunk visually disconnects at every point it has an active branch,
+ *  rather than rendering as one continuous box the whole branch column merely sits beside (the
+ *  earlier design this replaces — see the doc comment above `syncBranchAlignment` for the bug that
+ *  motivated it). A "run" is a maximal consecutive slice of `segments` ending either at the first
+ *  segment with an active child (a fork point) or at the thread's actual tip segment, whichever
+ *  comes first — each run renders as its own bordered `.thread-card` box in the template below, so
+ *  a fork produces sibling boxes (this run's own continuation, the next run in this array, plus
+ *  every active branch off it) instead of the trunk simply continuing through unbroken. No changes
+ *  needed to `useThreadSegments.ts` itself for this: a segment whose only child(ren) are done never
+ *  ends a run early (this reuses the exact same `activeChildIds` filter as `branchSegments` above),
+ *  so a done branch keeps reading as an ordinary mid-run dashed segment break, not a fork — and a
+ *  run can legitimately contain more than one `ThreadSegment` when an intermediate segment's only
+ *  child was later marked done. */
+const runs = computed<ThreadSegment[][]>(() => {
+  const result: ThreadSegment[][] = [];
+  let current: ThreadSegment[] = [];
+  for (const segment of segments.value) {
+    current.push(segment);
+    if (activeChildIds(segment.childBranchIds).length > 0 || segment.isTipSegment) {
+      result.push(current);
+      current = [];
+    }
+  }
+  return result;
+});
 
 const tipMessageId = computed(() => messages.value.at(-1)?.id ?? null);
 
@@ -312,32 +345,30 @@ const cardStyle = computed(() => ({
 }));
 
 // ---------------------------------------------------------------------------------------------
-// Connector alignment (bug fix): `.thread-card` (the trunk — one continuous flex column of every
-// segment) and `.thread-branches` (a wholly SEPARATE flex column, sibling to it — see this file's
-// top doc comment) have no CSS relationship tying a `.thread-branch-group`'s vertical position to
-// the `.thread-segment` it forked from. Each column simply stacks its own children from the top,
+// Connector alignment (bug fix, then Y-split redesign): `.thread-trunk` (the run-card chain below —
+// see `runs` above) and `.thread-branches` (a wholly SEPARATE flex column, sibling to it — see this
+// file's top doc comment) have no CSS relationship tying a `.thread-branch-group`'s vertical
+// position to the run-card it forked from. Each column simply stacks its own children from the top,
 // so a group's natural position depends only on the height of the branch groups *above it in that
-// same column* — never on the (unrelated) height of the trunk segments above the segment it
-// actually points at. The two columns' stacking only ever agreed by coincidence (e.g. every earlier
-// segment/group happening to be about the same height). `86dacd1` gave a toggled message's own
-// height change a `transition`, correctly reasoning that `.thread-branch-fork`'s `top`/`left` offsets
-// are fixed relative to its OWN box so ordinary reflow repositions the connector "for free" — but
-// that box's *position within the branches column* was never actually tied to the trunk segment's
-// position in the first place, so there was nothing correct for that reflow to reveal: expanding
-// ANY earlier trunk message changes a segment's height without changing any branch group's height,
-// which was already enough to desync the two columns even before `86dacd1`.
+// same column* — never on the (unrelated) height of the run-cards above the one it actually points
+// at. The two columns' stacking only ever agreed by coincidence (e.g. every earlier segment/group
+// happening to be about the same height).
 //
 // Fixed the same way `DocumentCanvas.vue`'s own `computeConversationLayout` already solves the
 // analogous canvas-mode problem (siblings stacking near a target position without overlapping) —
-// measure the real boxes and nudge into place — rather than reaching for CSS Grid `subgrid` (which
-// could express this declaratively but would require reshaping `.thread-card`'s single bordered box
-// spanning one continuous column into one grid cell per segment purely to satisfy this constraint,
-// and isn't yet used anywhere else in this codebase). This is the flow-layout equivalent: a
-// `margin-top` nudge on the group in place of an absolute `top`.
+// measure the real boxes and nudge into place — rather than reaching for CSS Grid `subgrid`. This is
+// the flow-layout equivalent: a `margin-top` nudge on the group in place of an absolute `top`.
+//
+// Originally (before the Y-split redesign) this measured a `.thread-segment` div's own bottom edge,
+// since every segment shared one continuous `.thread-card` box and only the specific forking
+// segment's edge (not the whole card's) was the real target. Now every forking segment gets its OWN
+// dedicated run-card (see `runs`/template below), so that run-card's own bottom border edge — the
+// real, visible edge a branch's connector should touch — IS the target directly; `runCardEls` below
+// tracks that element per forking segment instead of the segment `<div>` itself.
 // ---------------------------------------------------------------------------------------------
-const threadCardRef = ref<HTMLElement | null>(null);
+const trunkRef = ref<HTMLElement | null>(null);
 const branchesRef = ref<HTMLElement | null>(null);
-const segmentEls = new Map<string, HTMLElement>();
+const runCardEls = new Map<string, HTMLElement>();
 const branchGroupEls = new Map<string, HTMLElement>();
 // The nudge (in px) this component itself last applied to each group's `margin-top`, keyed the same
 // way as `branchGroupEls` — see `syncBranchAlignment`'s own doc comment for why this is tracked here
@@ -369,10 +400,17 @@ function scheduleAlignSync(): void {
   });
 }
 
-function setSegmentEl(segment: ThreadSegment, el: Element | null): void {
-  const key = segmentKey(segment);
-  if (el) segmentEls.set(key, el as HTMLElement);
-  else segmentEls.delete(key);
+/** Keyed by the run's own LAST segment (the only one that can be a fork point — see `runs`'
+ *  doc comment) so lookups in `syncBranchAlignment` share the exact same key `branchGroupEls`/
+ *  `branchSegments` already use. Called once per rendered run-card, regardless of whether that run
+ *  actually forks — harmless for a non-forking run (its entry is simply never read, since
+ *  `syncBranchAlignment` only ever iterates `branchSegments`). */
+function setRunCardEl(run: ThreadSegment[], el: Element | null): void {
+  const last = run[run.length - 1];
+  if (!last) return;
+  const key = segmentKey(last);
+  if (el) runCardEls.set(key, el as HTMLElement);
+  else runCardEls.delete(key);
   scheduleAlignSync();
 }
 
@@ -428,19 +466,19 @@ function setBranchGroupEl(segment: ThreadSegment, el: Element | null): void {
 // re-fire), which is what actually breaks the loop: a genuine change still nudges and transitions
 // smoothly exactly once, then reliably converges and goes quiet.
 function syncBranchAlignment(): void {
-  const cardEl = threadCardRef.value;
-  if (!cardEl || branchSegments.value.length === 0) return;
-  const cardTop = cardEl.getBoundingClientRect().top;
+  const trunkEl = trunkRef.value;
+  if (!trunkEl || branchSegments.value.length === 0) return;
+  const trunkTop = trunkEl.getBoundingClientRect().top;
 
   for (const segment of branchSegments.value) {
     const key = segmentKey(segment);
     const groupEl = branchGroupEls.get(key);
-    const segEl = segmentEls.get(key);
-    if (!groupEl || !segEl) continue;
+    const runCardEl = runCardEls.get(key);
+    if (!groupEl || !runCardEl) continue;
 
     const currentMargin = appliedMargins.get(key) ?? 0;
-    const naturalTop = groupEl.getBoundingClientRect().top - cardTop - currentMargin;
-    const targetTop = segEl.getBoundingClientRect().bottom - cardTop;
+    const naturalTop = groupEl.getBoundingClientRect().top - trunkTop - currentMargin;
+    const targetTop = runCardEl.getBoundingClientRect().bottom - trunkTop;
     const delta = Math.max(0, targetTop - naturalTop);
 
     // Sub-pixel-tolerant no-op guard: without this, two passes over an otherwise-unchanged layout
@@ -465,22 +503,22 @@ watch([branchSegments, expandedByMessage], () => void nextTick(scheduleAlignSync
 // Catches everything the watcher above can't: text reflow from a viewport/column-width change, a
 // deeply-nested descendant's own async content growth, fonts loading, etc. — anything that changes
 // a segment's or a branch group's real rendered height without this Thread's own reactive state
-// changing. Two targets, not one per segment/group: `cardEl`'s own border-box height already changes
-// whenever any segment inside it does (segments stack in one continuous column), and likewise for
-// `branchesEl` and its branch groups — one observer per column captures every interior resize that
-// matters here without the bookkeeping of one observer per segment/group.
+// changing. Two targets, not one per segment/group: `trunkEl`'s own border-box height already
+// changes whenever any run-card inside it does, and likewise for `branchesEl` and its branch groups
+// — one observer per column captures every interior resize that matters here without the
+// bookkeeping of one observer per segment/group.
 let resizeObserver: ResizeObserver | null = null;
 function ensureResizeObserver(): ResizeObserver | null {
   if (typeof ResizeObserver === 'undefined') return null;
   if (!resizeObserver) resizeObserver = new ResizeObserver(() => scheduleAlignSync());
   return resizeObserver;
 }
-// `branchesRef` (unlike `threadCardRef`) only exists while `branchSegments.length > 0` (the
+// `branchesRef` (unlike `trunkRef`) only exists while `branchSegments.length > 0` (the
 // `v-if` above `.thread-branches`) — so its element can appear/disappear well after this component
 // already mounted (the first branch off a previously-childless segment, or the last one going
 // `doneAt`), not just once at mount time, hence a `watch` on each ref rather than a one-time
 // `observe` call in `onMounted`.
-watch(threadCardRef, (el, prev) => {
+watch(trunkRef, (el, prev) => {
   const ro = ensureResizeObserver();
   if (!ro) return;
   if (prev) ro.unobserve(prev);
@@ -502,14 +540,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="thread" class="thread-node">
-    <article
-      ref="threadCardRef"
-      class="thread-card"
-      :class="{ 'thread-card--active': threadId === activeThreadId }"
-      :style="cardStyle"
-      :data-thread-id="threadId"
-      :data-thread-kind="thread.kind"
-    >
+    <div ref="trunkRef" class="thread-trunk">
       <header class="thread-card-header">
         <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
         <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
@@ -523,47 +554,79 @@ onBeforeUnmount(() => {
            freshly created root — thread-branches always get an auto-seeded first message) —
            without this, a brand-new Thread could never render a composer to send its own first
            message. -->
-      <ThreadComposer
+      <article
         v-if="messages.length === 0"
-        ref="composerRef"
-        :thread-id="threadId"
-        :disabled="thread.doneAt !== null"
-      />
-
-      <div
-        v-for="segment in segments"
-        :key="`${segment.startIndex}-${segment.endIndex}`"
-        :ref="(el) => setSegmentEl(segment, el as Element | null)"
-        class="thread-segment"
-        :class="{ 'is-tip-segment': segment.isTipSegment }"
+        class="thread-card"
+        :class="{ 'thread-card--active': threadId === activeThreadId }"
+        :style="cardStyle"
+        :data-thread-id="threadId"
+        :data-thread-kind="thread.kind"
       >
-        <div
-          v-for="(message, offset) in messages.slice(segment.startIndex, segment.endIndex + 1)"
-          :key="message.id"
-          class="thread-segment-message"
-          @mouseup="onMessageMouseUp(message.id)"
-        >
-          <MessageBubble
-            :message="message"
-            :seed="isSeedMessage(segment.startIndex + offset)"
-            :expanded="expandedByMessage[message.id] ?? false"
-            @update:expanded="(value) => setMessageExpanded(message.id, value)"
-          />
-        </div>
-
         <ThreadComposer
-          v-if="segment.isTipSegment"
           ref="composerRef"
           :thread-id="threadId"
           :disabled="thread.doneAt !== null"
         />
-      </div>
+      </article>
+
+      <!-- Y-split fork redesign (see `runs`' own doc comment, script above): every run gets its own
+           bordered box, so a fork visually disconnects the trunk here rather than continuing through
+           it unbroken — a `.thread-fork-connector` marks that break, dropping straight down into
+           this run's own continuation (the next run below), exactly the same shape a branch's own
+           connector already fans out sideways with (see `.thread-branches` below). -->
+      <template
+        v-for="(run, ri) in runs"
+        :key="`run-${run[0]!.startIndex}-${run[run.length - 1]!.endIndex}`"
+      >
+        <article
+          :ref="(el) => setRunCardEl(run, el as Element | null)"
+          class="thread-card"
+          :class="{ 'thread-card--active': threadId === activeThreadId }"
+          :style="cardStyle"
+          :data-thread-id="threadId"
+          :data-thread-kind="thread.kind"
+        >
+          <div
+            v-for="segment in run"
+            :key="`${segment.startIndex}-${segment.endIndex}`"
+            class="thread-segment"
+            :class="{ 'is-tip-segment': segment.isTipSegment }"
+          >
+            <div
+              v-for="(message, offset) in messages.slice(segment.startIndex, segment.endIndex + 1)"
+              :key="message.id"
+              class="thread-segment-message"
+              @mouseup="onMessageMouseUp(message.id)"
+            >
+              <MessageBubble
+                :message="message"
+                :seed="isSeedMessage(segment.startIndex + offset)"
+                :expanded="expandedByMessage[message.id] ?? false"
+                @update:expanded="(value) => setMessageExpanded(message.id, value)"
+              />
+            </div>
+
+            <ThreadComposer
+              v-if="segment.isTipSegment"
+              ref="composerRef"
+              :thread-id="threadId"
+              :disabled="thread.doneAt !== null"
+            />
+          </div>
+        </article>
+
+        <div
+          v-if="ri < runs.length - 1"
+          class="thread-fork-connector is-terminal"
+          aria-hidden="true"
+        ></div>
+      </template>
 
       <span v-if="branchError" class="thread-error" role="alert">{{ branchError }}</span>
-    </article>
+    </div>
 
-    <!-- Branches render as their own sibling column, connected by a line to the segment they
-         forked from — never nested inside `.thread-card`'s own border. See the layout doc comment
+    <!-- Branches render as their own sibling column, connected by a line to the run-card they
+         forked from — never nested inside a `.thread-card`'s own border. See the layout doc comment
          at the top of this file. -->
     <div v-if="branchSegments.length > 0" ref="branchesRef" class="thread-branches">
       <div
@@ -572,13 +635,21 @@ onBeforeUnmount(() => {
         :ref="(el) => setBranchGroupEl(segment, el as Element | null)"
         class="thread-branch-group"
       >
-        <div
-          v-for="childId in activeChildIds(segment.childBranchIds)"
-          :key="childId"
-          class="thread-branch-fork"
-        >
-          <ThreadCard :thread-id="childId" :depth="depth + 1" :active-thread-id="activeThreadId" />
-        </div>
+        <template v-for="(childId, ci) in activeChildIds(segment.childBranchIds)" :key="childId">
+          <!-- Two or more active branches off the exact same segment (an N-way fork, N > 2):
+               a spine link between each pair of stacked sibling forks so the whole stack still
+               reads as diverging from one shared point (this group's own top, aligned to the
+               fork run-card's bottom edge above) rather than each sibling past the first floating
+               a disconnected line from nothing. -->
+          <div v-if="ci > 0" class="thread-branch-spine" aria-hidden="true"></div>
+          <div class="thread-branch-fork">
+            <ThreadCard
+              :thread-id="childId"
+              :depth="depth + 1"
+              :active-thread-id="activeThreadId"
+            />
+          </div>
+        </template>
       </div>
     </div>
 
@@ -598,19 +669,31 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* The recursive unit: a flex ROW pairing this Thread's own bordered box (`.thread-card`, the
-   "trunk") with a further-right column of its branch children (`.thread-branches`), as tree
-   siblings rather than one nested inside the other's border — see this file's top-of-script doc
-   comment. `align-items: flex-start` (not the flex default `stretch`) is load-bearing: it lets
-   `.thread-node` size itself to its own content's natural width (trunk width, plus branch width
-   only when branches exist) instead of stretching to fill whatever width its own parent flex
-   column (`ThreadModeView.vue`'s `.thread-mode-list`, or a shallower `.thread-branches`) happens to
-   have — which is what lets a deep/wide tree grow rightward past that ancestor's own box and get
-   picked up by `.thread-mode-list`'s `overflow-x: auto` instead of stretching every ancestor's
-   assigned width to match. */
+/* The recursive unit: a flex ROW pairing this Thread's own trunk column (`.thread-trunk` — this
+   Thread's sticky header plus a chain of one or more bordered `.thread-card` run-boxes, split at
+   every fork point; see `runs`' doc comment in the script) with a further-right column of its
+   branch children (`.thread-branches`), as tree siblings rather than one nested inside the other's
+   border — see this file's top-of-script doc comment. `align-items: flex-start` (not the flex
+   default `stretch`) is load-bearing: it lets `.thread-node` size itself to its own content's
+   natural width (trunk width, plus branch width only when branches exist) instead of stretching to
+   fill whatever width its own parent flex column (`ThreadModeView.vue`'s `.thread-mode-list`, or a
+   shallower `.thread-branches`) happens to have — which is what lets a deep/wide tree grow rightward
+   past that ancestor's own box and get picked up by `.thread-mode-list`'s `overflow-x: auto` instead
+   of stretching every ancestor's assigned width to match. */
 .thread-node {
   display: flex;
   align-items: flex-start;
+}
+/* The trunk column: this Thread's own sticky header (once, not per run-card) followed by its chain
+   of `.thread-card` run-boxes and `.thread-fork-connector`s — see `runs`' doc comment. `flex: 0 0
+   auto` for the same fit-content, don't-stretch-or-shrink reason `.thread-card` below already
+   needed when it was itself this row's only trunk element. */
+.thread-trunk {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 .thread-card {
   display: flex;
@@ -712,27 +795,38 @@ onBeforeUnmount(() => {
 }
 /* Multiple sibling branches forked from the very same segment (FR-005b's "these are siblings of
    each other, not nested") stack vertically within one group, each getting its own connector via
-   `.thread-branch-fork` below rather than one shared border wrapping all of them. `transition:
-   margin-top` smooths `syncBranchAlignment`'s own JS-computed nudges (script, above) the same way
-   `MessageBubble.vue`'s own `transition: max-height` smooths the toggle that typically causes them,
-   rather than snapping straight to the new position. */
+   `.thread-branch-fork` below. No `gap` here (unlike before the Y-split redesign): the vertical
+   space between stacked siblings is now an explicit `.thread-branch-spine` element (template,
+   above) rather than a plain flex gap, so a 3rd+ sibling's connector still reads as one continuous
+   line down from the shared fork point instead of a disconnected stub floating from nothing (see
+   `.thread-branch-spine` below). `transition: margin-top` smooths `syncBranchAlignment`'s own
+   JS-computed nudges (script, above) the same way `MessageBubble.vue`'s own `transition: max-height`
+   smooths the toggle that typically causes them, rather than snapping straight to the new position. */
 .thread-branch-group {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
   transition: margin-top 0.15s ease;
 }
-/* Each branch box's own connector line + arrowhead back to the segment it forked from
+/* Fills the same vertical space the old flex `gap` used to (0.75rem) between two stacked sibling
+   `.thread-branch-fork`s off the same fork point, drawing a plain continuation of the vertical line
+   each fork's own `::before` already draws from its own top (below) — together, one unbroken line
+   runs from the shared fork point (this group's own top, JS-aligned to the run-card's bottom edge —
+   see `syncBranchAlignment`) down past every sibling's own horizontal tick. */
+.thread-branch-spine {
+  height: 0.75rem;
+  width: 0;
+  border-left: 2px solid var(--neutral-muted-color, #4b5563);
+}
+/* Each branch box's own connector line + arrowhead back to the run-card it forked from
    (mockup's "───▶"). `padding-left` reserves the room the line/arrowhead draw into, so this
    completely owns its own spacing from `.thread-card`'s right edge — `.thread-node`'s row has no
    extra `gap` of its own (see below), meaning it's this padding alone, not a shared gap, that keeps
    the whole tree's per-branch connector self-contained no matter how many groups/forks stack up.
-   `top`/`left` below are fixed offsets purely relative to THIS `.thread-branch-fork`'s own
-   (`position: relative`) box — which only ever positions the line/arrowhead correctly *within* a
-   branch group that itself already sits level with its trunk segment. That leveling is this
-   component's real, previously-missing anchor: see `.thread-branches`'/`.thread-branch-group`'s own
-   doc comments above and `syncBranchAlignment` in the script for why a fixed offset here was never
-   enough on its own. */
+   `top: 0` (touching this fork's own top edge exactly, not some offset into it) is load-bearing: the
+   FIRST fork in a group sits exactly level with the run-card's bottom edge (`syncBranchAlignment`'s
+   own alignment target), so a line drawn any lower than that floats disconnected from the trunk
+   entirely — the bug an earlier fixed `1.15rem` offset here actually had, confirmed visually (the
+   line landed inside this box's own header text, never touching the trunk boundary at all). */
 .thread-branch-fork {
   position: relative;
   padding-left: 1.75rem;
@@ -740,7 +834,7 @@ onBeforeUnmount(() => {
 .thread-branch-fork::before {
   content: '';
   position: absolute;
-  top: 1.15rem;
+  top: 0;
   left: 0;
   width: 1.75rem;
   height: 0;
@@ -749,7 +843,7 @@ onBeforeUnmount(() => {
 .thread-branch-fork::after {
   content: '';
   position: absolute;
-  top: calc(1.15rem - 5px);
+  top: -5px;
   left: 1.75rem;
   width: 0;
   height: 0;
@@ -757,5 +851,36 @@ onBeforeUnmount(() => {
   border-left-color: var(--neutral-muted-color, #4b5563);
   border-right-width: 0;
   transform: translateX(-1px);
+}
+/* The trunk's own equivalent of `.thread-branch-fork`'s connector — marks a run-card's own fork
+   point continuing straight down into its next run (this run's continuation), the sibling-below
+   counterpart to branches fanning out sideways from that exact same point. `is-terminal` (always set
+   where this renders — see template) draws a downward arrowhead: unlike a `.thread-branch-fork`, the
+   box below has no arrowhead of its own marking it as a real destination, so this connector needs
+   its own. */
+.thread-fork-connector {
+  position: relative;
+  height: 1.25rem;
+  width: 100%;
+}
+.thread-fork-connector::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 1.5rem;
+  width: 0;
+  border-left: 2px solid var(--neutral-muted-color, #4b5563);
+}
+.thread-fork-connector.is-terminal::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: calc(1.5rem - 5px);
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-top-color: var(--neutral-muted-color, #4b5563);
+  border-bottom-width: 0;
 }
 </style>
