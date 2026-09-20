@@ -149,6 +149,27 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     ]);
   });
 
+  // Visual-fit bug fix regression: the sticky `.thread-mode-hud` shell used to paint the visible
+  // box itself (a flat, full-viewport-bleed strip with no side borders/rounding), which read as
+  // visually disconnected from the narrower, centered, bordered `.thread-card` tree beneath it
+  // (user report: "the thread's header and expand/collapse all doesn't fit with the thread"). The
+  // fix splits the sticky positioning shell (`.thread-mode-hud`, still full-width so its sticky math
+  // covers the whole row) from the actual painted card (`.thread-mode-hud-card`), which now reuses
+  // `.thread-mode-content`'s own `width: fit-content`/centered sizing formula so it tracks the
+  // tree's own width instead of the viewport's. This asserts the shared `HudPanel` still renders
+  // nested inside that dedicated card wrapper rather than directly inside the bare sticky shell.
+  it('renders the shared HudPanel inside a dedicated, centered "card" wrapper (not directly inside the bare sticky shell)', () => {
+    seedTree();
+    const wrapper = mountView();
+    const shell = wrapper.find('.thread-mode-hud');
+    const card = shell.find('.thread-mode-hud-card');
+    expect(card.exists()).toBe(true);
+    expect(card.find('nav.hud-panel').exists()).toBe(true);
+    // The shell itself must not also carry the card's own visible-box class — they're deliberately
+    // two distinct elements (positioning shell vs. painted box), not one dual-purpose element.
+    expect(shell.classes()).not.toContain('thread-mode-hud-card');
+  });
+
   it('keeps the Expand all/Export all/Done actions inside the shared HUD header', () => {
     seedTree();
     const wrapper = mountView();
