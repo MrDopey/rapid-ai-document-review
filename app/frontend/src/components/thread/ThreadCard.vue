@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useThreadSegments } from '../../composables/useThreadSegments.js';
 import { ApiError } from '../../transport/http-client.js';
@@ -79,11 +79,16 @@ function isSeedMessage(index: number): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Highlight-to-branch (FR-005/FR-005a). Suppressed only on the Thread's actual current tip
-// MESSAGE (`tipMessageId`) — not the whole tip segment — matching FR-007's literal "N-1, N-2, or
-// any earlier message are all valid" (an earlier message inside the still-open tip segment is a
-// perfectly valid anchor) and the backend's own `ANCHOR_IS_TIP` check, which is keyed on the exact
-// message id, not the segment.
+// Highlight-to-branch (FR-005/FR-005a) and "Quote from here". Both start from the same captured
+// selection; which action(s) apply is decided purely by whether the selection's message is the
+// Thread's actual current tip MESSAGE (`tipMessageId`, not the whole tip segment):
+//  - Branch from here: only an EARLIER message — matching FR-007's literal "N-1, N-2, or any
+//    earlier message are all valid" (an earlier message inside the still-open tip segment is a
+//    perfectly valid anchor) and the backend's own `ANCHOR_IS_TIP` check, keyed on the exact
+//    message id, not the segment.
+//  - Quote from here: only the tip message itself — it seeds this same Thread's own next composer
+//    message (`store.quoteHighlightIntoComposer`), so "the latest message" is the only sensible
+//    scope; it never creates a branch.
 // ---------------------------------------------------------------------------------------------
 interface PendingSelection {
   messageId: string;
@@ -94,11 +99,12 @@ interface PendingSelection {
 const selection = ref<PendingSelection | null>(null);
 const branching = ref(false);
 const branchError = ref<string | null>(null);
+const composerRef = ref<InstanceType<typeof ThreadComposer> | null>(null);
 
 function onMessageMouseUp(messageId: string): void {
   const sel = window.getSelection();
   const text = sel?.toString().trim() ?? '';
-  if (!text || messageId === tipMessageId.value || sel!.rangeCount === 0) {
+  if (!text || sel!.rangeCount === 0) {
     selection.value = null;
     return;
   }
@@ -106,12 +112,21 @@ function onMessageMouseUp(messageId: string): void {
   selection.value = { messageId, text, x: rect.left + rect.width / 2, y: rect.top };
 }
 
+const canBranchFromSelection = computed(
+  () => selection.value != null && selection.value.messageId !== tipMessageId.value,
+);
+const canQuoteFromSelection = computed(
+  () => selection.value != null && selection.value.messageId === tipMessageId.value,
+);
+
 function dismissSelection(): void {
   selection.value = null;
 }
 
 async function onBranchFromSelection(): Promise<void> {
-  if (!selection.value || thread.value?.status === 'closed') return;
+  if (!selection.value || !canBranchFromSelection.value || thread.value?.status === 'closed') {
+    return;
+  }
   branching.value = true;
   branchError.value = null;
   try {
@@ -127,6 +142,18 @@ async function onBranchFromSelection(): Promise<void> {
   } finally {
     branching.value = false;
   }
+}
+
+/** Synchronous, purely local — no request round-trip, so no `pending`/error state to manage the
+ *  way `onBranchFromSelection` needs. Guarded on `doneAt` (not `status === 'closed'`, which a
+ *  Thread never actually reaches) since that's the real signal `ThreadComposer.vue` already
+ *  disables itself on. */
+function onQuoteFromSelection(): void {
+  if (!selection.value || !canQuoteFromSelection.value || thread.value?.doneAt !== null) return;
+  store.quoteHighlightIntoComposer(props.threadId, selection.value.text);
+  selection.value = null;
+  window.getSelection()?.removeAllRanges();
+  void nextTick(() => composerRef.value?.focus());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -202,6 +229,7 @@ const doneActions = computed<ActionDescriptor[]>(() => {
          this, a brand-new Thread could never render a composer to send its own first message. -->
     <ThreadComposer
       v-if="messages.length === 0"
+      ref="composerRef"
       :thread-id="threadId"
       :disabled="thread.doneAt !== null"
     />
@@ -228,6 +256,7 @@ const doneActions = computed<ActionDescriptor[]>(() => {
 
       <ThreadComposer
         v-if="segment.isTipSegment"
+        ref="composerRef"
         :thread-id="threadId"
         :disabled="thread.doneAt !== null"
       />
@@ -249,7 +278,10 @@ const doneActions = computed<ActionDescriptor[]>(() => {
       :y="selection.y"
       :highlighted-text="selection.text"
       :pending="branching"
+      :can-branch="canBranchFromSelection"
+      :can-quote="canQuoteFromSelection"
       @branch="onBranchFromSelection"
+      @quote="onQuoteFromSelection"
       @dismiss="dismissSelection"
     />
   </article>

@@ -7,6 +7,7 @@ import type { EventService } from '../events/event-service.ts';
 import { EventPublisher } from '../events/event-publisher.ts';
 import { getPendingStagedEditIds } from '../edit/edit-mapper.ts';
 import type { PiService } from '../pi/pi-service.ts';
+import { buildThreadBranchSeedMessage } from '@rapid-ai-document-review/shared/domain';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import {
   ConversationNotFoundError,
@@ -15,11 +16,7 @@ import {
 } from './conversation-service.ts';
 import { toConversationDto } from './conversation-mapper.ts';
 import { buildConversationMessages } from './message-log.ts';
-import {
-  buildThreadBranchSeedMessage,
-  deriveBranchName,
-  normalizeForHighlightMatch,
-} from './seed-excerpt.ts';
+import { deriveBranchName, normalizeForHighlightMatch } from './seed-excerpt.ts';
 
 export class InvalidHighlightError extends Error {}
 export class AnchorIsTipError extends Error {}

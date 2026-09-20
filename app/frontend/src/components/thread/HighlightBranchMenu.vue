@@ -1,15 +1,28 @@
 <script setup lang="ts">
 /**
  * 011-linear-thread-mode (FR-005/FR-005a/FR-007): a small selection popover, positioned near
- * the reviewer's current text selection, offering "Branch from here". `ThreadCard.vue` owns
- * deciding WHEN this renders at all — it's mounted only while there's an active, non-empty
- * selection inside a message that isn't the Thread's actual current tip message (FR-007's "anchor
- * must be strictly earlier than the tip", enforced here at the UI layer as well as by the backend's
- * own `ANCHOR_IS_TIP` check) — this component itself only renders the button and reports the
- * click, carrying no selection-detection logic of its own.
+ * the reviewer's current text selection, offering "Branch from here" and/or "Quote from here".
+ * `ThreadCard.vue` owns deciding WHEN this renders at all, and which of the two actions apply to
+ * the current selection — it's mounted only while there's an active, non-empty selection inside a
+ * message:
+ *  - "Branch from here" (`canBranch`) only for a selection inside a message that isn't the
+ *    Thread's actual current tip message (FR-007's "anchor must be strictly earlier than the tip",
+ *    enforced here at the UI layer as well as by the backend's own `ANCHOR_IS_TIP` check).
+ *  - "Quote from here" (`canQuote`) only for a selection inside the Thread's current tip message —
+ *    the mirror-image restriction, since it seeds that same Thread's own next composer message
+ *    rather than branching.
+ * This component itself only renders whichever button(s) apply and reports the click, carrying no
+ * selection-detection logic of its own.
  */
-defineProps<{ x: number; y: number; highlightedText: string; pending?: boolean }>();
-const emit = defineEmits<{ (e: 'branch'): void; (e: 'dismiss'): void }>();
+defineProps<{
+  x: number;
+  y: number;
+  highlightedText: string;
+  pending?: boolean;
+  canBranch: boolean;
+  canQuote: boolean;
+}>();
+const emit = defineEmits<{ (e: 'branch'): void; (e: 'quote'): void; (e: 'dismiss'): void }>();
 </script>
 
 <template>
@@ -20,12 +33,16 @@ const emit = defineEmits<{ (e: 'branch'): void; (e: 'dismiss'): void }>();
     @mousedown.stop
   >
     <button
+      v-if="canBranch"
       type="button"
       class="highlight-branch-button"
       :disabled="pending"
       @click="emit('branch')"
     >
       {{ pending ? 'Branching…' : 'Branch from here' }}
+    </button>
+    <button v-if="canQuote" type="button" class="highlight-branch-button" @click="emit('quote')">
+      Quote from here
     </button>
     <button
       type="button"

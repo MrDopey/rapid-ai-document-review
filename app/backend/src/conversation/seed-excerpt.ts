@@ -269,18 +269,6 @@ export function buildSelectionOnlySeedMessage(selectionText: string): string {
 }
 
 /**
- * Seeds a linear-thread-mode branch (011-linear-thread-mode, FR-005a) with the exact highlighted
- * passage that triggered it, wrapped in its own `<branch-seed-excerpt>` tag pair — the same
- * XML-tagging convention `wrapDocumentRevision`/`wrapHighlightedSelection` use for canvas-mode
- * seeds (constitution's Quality & Review Gates rule), under a distinct tag name since this excerpt
- * is a passage from prior *conversation* text, not document content (research.md R2/R4).
- */
-export function buildThreadBranchSeedMessage(highlightedText: string): string {
-  const tag = 'branch-seed-excerpt';
-  return [`<${tag}>`, '', highlightedText, '', `</${tag}>`].join('\n');
-}
-
-/**
  * Strips the Markdown syntax `MessageBubble.vue`'s render pipeline converts into real HTML elements
  * (bold/italic, headings, list markers, links, inline/fenced code, blockquotes) — none of which
  * survives as literal characters in what a user can actually highlight in a rendered message

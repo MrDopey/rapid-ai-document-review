@@ -3,7 +3,10 @@ import type {
   BranchThreadRequest,
   ConversationDto,
 } from '@rapid-ai-document-review/shared/contracts/http';
-import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
+import {
+  buildThreadBranchSeedMessage,
+  computeIsToolCallCarrier,
+} from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 import {
@@ -47,6 +50,13 @@ export interface ThreadsState {
    *  this still needs to live in the store rather than a local ref: a re-mount (e.g. after
    *  `loadDetail`) must not forget a message the user already expanded. */
   expandedByMessage: Record<string, Record<string, boolean>>;
+  /** "Quote from here"'s own composer draft, keyed by threadId — lives here rather than as a local
+   *  `ref` inside `ThreadComposer.vue` so `quoteHighlightIntoComposer` (triggered from
+   *  `ThreadCard.vue`, a sibling of the composer, not an ancestor with direct access to its
+   *  internals) has somewhere to write the quoted excerpt into. In-memory only, unlike
+   *  `expandedByMessage` — a draft-in-progress is exactly as ephemeral as canvas mode's own
+   *  composer state, which likewise isn't `localStorage`-persisted. */
+  draftByThread: Record<string, string>;
   loaded: boolean;
 }
 
@@ -64,6 +74,7 @@ export const useThreadStore = defineStore('thread', {
     refreshGeneration: {},
     lastEventSequence: null,
     expandedByMessage: {},
+    draftByThread: {},
     loaded: false,
   }),
 
@@ -118,7 +129,12 @@ export const useThreadStore = defineStore('thread', {
      *  left over from a document that is no longer the active one. */
     pruneStaleThreadState(): void {
       const liveIds = new Set(this.threads.map((t) => t.id));
-      for (const map of [this.messagesByThread, this.refreshGeneration, this.expandedByMessage]) {
+      for (const map of [
+        this.messagesByThread,
+        this.refreshGeneration,
+        this.expandedByMessage,
+        this.draftByThread,
+      ]) {
         for (const id of Object.keys(map)) {
           if (!liveIds.has(id)) delete map[id];
         }
@@ -163,6 +179,26 @@ export const useThreadStore = defineStore('thread', {
 
     async send(threadId: string, message: string): Promise<void> {
       await httpClient.sendThreadMessage(activeDocumentId(), threadId, message);
+    },
+
+    /** `ThreadComposer.vue`'s draft text for `threadId` — see `draftByThread`'s own doc comment
+     *  for why this lives here instead of a local `ref`. */
+    setThreadDraft(threadId: string, text: string): void {
+      this.draftByThread[threadId] = text;
+    },
+
+    /** "Quote from here": seeds `threadId`'s own next composer message with the highlighted
+     *  passage, wrapped in the exact same `<branch-seed-excerpt>` tag "Branch from here" seeds a
+     *  new branch's first message with (`buildThreadBranchSeedMessage`, shared with
+     *  `ThreadService.branchFromHighlight` on the backend so the two can never format the excerpt
+     *  differently) — but writes into this *same* Thread's draft rather than creating a branch.
+     *  Appended after any text the reviewer had already started typing (rather than overwriting
+     *  it), separated by a blank line, so a reviewer who quotes mid-draft never loses work. */
+    quoteHighlightIntoComposer(threadId: string, highlightedText: string): void {
+      const excerpt = buildThreadBranchSeedMessage(highlightedText);
+      const existing = this.draftByThread[threadId] ?? '';
+      this.draftByThread[threadId] =
+        existing.trim().length > 0 ? `${existing}\n\n${excerpt}` : excerpt;
     },
 
     /** FR-005/FR-005a: branch a new Thread from a highlighted passage in an earlier (non-tip)

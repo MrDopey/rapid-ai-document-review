@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 
 /**
@@ -14,8 +14,17 @@ import { useThreadStore } from '../../stores/thread.js';
 const props = defineProps<{ threadId: string; disabled?: boolean }>();
 
 const store = useThreadStore();
-const draft = ref('');
 const sending = ref(false);
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
+
+// Backed by `store.draftByThread` (not a local `ref`) so "Quote from here" (`ThreadCard.vue`'s
+// `onQuoteFromSelection`, via `store.quoteHighlightIntoComposer`) — a sibling component, not an
+// ancestor with direct access to this component's internals — has somewhere to seed the quoted
+// excerpt into. See `draftByThread`'s own doc comment in `stores/thread.ts`.
+const draft = computed({
+  get: () => store.draftByThread[props.threadId] ?? '',
+  set: (value: string) => store.setThreadDraft(props.threadId, value),
+});
 
 async function onSend(): Promise<void> {
   const text = draft.value.trim();
@@ -36,6 +45,11 @@ function onComposerKeydown(event: KeyboardEvent): void {
   event.preventDefault();
   void onSend();
 }
+
+// Called by `ThreadCard.vue` right after "Quote from here" seeds this thread's draft, so the
+// reviewer lands with their cursor ready to type their own follow-up rather than having to click
+// into the textarea themselves.
+defineExpose({ focus: () => textareaRef.value?.focus() });
 </script>
 
 <template>
@@ -43,6 +57,7 @@ function onComposerKeydown(event: KeyboardEvent): void {
     <label class="visually-hidden" :for="`thread-composer-${threadId}`">Continue this thread</label>
     <textarea
       :id="`thread-composer-${threadId}`"
+      ref="textareaRef"
       v-model="draft"
       placeholder="Continue this thread…"
       :disabled="disabled || sending"

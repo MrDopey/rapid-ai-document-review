@@ -162,3 +162,23 @@ export function computeIsToolCallCarrier(data: {
 }): boolean {
   return data.text === '' && !data.reasoning;
 }
+
+/**
+ * Wraps a highlighted passage from a thread-mode conversation in its own `<branch-seed-excerpt>`
+ * tag pair — the same XML-tagging convention `seed-excerpt.ts`'s own `wrapDocumentRevision`/
+ * `wrapHighlightedSelection` use for canvas-mode seeds (constitution's Quality & Review Gates
+ * rule), under a distinct tag name since this excerpt is a passage from prior *conversation* text,
+ * not document content.
+ *
+ * Lives here (not backend-only `conversation/seed-excerpt.ts`) because it now has two genuinely
+ * separate callers on two separate sides of the wire that must always produce byte-identical
+ * output: the backend's `ThreadService.branchFromHighlight` (seeds a brand-new branch's first
+ * message, FR-005a) and the frontend's `stores/thread.ts` `quoteHighlightIntoComposer` ("Quote
+ * from here" — seeds the *same* thread's own next composer message, no branch/new session
+ * involved). Both actions share this one builder rather than each formatting the tag by hand, so
+ * they can never drift apart.
+ */
+export function buildThreadBranchSeedMessage(highlightedText: string): string {
+  const tag = 'branch-seed-excerpt';
+  return [`<${tag}>`, '', highlightedText, '', `</${tag}>`].join('\n');
+}
