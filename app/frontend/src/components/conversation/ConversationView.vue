@@ -12,6 +12,7 @@ import { loadPaneSizes, persistPaneSizes } from '../../composables/panePersisten
 import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { useConversationContinuity } from '../../composables/conversationContinuity.js';
 import { useConversationRename } from '../../composables/conversationRename.js';
+import { useAgentErrorBanner } from '../../composables/agentErrorBanner.js';
 import {
   useConversationBranchAction,
   useBulkToggleAction,
@@ -110,7 +111,10 @@ const {
   startEditingName,
   cancelEditingName,
   saveName,
-} = useConversationRename(() => props.conversationId, nameInputEl);
+} = useConversationRename(nameInputEl, {
+  find: () => store.conversations.find((c) => c.id === props.conversationId) ?? null,
+  rename: (id, name) => store.rename(id, name),
+});
 
 // Shares the exact same computed logic as `ConversationThreadBox.vue`'s continuity-context
 // rendering, via the composable, rather than duplicating it — see `useConversationContinuity`'s
@@ -309,14 +313,10 @@ function pendingProposalPhrase(count: number): string {
  *  `conversation_summary_folded` handler. */
 const foldedSummary = computed(() => store.foldedSummaries[props.conversationId] ?? null);
 
-// Dismissing the error banner is purely a local UI affordance — `conversation.status` (and its
-// HUD badge) stay `errored` until a retry actually succeeds; this only lets the user clear the
-// message out of the way in the meantime. Reset whenever a *new* error arrives, or the user
-// switches conversations, so a previous dismissal doesn't hide a later, different failure.
-const errorDismissed = ref(false);
-function dismissError(): void {
-  errorDismissed.value = true;
-}
+// Shared with `ThreadCard.vue` — see `agentErrorBanner.ts`'s own doc comment. `load()` below also
+// resets `errorDismissed` on a conversation switch (this composable's own reset only covers a *new*
+// error arriving on the SAME conversation instance).
+const { errorDismissed, dismissError } = useAgentErrorBanner(() => conversation.value?.status);
 
 function load(): void {
   errorDismissed.value = false;
@@ -364,12 +364,6 @@ watch(
     // conversation was previously open.
     stickToBottom.value = true;
     isInitialMessagesLoad.value = true;
-  },
-);
-watch(
-  () => conversation.value?.status,
-  (status, previousStatus) => {
-    if (status === 'errored' && previousStatus !== 'errored') errorDismissed.value = false;
   },
 );
 
@@ -971,29 +965,9 @@ const actions = computed<ActionDescriptor[]>(() => {
 .continuity-context {
   margin-bottom: 0.5rem;
 }
-.error-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--danger-bg, #fee2e2);
-  color: var(--danger-color, #991b1b);
-}
-/* `.text-wrap-safe`'s shared overflow-wrap handling now lives in style.css. `min-width: 0` stays
-   here: an unbroken long error string (e.g. a raw provider error payload) sits in the
-   `.error-banner` flex row, which otherwise refuses to let this span shrink below its content's
-   intrinsic width, forcing the whole banner — and with it the page — wider than the viewport. */
-.error-banner-message {
-  min-width: 0;
-  max-height: 8rem;
-  overflow-y: auto;
-}
-.error-banner-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex: 0 0 auto;
-}
+/* `.error-banner`/`.error-banner-message`/`.error-banner-actions` (parity fix, 011-linear-thread-mode
+   follow-up): hoisted into style.css so `ThreadCard.vue`'s own Retry banner can reuse them —
+   see that shared rule's own doc comment. */
 /* The composer footer — only rendered while the conversation is open (see the template comment
    above `.input-area`); collapses entirely once closed, since Request review now lives in the
    header instead. */

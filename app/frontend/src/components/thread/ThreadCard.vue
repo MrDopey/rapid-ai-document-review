@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useThreadSegments, type ThreadSegment } from '../../composables/useThreadSegments.js';
+import { useAgentErrorBanner } from '../../composables/agentErrorBanner.js';
+import { useConversationRename } from '../../composables/conversationRename.js';
 import { ApiError } from '../../transport/http-client.js';
 import type { ActionDescriptor } from '../../composables/conversationActions.js';
 import ConversationActionButtons from '../conversation/ConversationActionButtons.vue';
@@ -59,6 +61,25 @@ const store = useThreadStore();
 
 const thread = computed(() => store.findThread(props.threadId));
 const messages = computed(() => store.messagesFor(props.threadId));
+
+// Parity fix (011-linear-thread-mode follow-up): the same click-to-edit title affordance canvas
+// mode's `ConversationThreadBox.vue`/`ConversationView.vue` already share via
+// `useConversationRename` — generalized to accept a narrow `{ find, rename }` source (rather than
+// hardcoding `useConversationsStore()`) so this Thread-mode usage can drive `useThreadStore()`
+// instead without a second, forked copy of the composable.
+const nameInputEl = ref<HTMLInputElement | null>(null);
+const {
+  isEditingName,
+  nameDraft,
+  renameError,
+  renameSaving,
+  startEditingName,
+  cancelEditingName,
+  saveName,
+} = useConversationRename(nameInputEl, {
+  find: () => store.findThread(props.threadId),
+  rename: (id, name) => store.rename(id, name),
+});
 
 onMounted(() => {
   if (!store.messagesByThread[props.threadId]) {
@@ -279,6 +300,20 @@ async function onMarkDone(): Promise<void> {
 async function onReopen(): Promise<void> {
   doneError.value = null;
   await store.reopen(props.threadId);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Parity fix (011-linear-thread-mode follow-up): a Thread's underlying agent turn can fail exactly
+// the same way a canvas conversation's can (`thread.status === 'errored'`, now actually reflected
+// by `stores/thread.ts`'s `handleServerFrame` — see its own doc comment on the WS events this used
+// to silently ignore). Reuses `ConversationView.vue`'s exact Retry/Dismiss banner shape/CSS
+// (`agentErrorBanner.ts`, `.error-banner*` hoisted into style.css) rather than inventing a second
+// one.
+// ---------------------------------------------------------------------------------------------
+const { errorDismissed, dismissError } = useAgentErrorBanner(() => thread.value?.status);
+
+async function onRetry(): Promise<void> {
+  await store.retry(props.threadId);
 }
 
 // Same `ActionDescriptor` + `ConversationActionButtons.vue` renderer canvas mode's own
@@ -561,13 +596,56 @@ onBeforeUnmount(() => {
         class="thread-card-header"
         :class="{ 'thread-card-header--active': threadId === activeThreadId }"
       >
-        <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
+        <!-- Parity fix (011-linear-thread-mode follow-up): same click-to-edit title affordance as
+             canvas mode's `ConversationThreadBox.vue`/`ConversationView.vue`, via the same shared
+             `useConversationRename` composable — see this file's own script doc comment. -->
+        <div class="thread-card-title-group">
+          <input
+            v-if="isEditingName"
+            ref="nameInputEl"
+            v-model="nameDraft"
+            type="text"
+            class="thread-title-input"
+            aria-label="Thread name"
+            :disabled="renameSaving"
+            @keydown.enter.prevent="saveName"
+            @keydown.escape.prevent="cancelEditingName"
+            @blur="saveName"
+          />
+          <template v-else>
+            <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
+            <button
+              type="button"
+              class="thread-rename-button"
+              aria-label="Rename thread"
+              title="Rename thread"
+              @click="startEditingName"
+            >
+              ✎
+            </button>
+          </template>
+        </div>
         <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
         <span class="thread-card-actions">
           <ConversationActionButtons :actions="headerActions" />
         </span>
       </header>
+      <span v-if="renameError" class="rename-error" role="alert">{{ renameError }}</span>
       <span v-if="doneError" class="thread-error" role="alert">{{ doneError }}</span>
+
+      <!-- Parity fix (011-linear-thread-mode follow-up): a Thread's own agent-turn-errored banner —
+           same shape/CSS as `ConversationView.vue`'s (`.error-banner*`, hoisted into style.css) and
+           the same dismiss semantics (`agentErrorBanner.ts`). Without this, a failed turn here had
+           no visible signal at all and no way to retry it. -->
+      <div v-if="thread.status === 'errored' && !errorDismissed" class="error-banner" role="alert">
+        <span class="error-banner-message text-wrap-safe">{{
+          thread.errorMessage ?? 'The agent hit an error.'
+        }}</span>
+        <span class="error-banner-actions">
+          <button type="button" @click="onRetry">Retry</button>
+          <button type="button" aria-label="Dismiss error" @click="dismissError">Dismiss</button>
+        </span>
+      </div>
 
       <!-- Groups every bordered box this Thread's own trunk renders (the zero-message composer-only
            card, or the run-card chain below) so exactly one of them — always the first — can be
@@ -815,10 +893,29 @@ onBeforeUnmount(() => {
   border-color: var(--accent-color, #2563eb);
   box-shadow: 0 0 0 2px var(--accent-color, #2563eb);
 }
-.thread-card-title {
-  font-weight: 600;
+/* Parity fix (011-linear-thread-mode follow-up): groups the title/rename-button pair (or the
+   rename `<input>`) so the pair together — not just the plain-text span — takes over the flex slot
+   `.thread-card-title` alone used to occupy directly in the header row. Same shape as
+   `ConversationThreadBox.vue`'s own `.thread-title-group`. */
+.thread-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   flex: 1 1 auto;
   min-width: 0;
+}
+.thread-card-title {
+  font-weight: 600;
+  min-width: 0;
+}
+/* `.thread-rename-button`/`.rename-error`'s shared shape lives in style.css (identical to
+   `ConversationThreadBox.vue`'s/`ConversationView.vue`'s own copies). `.thread-title-input`'s
+   shared shape (flex/border/padding) also lives there — this override layers just the three
+   properties that differ, matching this card's own title styling. */
+.thread-title-input {
+  font-weight: 600;
+  font-size: inherit;
+  background: var(--panel-bg, #f7f7f8);
 }
 .thread-root-badge {
   font-size: 0.7rem;

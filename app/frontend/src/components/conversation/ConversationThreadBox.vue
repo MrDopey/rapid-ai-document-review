@@ -78,7 +78,10 @@ const {
   startEditingName,
   cancelEditingName,
   saveName,
-} = useConversationRename(() => props.conversationId, nameInputEl);
+} = useConversationRename(nameInputEl, {
+  find: () => store.conversations.find((c) => c.id === props.conversationId) ?? null,
+  rename: (id, name) => store.rename(id, name),
+});
 
 // Branch-lineage cue (sidebar list view): a plain-text breadcrumb naming this conversation's
 // parent, if any. This data model has no message-level fork-point field at all —

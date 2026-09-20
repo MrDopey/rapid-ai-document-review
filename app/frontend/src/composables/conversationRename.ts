@@ -1,5 +1,5 @@
 import { computed, nextTick, ref, type Ref } from 'vue';
-import { useConversationsStore } from '../stores/conversations.js';
+import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { ApiError } from '../transport/http-client.js';
 
 export interface ConversationRename {
@@ -13,28 +13,40 @@ export interface ConversationRename {
 }
 
 /**
- * Shared click-to-edit conversation-title rename affordance, used by both
- * `ConversationThreadBox.vue` and `ConversationView.vue`, following the same "one action per slot"
- * convention every other per-conversation action in this app uses: an inline `<input>` replaces the
- * plain-text title, save on Enter/blur, cancel on Escape (constitution's "UI Conventions": no
- * confirmation dialog for a reversible, single-field text edit). Mirrors
+ * The minimal shape this composable needs out of whichever store owns the conversation/Thread being
+ * renamed — kept narrow (rather than importing a specific store type) so the SAME composable can
+ * drive both canvas mode's `useConversationsStore()` and Thread mode's `useThreadStore()`, matching
+ * this codebase's established "narrow accessor, not a whole store" convention
+ * (`threadTreeOrder.ts`'s own `ThreadTreeOrderSource`, `agentErrorBanner.ts`'s `status` getter).
+ */
+export interface ConversationRenameSource {
+  find: () => ConversationDto | null;
+  rename: (id: string, name: string) => Promise<unknown>;
+}
+
+/**
+ * Shared click-to-edit conversation-title rename affordance, used by `ConversationThreadBox.vue`,
+ * `ConversationView.vue`, and `ThreadCard.vue` (011-linear-thread-mode parity fix — a Thread's own
+ * name can be renamed exactly the same way a canvas conversation's can), following the same
+ * "one action per slot" convention every other per-conversation action in this app uses: an inline
+ * `<input>` replaces the plain-text title, save on Enter/blur, cancel on Escape (constitution's "UI
+ * Conventions": no confirmation dialog for a reversible, single-field text edit). Mirrors
  * `useConversationBranchAction`'s shape (`conversationActions.ts`) — a composable taking a
  * conversationId accessor and returning the draft ref/save/cancel/start functions, consumed
- * identically by both hosts.
+ * identically by every host.
  *
  * `nameInputEl` is supplied by the caller (rather than owned here) — each host still declares its
  * own `ref<HTMLInputElement | null>(null)` for the `ref="nameInputEl"` template binding (a template
  * ref has to be a local binding the host's own template can see), and this composable just focuses/
- * selects through it.
+ * selects through it. `source.find` already closes over whichever id the caller cares about (e.g.
+ * `() => store.conversations.find((c) => c.id === props.conversationId) ?? null`), so there's no
+ * separate `conversationId` parameter here.
  */
 export function useConversationRename(
-  conversationId: () => string,
   nameInputEl: Ref<HTMLInputElement | null>,
+  source: ConversationRenameSource,
 ): ConversationRename {
-  const store = useConversationsStore();
-  const conversation = computed(
-    () => store.conversations.find((c) => c.id === conversationId()) ?? null,
-  );
+  const conversation = computed(() => source.find());
 
   const isEditingName = ref(false);
   const nameDraft = ref('');
@@ -74,7 +86,7 @@ export function useConversationRename(
     }
     renameSaving.value = true;
     try {
-      await store.rename(conversation.value.id, trimmed);
+      await source.rename(conversation.value.id, trimmed);
       isEditingName.value = false;
       renameError.value = null;
     } catch (err) {

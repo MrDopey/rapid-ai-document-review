@@ -2,12 +2,14 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   BranchThreadRequest,
   ExportDocumentSessionQuery,
+  RenameConversationRequest,
   SendMessageRequest,
   type ErrorCode,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
   AgentUnavailableError,
   ConversationClosedError,
+  ConversationNotErroredError,
   ConversationNotFoundError,
   MaxConversationDepthExceededError,
   type ConversationService,
@@ -39,6 +41,9 @@ function handleThreadError(
   }
   if (err instanceof ConversationClosedError) {
     return { status: 409, code: 'CONVERSATION_CLOSED' };
+  }
+  if (err instanceof ConversationNotErroredError) {
+    return { status: 409, code: 'CONVERSATION_NOT_ERRORED' };
   }
   if (err instanceof AgentUnavailableError) {
     return { status: 502, code: 'AGENT_UNAVAILABLE' };
@@ -149,6 +154,24 @@ export function registerThreadRoutes(
     },
   );
 
+  // Parity fix (011-linear-thread-mode follow-up): a Thread's own `name` (`ThreadCard.vue`'s header
+  // title) can be renamed exactly the same way a canvas conversation's can — pure metadata, no
+  // bearing on tool availability/branching. Reuses `ConversationService.rename` verbatim (FR-015's
+  // own convention, already used by `.../send`/`.../retry` above) rather than duplicating it.
+  app.patch<{ Params: { documentId: string; id: string } }>(
+    '/api/documents/:documentId/threads/:id',
+    async (request, reply) => {
+      const data = parseOrFail(reply, RenameConversationRequest, request.body);
+      if (!data) return;
+      return withThreadErrors(reply, async () => {
+        requireDocumentType(storage, request.params.documentId, 'thread');
+        requireThreadInDocument(storage, request.params.documentId, request.params.id);
+        const thread = conversationService.rename(request.params.id, data.name);
+        return reply.send(thread);
+      });
+    },
+  );
+
   app.get<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/threads/:id/messages',
     async (request, reply) => {
@@ -169,6 +192,25 @@ export function registerThreadRoutes(
         requireDocumentType(storage, request.params.documentId, 'thread');
         requireThreadInDocument(storage, request.params.documentId, request.params.id);
         const result = await conversationService.send(request.params.id, data.message);
+        return reply.status(202).send(result);
+      });
+    },
+  );
+
+  // Parity fix (011-linear-thread-mode follow-up): a Thread's underlying agent turn can fail exactly
+  // the same way a canvas conversation's can (both are the same `conversation` table row, driven by
+  // the same PiService/event-bridge machinery — see `conversation_status_changed`/`agent_error` in
+  // `contracts/events.ts`, emitted identically regardless of `kind`) — but Thread mode had no way to
+  // retry one. Reuses `ConversationService.retry` verbatim (FR-015's own convention, already used
+  // by `.../send` above) rather than duplicating its "re-send the last user message" logic on
+  // `ThreadService`.
+  app.post<{ Params: { documentId: string; id: string } }>(
+    '/api/documents/:documentId/threads/:id/retry',
+    async (request, reply) => {
+      return withThreadErrors(reply, async () => {
+        requireDocumentType(storage, request.params.documentId, 'thread');
+        requireThreadInDocument(storage, request.params.documentId, request.params.id);
+        const result = await conversationService.retry(request.params.id);
         return reply.status(202).send(result);
       });
     },

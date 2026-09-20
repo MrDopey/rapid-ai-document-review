@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import ThreadCard from '../../src/components/thread/ThreadCard.vue';
@@ -18,6 +18,8 @@ vi.mock('../../src/transport/http-client.js', () => ({
     branchThread: vi.fn(),
     markThreadDone: vi.fn(),
     reopenThread: vi.fn(),
+    retryThread: vi.fn(),
+    renameThread: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status = 0;
@@ -765,5 +767,172 @@ describe('ThreadCard — header containment (bug fix)', () => {
     expect(inactiveWrapper.find('.thread-card-header').classes()).not.toContain(
       'thread-card-header--active',
     );
+  });
+});
+
+// Parity fix (011-linear-thread-mode follow-up): before this, a Thread's agent turn could fail
+// (`status: 'errored'`) with no visible banner and no Retry action at all — `stores/thread.ts`
+// silently ignored `conversation_status_changed`. Reuses `ConversationView.vue`'s exact banner
+// shape (`.error-banner*`, `agentErrorBanner.ts`) rather than a second hand-rolled one.
+describe('ThreadCard — agent-turn-errored banner + Retry (parity fix)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('shows no error banner while the thread is idle', () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', status: 'idle' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+
+    expect(wrapper.find('.error-banner').exists()).toBe(false);
+  });
+
+  it('shows the error banner with its message and a Retry button once the thread is errored', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', status: 'errored', errorMessage: 'Upstream failure.' }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+    const banner = wrapper.find('.error-banner');
+
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain('Upstream failure.');
+    expect(banner.text()).toContain('Retry');
+  });
+
+  it('falls back to a generic message when errorMessage is null', () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', status: 'errored', errorMessage: null })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+
+    expect(wrapper.find('.error-banner').text()).toContain('The agent hit an error.');
+  });
+
+  it('clicking Retry calls httpClient.retryThread for this thread', async () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', status: 'errored' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+    const { httpClient } = await import('../../src/transport/http-client.js');
+
+    const wrapper = mountCard('root-1');
+    await wrapper.find('.error-banner-actions button').trigger('click');
+
+    expect(httpClient.retryThread).toHaveBeenCalledWith(null, 'root-1');
+  });
+
+  it('clicking Dismiss hides the banner without changing status', async () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', status: 'errored' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+    await wrapper.find('[aria-label="Dismiss error"]').trigger('click');
+
+    expect(wrapper.find('.error-banner').exists()).toBe(false);
+    expect(store.findThread('root-1')?.status).toBe('errored');
+  });
+});
+
+// Parity fix (011-linear-thread-mode follow-up): a Thread's own name can be renamed exactly the
+// same way a canvas conversation's can — reuses the exact same `useConversationRename` composable
+// as `ConversationThreadBox.vue`/`ConversationView.vue` (generalized to a `{ find, rename }`
+// source), not a second hand-rolled implementation.
+describe('ThreadCard — rename (parity fix)', () => {
+  let pinia: Pinia;
+
+  beforeEach(async () => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    const { httpClient } = await import('../../src/transport/http-client.js');
+    vi.mocked(httpClient.renameThread).mockReset();
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('shows the plain-text title and a rename button by default, no input', () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', name: 'Original Thread Name' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+
+    expect(wrapper.find('.thread-card-title').text()).toBe('Original Thread Name');
+    expect(wrapper.find('.thread-rename-button').exists()).toBe(true);
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+  });
+
+  it('clicking the rename button opens an input pre-filled with the current name', async () => {
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', name: 'Original Thread Name' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+
+    expect(input.exists()).toBe(true);
+    expect(input.element.value).toBe('Original Thread Name');
+    expect(wrapper.find('.thread-card-title').exists()).toBe(false);
+  });
+
+  it('saves the new name on Enter, calling httpClient.renameThread and updating the store', async () => {
+    const { httpClient } = await import('../../src/transport/http-client.js');
+    vi.mocked(httpClient.renameThread).mockResolvedValue(
+      threadFixture({ id: 'root-1', name: 'New Thread Name' }),
+    );
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', name: 'Original Thread Name' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('New Thread Name');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+
+    expect(httpClient.renameThread).toHaveBeenCalledWith(null, 'root-1', 'New Thread Name');
+    expect(store.findThread('root-1')?.name).toBe('New Thread Name');
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
+    expect(wrapper.find('.thread-card-title').text()).toBe('New Thread Name');
+  });
+
+  it('cancels on Escape without calling the API, reverting to the original name', async () => {
+    const { httpClient } = await import('../../src/transport/http-client.js');
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', name: 'Original Thread Name' })];
+    store.messagesByThread['root-1'] = [makeMessage('m0')];
+
+    const wrapper = mountCard('root-1');
+    await wrapper.find('.thread-rename-button').trigger('click');
+    const input = wrapper.find<HTMLInputElement>('.thread-title-input');
+    await input.setValue('Discarded edit');
+    await input.trigger('keydown.escape');
+    await flushPromises();
+
+    expect(httpClient.renameThread).not.toHaveBeenCalled();
+    expect(store.findThread('root-1')?.name).toBe('Original Thread Name');
+    expect(wrapper.find('.thread-title-input').exists()).toBe(false);
   });
 });

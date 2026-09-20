@@ -411,6 +411,33 @@ body {
   opacity: 0.7;
 }
 
+/* Shared "agent turn errored" banner (parity fix, 011-linear-thread-mode follow-up): originally
+   `ConversationView.vue`-only, hoisted here (same convention as `.thread-rename-button`/
+   `.rename-error` above) so `ThreadCard.vue`'s own Retry banner can be pixel-identical rather than
+   a second hand-copied definition. */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--danger-bg, #fee2e2);
+  color: var(--danger-color, #991b1b);
+}
+/* `min-width: 0`: an unbroken long error string (e.g. a raw provider error payload) sits in the
+   `.error-banner` flex row, which otherwise refuses to let this span shrink below its content's
+   intrinsic width, forcing the whole banner — and with it the page — wider than the viewport. */
+.error-banner-message {
+  min-width: 0;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+.error-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
 /* Shared text-wrap-safe utility — for any element rendering unbounded/dynamic text (LLM-generated
    Markdown/reasoning, user-entered document/conversation titles, edit summaries, revision notes)
    that would otherwise overflow its container with no natural break point. Used by MessageBubble,

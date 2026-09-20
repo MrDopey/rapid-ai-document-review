@@ -366,6 +366,28 @@ export const httpClient = {
     );
   },
 
+  /** Parity fix: a Thread's agent turn can fail exactly the same way a canvas conversation's can —
+   *  this is `retryConversation`'s own thread-scoped route counterpart (`ConversationService.retry`
+   *  reused verbatim server-side, see `threads.ts`'s own route doc comment). */
+  async retryThread(documentId: string, id: string) {
+    return request(`/api/documents/${documentId}/threads/${id}/retry`, { method: 'POST' }, (j) =>
+      RetryResponse.parse(j),
+    );
+  },
+
+  /** Parity fix: a Thread's own name can be renamed exactly the same way a canvas conversation's
+   *  can — this is `renameConversation`'s own thread-scoped route counterpart
+   *  (`ConversationService.rename` reused verbatim server-side, see `threads.ts`'s own route doc
+   *  comment). */
+  async renameThread(documentId: string, id: string, name: string) {
+    const body: RenameConversationRequest = { name };
+    return request(
+      `/api/documents/${documentId}/threads/${id}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+      (j) => ConversationDto.parse(j),
+    );
+  },
+
   /** User Story 4/FR-013b: the whole-document Pi-native session export — returns raw HTML text
    *  (not a JSON DTO), following `exportDocument`'s own raw-text-response pattern rather than the
    *  JSON-DTO `request()` helper every other method here uses, since the response body itself is a

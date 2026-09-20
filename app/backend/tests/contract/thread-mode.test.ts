@@ -5,6 +5,7 @@ import {
   CreateDocumentResponse,
   GetConversationResponse,
   ListConversationsResponse,
+  RetryResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import { createTestApp, waitFor } from './test-app.js';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
@@ -485,5 +486,97 @@ describe('User Story 4/FR-013b: a genuine whole-document Pi-native session expor
     expect(detail.messages.some((m) => m.text === 'Message after whole-document export.')).toBe(
       true,
     );
+  });
+});
+
+// Parity fix (011-linear-thread-mode follow-up): a Thread's agent turn can fail exactly the same way
+// a canvas conversation's can — this endpoint is `ConversationService.retry` reused verbatim (see
+// its own route doc comment in threads.ts), mirroring http.test.ts's own
+// "POST /api/conversations/:id/retry" coverage for the canvas route.
+describe('Retry: a Thread can retry a failed agent turn, same as a canvas conversation', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  it('409 CONVERSATION_NOT_ERRORED on a thread that is not currently errored', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const res = await call(
+      ctx.app,
+      'POST',
+      `/api/documents/${ctx.documentId}/threads/${created.mainConversation.id}/retry`,
+    );
+    expect(res.status).toBe(409);
+    expect((res.json as { error: { code: string } }).error.code).toBe('CONVERSATION_NOT_ERRORED');
+  });
+
+  it('202 accepted:true, status:"working" after an errored thread retries', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+
+    // `FakeAgentSession`'s magic string (see http.test.ts's own retry coverage) force-settles the
+    // turn as `agent_error` instead of a normal reply.
+    await call(ctx.app, 'POST', `/api/documents/${ctx.documentId}/threads/${rootId}/send`, {
+      message: '__AGENT_ERROR__',
+    });
+    await waitFor(() => ctx.storage.getConversation(rootId)?.status === 'errored');
+
+    const res = await call(
+      ctx.app,
+      'POST',
+      `/api/documents/${ctx.documentId}/threads/${rootId}/retry`,
+    );
+    expect(res.status).toBe(202);
+    const parsed = RetryResponse.parse(res.json);
+    expect(parsed.accepted).toBe(true);
+    expect(parsed.status).toBe('working');
+  });
+
+  it('refuses POST .../threads/:id/retry against a documentType: canvas document', async () => {
+    const created = await createCanvasDoc(ctx, '# Canvas doc\n\nContent.');
+    const res = await call(
+      ctx.app,
+      'POST',
+      `/api/documents/${created.document.id}/threads/${created.mainConversation.id}/retry`,
+    );
+    expect(res.status).toBe(409);
+    expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
+  });
+});
+
+// Parity fix (011-linear-thread-mode follow-up): a Thread's own name can be renamed exactly the
+// same way a canvas conversation's can — pure metadata, no bearing on tool availability/branching.
+describe('Rename: a Thread can be renamed, same as a canvas conversation', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  it('renames a thread and returns the updated DTO', async () => {
+    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
+    const rootId = created.mainConversation.id;
+
+    const res = await call(ctx.app, 'PATCH', `/api/documents/${ctx.documentId}/threads/${rootId}`, {
+      name: 'My renamed thread',
+    });
+    expect(res.status).toBe(200);
+    expect((res.json as { name: string }).name).toBe('My renamed thread');
+
+    const detail = await getThreadMessages(ctx, rootId);
+    expect(detail.conversation.name).toBe('My renamed thread');
+  });
+
+  it('refuses PATCH .../threads/:id against a documentType: canvas document', async () => {
+    const created = await createCanvasDoc(ctx, '# Canvas doc\n\nContent.');
+    const res = await call(
+      ctx.app,
+      'PATCH',
+      `/api/documents/${created.document.id}/threads/${created.mainConversation.id}`,
+      { name: 'nope' },
+    );
+    expect(res.status).toBe(409);
+    expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
   });
 });

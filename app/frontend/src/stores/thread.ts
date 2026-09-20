@@ -16,6 +16,7 @@ import {
   setExpandedForEntity,
   setManyExpandedForEntity,
 } from '../composables/expandableMessages.js';
+import { announceAgentError, announceAgentStarted } from '../a11y/live-regions.js';
 import { useDocumentStore } from './document.js';
 import type { ConversationMessageState } from './conversations.js';
 import { ensureArray } from './util.js';
@@ -199,6 +200,23 @@ export const useThreadStore = defineStore('thread', {
       await httpClient.sendThreadMessage(activeDocumentId(), threadId, message);
     },
 
+    /** Parity fix: a Thread's agent turn can fail exactly the same way a canvas conversation's
+     *  can (`conversation.status` transitions to `'errored'` via the `conversation_status_changed`
+     *  WS event, handled in `handleServerFrame` below) — this is `conversations.ts`'s own `retry`
+     *  action, re-sending the same failed turn's last user message. */
+    async retry(threadId: string): Promise<void> {
+      await httpClient.retryThread(activeDocumentId(), threadId);
+    },
+
+    /** Parity fix: a Thread's own name can be renamed exactly the same way a canvas conversation's
+     *  can (`conversations.ts`'s own `rename` action) — the second connected client's own update
+     *  lands via the `conversation_renamed` WS event, already handled in `handleServerFrame` below. */
+    async rename(threadId: string, name: string): Promise<ConversationDto> {
+      const thread = await httpClient.renameThread(activeDocumentId(), threadId, name);
+      this.upsertThread(thread);
+      return thread;
+    },
+
     /** `ThreadComposer.vue`'s draft text for `threadId` — see `draftByThread`'s own doc comment
      *  for why this lives here instead of a local `ref`. */
     setThreadDraft(threadId: string, text: string): void {
@@ -293,6 +311,33 @@ export const useThreadStore = defineStore('thread', {
       const threadId = event.conversationId;
 
       switch (event.type) {
+        // Parity fix: mirrors `conversations.ts`'s own `conversation_status_changed`/`agent_error`/
+        // `agent_started` handling verbatim — before this, a Thread's agent turn could fail
+        // (`agent_error`) with `conv.status` never actually transitioning to `'errored'` in this
+        // store, so `ThreadCard.vue` had no signal to show an error banner or a Retry action at
+        // all: a failed turn just silently left the reviewer's message unanswered forever, with no
+        // indication anything went wrong. These events are emitted identically for a thread-kind
+        // conversation as for a canvas one (`event-bridge.ts` doesn't distinguish by `kind`).
+        case 'conversation_status_changed': {
+          const thread = this.findThread(threadId);
+          if (thread) thread.status = event.data.status;
+          break;
+        }
+
+        // FR-043b-equivalent screen-reader announcements, same as `conversations.ts` — state itself
+        // is already updated by `conversation_status_changed` above.
+        case 'agent_error': {
+          const thread = this.findThread(threadId);
+          announceAgentError(thread ? thread.name : 'Thread', event.data.message);
+          break;
+        }
+
+        case 'agent_started': {
+          const thread = this.findThread(threadId);
+          announceAgentStarted(thread ? thread.name : 'Thread');
+          break;
+        }
+
         // A freshly-created root/branch Thread. Guarded on `event.data.kind` (not just "unknown
         // id") — the active document's WS stream also carries canvas-mode `conversation_started`
         // events when the two document types briefly overlap (e.g. a stale subscription during a
