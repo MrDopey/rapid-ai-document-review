@@ -410,6 +410,56 @@ const branchGroupEls = new Map<string, HTMLElement>();
 // in JS rather than read back off the DOM (`getComputedStyle`) on every pass.
 const appliedMargins = new Map<string, number>();
 
+// Bug fix (initial-load animation): a freshly mounted/refreshed page fires the exact same
+// `syncBranchAlignment` correction machinery as a live interaction — `onMounted` schedules a pass,
+// then messages arriving from `store.loadDetail()` (this card's own or a recursively-mounted
+// child's), fonts/images settling, etc. each re-trigger the `ResizeObserver` below — but none of
+// that is a "live user-triggered layout change" (an expand/collapse toggle, a new branch appearing
+// from a highlight-to-branch action) the way `.thread-branch-group`'s own `transition: margin-top`
+// was designed for. Confirmed via Playwright against a real seeded multi-branch document: WITHOUT
+// this suppression, initial mount alone produces a visible ~1s cascade of margin-top corrections —
+// worse, each one plays out over the transition's own duration, so each corrective write triggers
+// another `ResizeObserver` firing mid-transition, re-scheduling yet another correction, which is
+// exactly the same restart-the-transition feedback shape `4e30ac0`'s jiggle-loop fix already
+// diagnosed (see `syncBranchAlignment`'s own doc comment) — initial mount just has far more genuine
+// correction passes to chain through (asynchronous data arriving) than a single settled interaction
+// ever does, which is what stretches it out to ~1-2s instead of one quick nudge.
+//
+// Fixed the same way `App.vue`'s `previewSplitDragging`/`DocumentCanvas.vue`'s
+// `editorSplitDragging` already suppress THEIR OWN transitions for a different "not a real user-
+// facing animation" span (a live pointer drag, which must track 1:1 with the pointer, never lag
+// behind an easing curve): a boolean ref driving the transition inline (`branchGroupStyle` below)
+// rather than a static CSS rule, `none` until this component's own alignment activity has gone
+// quiet for `ALIGN_SETTLE_QUIET_MS`. Every call to `scheduleAlignSync()` (mount, the segment/expand
+// watcher, and the `ResizeObserver`) counts as "activity" and resets the quiet timer — so as long as
+// corrections keep genuinely arriving (the initial settle cascade), the transition stays suppressed
+// and every write lands instantly with no visible motion; once nothing has requested a new pass for
+// `ALIGN_SETTLE_QUIET_MS`, `alignTransitionsReady` flips true PERMANENTLY (never reset back to
+// false — this is a one-way "has this card finished its first settle" latch, not a per-interaction
+// toggle), so every later live interaction (expand/collapse, a new branch appearing, a window
+// resize) gets the real, smooth transition exactly as before. Scoped per `ThreadCard` instance
+// (not shared/global) since each recursively-mounted branch mounts — and so settles — on its own
+// schedule, independent of its parent/siblings.
+const alignTransitionsReady = ref(false);
+const ALIGN_SETTLE_QUIET_MS = 200;
+let alignSettleTimer: ReturnType<typeof setTimeout> | null = null;
+function markAlignActivity(): void {
+  // One-way latch: once settled, later activity (a genuine live interaction) must never re-arm
+  // suppression — that would silently swallow the very animations this fix is required to preserve.
+  if (alignTransitionsReady.value) return;
+  if (alignSettleTimer !== null) clearTimeout(alignSettleTimer);
+  alignSettleTimer = setTimeout(() => {
+    alignSettleTimer = null;
+    alignTransitionsReady.value = true;
+  }, ALIGN_SETTLE_QUIET_MS);
+}
+/** Bound onto `.thread-branch-group` (template) in place of a static CSS `transition` rule — see
+ *  `alignTransitionsReady`'s own doc comment above for why this needs to be a JS-computed value
+ *  rather than a permanent CSS declaration. */
+const branchGroupStyle = computed(() => ({
+  transition: alignTransitionsReady.value ? 'margin-top 0.1s ease' : 'none',
+}));
+
 function segmentKey(segment: Pick<ThreadSegment, 'startIndex' | 'endIndex'>): string {
   return `${segment.startIndex}-${segment.endIndex}`;
 }
@@ -428,6 +478,10 @@ const cancelScheduledFrame: (handle: number) => void =
 
 let alignFrame: number | null = null;
 function scheduleAlignSync(): void {
+  // Every distinct request to realign — mount, the segment/expand watcher, or the `ResizeObserver`
+  // — counts as activity, even one that arrives while a frame is already pending (still genuine
+  // ongoing churn) — see `markAlignActivity`'s own doc comment above.
+  markAlignActivity();
   if (alignFrame !== null) return;
   alignFrame = scheduleFrame(() => {
     alignFrame = null;
@@ -570,6 +624,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
   if (alignFrame !== null) cancelScheduledFrame(alignFrame);
+  if (alignSettleTimer !== null) clearTimeout(alignSettleTimer);
 });
 </script>
 
@@ -741,6 +796,7 @@ onBeforeUnmount(() => {
         :key="`branches-${segment.startIndex}-${segment.endIndex}`"
         :ref="(el) => setBranchGroupEl(segment, el as Element | null)"
         class="thread-branch-group"
+        :style="branchGroupStyle"
       >
         <template v-for="(childId, ci) in activeChildIds(segment.childBranchIds)" :key="childId">
           <!-- Two or more active branches off the exact same segment (an N-way fork, N > 2):
@@ -966,13 +1022,18 @@ onBeforeUnmount(() => {
    space between stacked siblings is now an explicit `.thread-branch-spine` element (template,
    above) rather than a plain flex gap, so a 3rd+ sibling's connector still reads as one continuous
    line down from the shared fork point instead of a disconnected stub floating from nothing (see
-   `.thread-branch-spine` below). `transition: margin-top` smooths `syncBranchAlignment`'s own
-   JS-computed nudges (script, above) the same way `MessageBubble.vue`'s own `transition: max-height`
-   smooths the toggle that typically causes them, rather than snapping straight to the new position. */
+   `.thread-branch-spine` below). The `margin-top` transition that smooths `syncBranchAlignment`'s
+   own JS-computed nudges (the same way `MessageBubble.vue`'s own `transition: max-height` smooths
+   the toggle that typically causes them, rather than snapping straight to the new position) is
+   deliberately NOT a static rule here — it's the inline `branchGroupStyle` computed in the script
+   above, `none` until this card's own initial alignment settles and permanently the real transition
+   after that, so a freshly loaded/refreshed page snaps directly into its final position instead of
+   visibly animating every corrective pass a fresh mount's asynchronous data/content settling
+   triggers (bug report: "~2 seconds of animations" on refresh) — see `alignTransitionsReady`'s own
+   doc comment for the full rationale. */
 .thread-branch-group {
   display: flex;
   flex-direction: column;
-  transition: margin-top 0.1s ease;
 }
 /* Fills the same vertical space the old flex `gap` used to (0.75rem) between two stacked sibling
    `.thread-branch-fork`s off the same fork point, drawing a plain continuation of the vertical line

@@ -549,6 +549,97 @@ describe('ThreadCard — branch connector alignment (bug fix)', () => {
 
     expect((groupEl as HTMLElement).style.marginTop).toBe('');
   });
+
+  // Regression test for the initial-load animation bug: a freshly mounted/refreshed page fires the
+  // exact same `syncBranchAlignment` correction machinery `onMounted` already schedules, but a
+  // static `transition: margin-top 0.1s ease` CSS rule made every one of those corrective mount-time
+  // writes visibly animate — confirmed via Playwright against a real seeded multi-branch document to
+  // take ~1-2s of visible motion end-to-end. `alignTransitionsReady`/`branchGroupStyle` (script)
+  // suppress the transition (`transition: none`, inline) until this card's own alignment activity
+  // has gone quiet for `ALIGN_SETTLE_QUIET_MS`, then flip it on permanently — this suite asserts that
+  // state machine directly, mirroring `App.vue`'s `previewSplitDragging`/`DocumentCanvas.vue`'s
+  // `editorSplitDragging` drag-suppression convention (a boolean-driven inline `transition`, not a
+  // static CSS rule).
+  describe('initial-mount transition suppression (no-visible-animation-on-load fix)', () => {
+    it('suppresses the branch-group margin-top transition immediately after mount', () => {
+      const store = useThreadStore();
+      store.threads = [
+        threadFixture({ id: 'root-1', kind: 'thread-root' }),
+        threadFixture({
+          id: 'branch-1',
+          kind: 'thread-branch',
+          parentId: 'root-1',
+          forkedFromMessageId: 'm0',
+          seedExcerptText: 'excerpt',
+        }),
+      ];
+      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+      const wrapper = mountCard('root-1');
+      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
+
+      // Mount just happened — `onMounted`'s own `scheduleAlignSync()` call has armed the settle
+      // timer but it can't have fired yet (0ms have elapsed), so the transition must still read as
+      // suppressed.
+      expect(groupEl.style.transition).toBe('none');
+    });
+
+    it('enables the real margin-top transition once alignment activity goes quiet', async () => {
+      const store = useThreadStore();
+      store.threads = [
+        threadFixture({ id: 'root-1', kind: 'thread-root' }),
+        threadFixture({
+          id: 'branch-1',
+          kind: 'thread-branch',
+          parentId: 'root-1',
+          forkedFromMessageId: 'm0',
+          seedExcerptText: 'excerpt',
+        }),
+      ];
+      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+      const wrapper = mountCard('root-1');
+      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
+      expect(groupEl.style.transition).toBe('none');
+
+      // No further alignment activity is triggered here — the quiet timer armed at mount should
+      // fire on its own and flip the transition on.
+      await waitFor(() => groupEl.style.transition === 'margin-top 0.1s ease');
+      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
+    });
+
+    it('never re-suppresses the transition for a later live interaction once settled', async () => {
+      const store = useThreadStore();
+      store.threads = [
+        threadFixture({ id: 'root-1', kind: 'thread-root' }),
+        threadFixture({
+          id: 'branch-1',
+          kind: 'thread-branch',
+          parentId: 'root-1',
+          forkedFromMessageId: 'm0',
+          seedExcerptText: 'excerpt',
+        }),
+      ];
+      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+      const wrapper = mountCard('root-1');
+      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
+      await waitFor(() => groupEl.style.transition === 'margin-top 0.1s ease');
+
+      // A genuine later live interaction (the same bulk-toggle-driven re-alignment the other tests
+      // in this suite use) re-triggers `scheduleAlignSync()`/`markAlignActivity()` — this must NOT
+      // re-arm suppression, or a real user action shortly after mount would silently lose its
+      // animation too.
+      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
+      // Still true after the interaction's own alignment pass has had time to run.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
+    });
+  });
 });
 
 // Structural coverage for the Y-split fork redesign itself (`runs`, script above): a fork visually
