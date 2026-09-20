@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useThreadFocusState } from '../../composables/threadFocusState.js';
+import { ApiError } from '../../transport/http-client.js';
 import ThreadCard from './ThreadCard.vue';
 import DoneThreadsPanel from './DoneThreadsPanel.vue';
 import HudPanel, { type HudItem } from '../hud/HudPanel.vue';
@@ -89,6 +90,42 @@ watch(threadFocus.activeThreadId, (threadId) => {
 const bulkToggleLabel = computed(() =>
   store.anyMessageCollapsed() ? 'Expand all' : 'Collapse all',
 );
+
+// ---------------------------------------------------------------------------------------------
+// Export all (User Story 4/FR-013b): the whole-document counterpart of each `ThreadCard.vue`'s own
+// single-thread export, exposed here as a HUD-level action alongside Expand-all/Done — it's a
+// document-wide action in the same way those two are, not scoped to any single thread the way
+// `ThreadCard.vue`'s own per-thread export button was (removed: per-thread export never made much
+// sense standalone once the whole-document export exists). `threadStore.exportDocumentSession()`
+// itself is untouched by this move — only its trigger's location changed. Opened in a new tab via a
+// `Blob` object URL rather than rendered inline: the SDK designs this artifact as a standalone
+// document with its own interactive branch-navigation JS, not something meant to be embedded inside
+// a Vue component.
+// ---------------------------------------------------------------------------------------------
+const exportingDocument = ref(false);
+const exportDocumentError = ref<string | null>(null);
+
+async function onExportDocument(): Promise<void> {
+  exportDocumentError.value = null;
+  exportingDocument.value = true;
+  try {
+    const html = await store.exportDocumentSession();
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank');
+    // Revoked after a delay, not immediately: the newly opened tab reads the blob URL
+    // asynchronously, so revoking synchronously here risks the tab seeing it gone before it loads.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    exportDocumentError.value =
+      err instanceof ApiError && err.code === 'EMPTY_DOCUMENT_EXPORT'
+        ? 'This document has no thread messages yet, so there is nothing to export.'
+        : err instanceof Error
+          ? err.message
+          : 'Failed to export this document.';
+  } finally {
+    exportingDocument.value = false;
+  }
+}
 </script>
 
 <template>
@@ -99,11 +136,11 @@ const bulkToggleLabel = computed(() =>
          011-linear-thread-mode: this used to be a standalone `.thread-mode-toolbar` (plain title +
          buttons) — now the shared `HudPanel.vue` (the same component canvas mode's own toolbar
          mounts), so the two HUD surfaces stay visually/behaviorally identical rather than
-         separately-maintained look-alikes. Its own doc-wide Expand-all/Done actions (unrelated to
-         any single thread — unlike `ThreadCard.vue`'s own per-thread bulk-toggle) move into
-         `HudPanel.vue`'s `#actions` slot rather than a second, adjacent toolbar strip. "Export all"
-         used to live here too, but moved to `App.vue`'s title bar (next to History) since both are
-         document-level actions, not scoped to this tree view the way Expand-all/Done are. -->
+         separately-maintained look-alikes. Its own doc-wide Expand-all/Export-all/Done actions
+         (unrelated to any single thread — unlike `ThreadCard.vue`'s own per-thread bulk-toggle) move
+         into `HudPanel.vue`'s `#actions` slot — the same right-hand header cluster canvas mode's own
+         usage of this component reserves for its Active/All filter toggle — rather than a second,
+         adjacent toolbar strip. -->
     <div class="thread-mode-hud">
       <HudPanel
         label="Threads"
@@ -121,11 +158,23 @@ const bulkToggleLabel = computed(() =>
           <button type="button" class="thread-mode-bulk-toggle" @click="store.toggleAllMessages()">
             {{ bulkToggleLabel }}
           </button>
+          <button
+            type="button"
+            class="thread-mode-export-all"
+            title="Export the whole document's Pi session as a self-contained HTML file"
+            :disabled="exportingDocument"
+            @click="onExportDocument"
+          >
+            {{ exportingDocument ? 'Exporting…' : 'Export all' }}
+          </button>
           <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
             Done ({{ doneCount }})
           </button>
         </template>
       </HudPanel>
+      <p v-if="exportDocumentError" class="thread-mode-export-error" role="alert">
+        {{ exportDocumentError }}
+      </p>
     </div>
 
     <div class="thread-mode-content">
@@ -209,6 +258,14 @@ const bulkToggleLabel = computed(() =>
 }
 .thread-mode-empty {
   color: var(--neutral-muted-color, #4b5563);
+}
+/* Plain inline text, same tone as `.load-error p` — sits below the sticky HUD row (inside
+   `.thread-mode-hud`, not scrolling away with it) rather than centered/width-capped the way
+   `.thread-mode-content`'s narrower reading column would otherwise force it. */
+.thread-mode-export-error {
+  margin: 0.4rem 0 0;
+  color: var(--danger-color, #b91c1c);
+  font-size: 0.8rem;
 }
 /* `align-items: flex-start` + `overflow-x: auto`: each `ThreadCard.vue`'s root `.thread-node` sizes
    itself to its own content width (trunk box, plus a further-right column per branch depth — see

@@ -15,7 +15,6 @@ import {
 import {
   AnchorIsTipError,
   EmptyDocumentExportError,
-  EmptyThreadExportError,
   InvalidHighlightError,
   PendingEditsBlockDoneError,
   type ThreadService,
@@ -63,9 +62,6 @@ function handleThreadError(
       code: 'PENDING_EDITS_BLOCK_DONE',
       details: { pendingEditIds: err.pendingEditIds },
     };
-  }
-  if (err instanceof EmptyThreadExportError) {
-    return { status: 409, code: 'EMPTY_THREAD_EXPORT' };
   }
   if (err instanceof EmptyDocumentExportError) {
     return { status: 409, code: 'EMPTY_DOCUMENT_EXPORT' };
@@ -216,20 +212,6 @@ export function registerThreadRoutes(
         requireDocumentType(storage, request.params.documentId, 'thread');
         requireThreadInDocument(storage, request.params.documentId, request.params.id);
         const result = threadService.reopen(request.params.id);
-        return reply.send(result);
-      });
-    },
-  );
-
-  // User Story 4/FR-013: a fresh, on-demand genuine Pi-native session export (research.md R9) —
-  // never persisted, so this is a plain read (GET), not an action route.
-  app.get<{ Params: { documentId: string; id: string } }>(
-    '/api/documents/:documentId/threads/:id/export',
-    async (request, reply) => {
-      return withThreadErrors(reply, async () => {
-        requireDocumentType(storage, request.params.documentId, 'thread');
-        requireThreadInDocument(storage, request.params.documentId, request.params.id);
-        const result = threadService.exportSession(request.params.id);
         return reply.send(result);
       });
     },

@@ -8,6 +8,7 @@ import type {
   ListConversationsResponse,
   UserSettingsDto,
 } from '@rapid-ai-document-review/shared/contracts/http';
+import HistoryPanel from '../../src/components/history/HistoryPanel.vue';
 
 // New feature: synchronized scrolling between the Editor and Preview panes. This covers the
 // toolbar-level bits App.vue itself owns (per specs/005-canvas-conversation-threads' toolbar
@@ -83,7 +84,6 @@ vi.mock('../../src/transport/http-client.js', () => ({
     deleteDocument: vi.fn(),
     // Used only by the "Thread-mode header" suite below (011-linear-thread-mode).
     listThreads: vi.fn(),
-    exportDocumentSession: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status: number;
@@ -1798,14 +1798,16 @@ describe('App.vue — Document switcher (multi-document)', () => {
   });
 });
 
-// 011-linear-thread-mode: "History"/"Export all" placement fix + relocation. Both are document-level
-// actions (not scoped to the thread tree the way ThreadModeView's own Expand-all/Done are), so both
-// now render together in App.vue's own Thread-mode title bar rather than History floating alone in
-// its own row below the title, and Export all living in ThreadModeView's HUD. This suite mounts the
-// real `App.vue` against a `documentType: 'thread'` document (stubbing `ThreadModeView`/
-// `HistoryPanel` themselves — their own internals are covered by ThreadModeView.spec.ts/
-// HistoryPanel.spec.ts, not re-tested here) and checks only the header's own structure/wiring.
-describe('App.vue — Thread-mode header: History + Export all placement', () => {
+// 011-linear-thread-mode: History has no meaningful use in Thread mode (a `documentType: 'thread'`
+// document can never accumulate more than its single creation revision through this mode's own
+// UI — no editor/canvas is ever mounted, and there are no `read_document`/`propose_document_edit`
+// tools), so it's removed from this shell entirely rather than kept as a no-op button + panel.
+// "Export all" moved into `ThreadModeView.vue`'s own HUD `#actions` slot (see
+// ThreadModeView.spec.ts for its own coverage) — this suite mounts the real `App.vue` against a
+// `documentType: 'thread'` document (stubbing `ThreadModeView`/`HistoryPanel` themselves — their
+// own internals are covered by ThreadModeView.spec.ts/HistoryPanel.spec.ts, not re-tested here) and
+// checks only that the title bar's own shell no longer renders either control.
+describe('App.vue — Thread-mode header: History removed, Export all relocated', () => {
   let pinia: Pinia;
 
   const threadDocumentFixture: DocumentDto = {
@@ -1856,7 +1858,6 @@ describe('App.vue — Thread-mode header: History + Export all placement', () =>
       conversations: [],
       nextCursor: null,
     });
-    vi.mocked(httpClient.exportDocumentSession).mockResolvedValue('<html>exported</html>');
   });
 
   afterEach(() => {
@@ -1870,57 +1871,24 @@ describe('App.vue — Thread-mode header: History + Export all placement', () =>
     return wrapper;
   }
 
-  it('renders History and Export all together in .thread-mode-header-actions, nested inside .document-title-bar alongside the title-bar icons', async () => {
+  it('renders no History button and no thread-mode-header-actions box in the title bar', async () => {
     const wrapper = await mountThreadApp();
 
     const titleBar = wrapper.find('.document-title-bar');
     expect(titleBar.exists()).toBe(true);
-
-    const actions = titleBar.find('.thread-mode-header-actions');
-    expect(actions.exists()).toBe(true);
-
-    const buttonLabels = actions.findAll('button').map((b) => b.text());
-    expect(buttonLabels).toEqual(['History', 'Export all']);
-
-    // Source order within `.document-title-bar`: switcher, then the icon row, then this actions
-    // box — i.e. it sits in the *same* row as the title/icons (flush right, after them), not on a
-    // separate row underneath.
-    const topLevelChildren = Array.from(titleBar.element.children).map((el) =>
-      el.className.toString(),
-    );
-    const iconsIndex = topLevelChildren.findIndex((c) => c.includes('title-bar-icons'));
-    const actionsIndex = topLevelChildren.findIndex((c) =>
-      c.includes('thread-mode-header-actions'),
-    );
-    expect(iconsIndex).toBeGreaterThanOrEqual(0);
-    expect(actionsIndex).toBeGreaterThan(iconsIndex);
+    expect(titleBar.text()).not.toContain('History');
+    expect(wrapper.find('.thread-mode-header-actions').exists()).toBe(false);
   });
 
-  it('does not render "Export all" inside the stubbed ThreadModeView (it only lives in the header now)', async () => {
+  it('renders no HistoryPanel and never opens one for a thread document', async () => {
     const wrapper = await mountThreadApp();
     expect(wrapper.find('.thread-mode-layout').exists()).toBe(true);
-    expect(wrapper.find('.thread-mode-export-all').exists()).toBe(false);
+    expect(wrapper.findComponent(HistoryPanel).exists()).toBe(false);
   });
 
-  it('clicking "Export all" calls threadStore.exportDocumentSession for the active document and opens the result in a new tab', async () => {
-    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
-    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-
+  it('does not render "Export all" in the title bar (it only lives in the stubbed ThreadModeView\'s own HUD now)', async () => {
     const wrapper = await mountThreadApp();
-    const exportButton = wrapper
-      .findAll('.thread-mode-header-actions button')
-      .find((b) => b.text().includes('Export all'));
-    if (!exportButton) throw new Error('"Export all" button not found in the header');
-
-    await exportButton.trigger('click');
-    await flushPromises();
-
-    expect(httpClient.exportDocumentSession).toHaveBeenCalledWith(threadDocumentFixture.id);
-    expect(openSpy).toHaveBeenCalledWith('blob:mock-url', '_blank');
-
-    createObjectURLSpy.mockRestore();
-    revokeObjectURLSpy.mockRestore();
-    openSpy.mockRestore();
+    const titleBar = wrapper.find('.document-title-bar');
+    expect(titleBar.text()).not.toContain('Export all');
   });
 });

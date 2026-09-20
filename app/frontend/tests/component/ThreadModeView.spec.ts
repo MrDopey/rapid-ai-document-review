@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import ThreadModeView from '../../src/components/thread/ThreadModeView.vue';
 import { useThreadStore } from '../../src/stores/thread.js';
 import type { ConversationMessageState } from '../../src/stores/conversations.js';
+import { httpClient, ApiError } from '../../src/transport/http-client.js';
 
 // 011-linear-thread-mode: `ThreadModeView.vue` now mounts the shared `HudPanel.vue` (generalized
 // from the canvas-only HUD it used to be exclusively) in place of its own former standalone
@@ -99,6 +100,7 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     // keeps each test's own DOM out of the next test's `document.body`.
     activeWrapper?.unmount();
     activeWrapper = null;
+    vi.clearAllMocks();
   });
 
   function seedTree(): void {
@@ -147,13 +149,49 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     ]);
   });
 
-  it('keeps the Expand all/Done actions inside the shared HUD header ("Export all" now lives in App.vue\'s title bar)', () => {
+  it('keeps the Expand all/Export all/Done actions inside the shared HUD header', () => {
     seedTree();
     const wrapper = mountView();
     const header = wrapper.find('.hud-header');
     expect(header.find('.thread-mode-bulk-toggle').exists()).toBe(true);
-    expect(header.find('.thread-mode-export-all').exists()).toBe(false);
+    expect(header.find('.thread-mode-export-all').exists()).toBe(true);
+    expect(header.find('.thread-mode-export-all').text()).toBe('Export all');
     expect(header.find('.thread-mode-done-toggle').text()).toContain('Done (0)');
+  });
+
+  it('clicking "Export all" calls threadStore.exportDocumentSession and opens the result in a new tab', async () => {
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.mocked(httpClient.exportDocumentSession).mockResolvedValue('<html>exported</html>');
+
+    seedTree();
+    const wrapper = mountView();
+    const exportButton = wrapper.find('.thread-mode-export-all');
+    expect(exportButton.exists()).toBe(true);
+
+    await exportButton.trigger('click');
+    await flushPromises();
+
+    expect(httpClient.exportDocumentSession).toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith('blob:mock-url', '_blank');
+
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+    openSpy.mockRestore();
+  });
+
+  it('shows an inline error when "Export all" is refused as empty', async () => {
+    vi.mocked(httpClient.exportDocumentSession).mockRejectedValue(
+      new ApiError(409, 'EMPTY_DOCUMENT_EXPORT', 'empty'),
+    );
+
+    seedTree();
+    const wrapper = mountView();
+    await wrapper.find('.thread-mode-export-all').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.thread-mode-export-error').text()).toContain('nothing to export');
   });
 
   it('Ctrl+Alt+J cycles the active thread forward, highlighting and scrolling the matching ThreadCard', async () => {

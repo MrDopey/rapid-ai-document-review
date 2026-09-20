@@ -1,8 +1,5 @@
 import { join } from 'node:path';
-import type {
-  ConversationDto,
-  ExportThreadSessionResponse,
-} from '@rapid-ai-document-review/shared/contracts/http';
+import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { DocumentNotFoundError } from '../document/document-service.ts';
 import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
@@ -23,9 +20,6 @@ import { deriveBranchName, normalizeForHighlightMatch } from './seed-excerpt.ts'
 
 export class InvalidHighlightError extends Error {}
 export class AnchorIsTipError extends Error {}
-/** User Story 4/FR-013: a Thread with no message history yet has nothing genuine to export
- *  (`PiService.exportThreadSession` would otherwise fail on an empty root-to-leaf path). */
-export class EmptyThreadExportError extends Error {}
 /** User Story 4/FR-013b: a threaded-conversation document with no message history in ANY of its
  *  Threads has nothing genuine to export as a whole-tree artifact either. */
 export class EmptyDocumentExportError extends Error {}
@@ -245,35 +239,10 @@ export class ThreadService {
   }
 
   /**
-   * Produces a fresh, on-demand genuine Pi-native session export of `threadId`'s own history
-   * (User Story 4/FR-013, research.md R9, data-model.md's "Exported session"). Refused for a
-   * Thread with no message history yet — there is nothing genuine to export.
-   */
-  exportSession(threadId: string): ExportThreadSessionResponse {
-    const thread = this.getThreadOrThrow(threadId);
-    const appMessages = buildConversationMessages(this.storage, threadId);
-    if (appMessages.length === 0) {
-      throw new EmptyThreadExportError(`Thread ${threadId} has no message history to export`);
-    }
-    const { jsonl, messages } = this.piService.exportThreadSession(thread);
-    return {
-      threadId,
-      exportedAt: new Date().toISOString(),
-      jsonl,
-      messages: messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        text: m.text,
-        createdAt: m.timestamp,
-      })),
-    };
-  }
-
-  /**
    * Produces a fresh, on-demand genuine Pi-native whole-document session export (User Story
-   * 4/FR-013b, research.md R10, data-model.md's "Exported document session") — the whole-tree
-   * counterpart of `exportSession` above, covering every Thread in `documentId` at once. Refused
-   * when no Thread in the document has any message history yet.
+   * 4/FR-013b, research.md R10, data-model.md's "Exported document session"), covering every
+   * Thread in `documentId` at once. Refused when no Thread in the document has any message history
+   * yet.
    */
   async exportDocumentSession(
     documentId: string,

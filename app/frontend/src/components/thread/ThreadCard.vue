@@ -8,7 +8,6 @@ import ConversationActionButtons from '../conversation/ConversationActionButtons
 import MessageBubble from '../conversation/MessageBubble.vue';
 import ThreadComposer from './ThreadComposer.vue';
 import HighlightBranchMenu from './HighlightBranchMenu.vue';
-import ThreadExportViewer from './ThreadExportViewer.vue';
 
 /**
  * 011-linear-thread-mode: renders one Thread as one or more stacked, read-only
@@ -244,13 +243,6 @@ async function onReopen(): Promise<void> {
   await store.reopen(props.threadId);
 }
 
-// ---------------------------------------------------------------------------------------------
-// Export (User Story 4/FR-013): an always-available utility action, folded into this same
-// `headerActions` row below (which already combines the per-Thread bulk-toggle action with Mark
-// done/Reopen) rather than a fourth hand-rolled `<button>`.
-// ---------------------------------------------------------------------------------------------
-const exportOpen = ref(false);
-
 // Same `ActionDescriptor` + `ConversationActionButtons.vue` renderer canvas mode's own
 // `ConversationThreadBox.vue`/`ConversationView.vue` header actions already use (its own doc
 // comment: "consolidated from the near-identical `.thread-action-button` rule ... in both" prior
@@ -290,14 +282,6 @@ const headerActions = computed<ActionDescriptor[]>(() => [
     label: threadBulkToggleLabel.value,
     ariaLabel: `${threadBulkToggleLabel.value} messages in this thread`,
     onClick: onToggleThreadMessages,
-  },
-  {
-    key: 'export',
-    label: 'Export',
-    ariaLabel: `Export ${thread.value?.name ?? 'thread'}'s Pi session`,
-    onClick: () => {
-      exportOpen.value = true;
-    },
   },
   ...doneActions.value,
 ]);
@@ -414,16 +398,6 @@ const cardStyle = computed(() => ({
       @quote="onQuoteFromSelection"
       @dismiss="dismissSelection"
     />
-
-    <Transition name="modal">
-      <div
-        v-if="exportOpen"
-        class="modal-overlay thread-export-overlay"
-        @click.self="exportOpen = false"
-      >
-        <ThreadExportViewer :thread-id="threadId" @close="exportOpen = false" />
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -574,19 +548,5 @@ const cardStyle = computed(() => ({
   border-left-color: var(--neutral-muted-color, #4b5563);
   border-right-width: 0;
   transform: translateX(-1px);
-}
-/* `.modal-overlay`'s shared base rule (see its own comment in style.css) deliberately leaves
-   z-index to each caller, since overlays nest. `.thread-export-overlay` needs an explicit z-index
-   here: at `z-index: auto`, this `position: fixed` overlay wouldn't establish its own stacking
-   context and would paint in plain tree order within the page's root stacking context — where
-   `.thread-card-header` above (`position: sticky`, `--z-raised`) DOES establish one and paints
-   above any unstyled (auto) content in that same root context, regardless of DOM order, letting
-   every ThreadCard's own sticky header render on top of this export modal instead of behind it
-   (the exact bug this fixes). `--z-overlay-blocking`, not `--z-overlay`, matches this file's own
-   `HistoryPanel.vue`'s `.diff-overlay` precedent: this is an independent, page-level "simple" modal
-   with no nesting relationship to any other overlay in this mode, so it must always render above
-   every sticky header/toolbar/popover tier below `--z-indicator`, no exceptions. */
-.thread-export-overlay {
-  z-index: var(--z-overlay-blocking, 70);
 }
 </style>

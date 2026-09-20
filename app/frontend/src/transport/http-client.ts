@@ -18,7 +18,6 @@ import {
   ErrorEnvelope,
   ExportDocumentQuery,
   ExportDocumentSessionQuery,
-  ExportThreadSessionResponse,
   GetConversationResponse,
   GetDocumentResponse,
   ListConversationsResponse,
@@ -367,13 +366,7 @@ export const httpClient = {
     );
   },
 
-  async exportThread(documentId: string, id: string) {
-    return request(`/api/documents/${documentId}/threads/${id}/export`, undefined, (j) =>
-      ExportThreadSessionResponse.parse(j),
-    );
-  },
-
-  /** User Story 4/FR-013b: the whole-document counterpart of `exportThread` — returns raw HTML text
+  /** User Story 4/FR-013b: the whole-document Pi-native session export — returns raw HTML text
    *  (not a JSON DTO), following `exportDocument`'s own raw-text-response pattern rather than the
    *  JSON-DTO `request()` helper every other method here uses, since the response body itself is a
    *  self-contained HTML artifact (`GET .../threads/export`, contracts/thread-mode.md). */

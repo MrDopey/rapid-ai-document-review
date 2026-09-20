@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 import type {
   BranchThreadRequest,
   ConversationDto,
-  ExportThreadSessionResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
   buildThreadBranchSeedMessage,
@@ -242,15 +241,10 @@ export const useThreadStore = defineStore('thread', {
       if (thread) thread.doneAt = null;
     },
 
-    /** User Story 4/FR-013: a fresh, on-demand genuine Pi-native session export — ephemeral
-     *  (data-model.md's "Exported session"), so this returns the result directly rather than
-     *  mutating any store state (there is nothing to cache; a second call produces a new export). */
-    async exportThread(threadId: string): Promise<ExportThreadSessionResponse> {
-      return httpClient.exportThread(activeDocumentId(), threadId);
-    },
-
-    /** User Story 4/FR-013b: the whole-document counterpart of `exportThread` — also ephemeral
-     *  (data-model.md's "Exported document session"), returning the raw HTML text directly. */
+    /** User Story 4/FR-013b: a fresh, on-demand genuine whole-document Pi-native session export —
+     *  ephemeral (data-model.md's "Exported document session"), so this returns the raw HTML text
+     *  directly rather than mutating any store state (there is nothing to cache; a second call
+     *  produces a new export). */
     async exportDocumentSession(): Promise<string> {
       return httpClient.exportDocumentSession(activeDocumentId());
     },
