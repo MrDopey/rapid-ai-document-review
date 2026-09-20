@@ -94,6 +94,14 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
   background: var(--panel-bg, #f7f7f8);
   border-bottom: 2px solid var(--border-color, #ddd);
   border-radius: 8px 8px 0 0;
+  /* Sticky within this dialog's own scrolling root (`.help-dialog` above has `overflow: auto`) so
+     the title and Close button stay reachable while scrolling long help content — same technique
+     as style.css's shared `.diff-header` (DiffViewer.vue/RevisionDiffViewer.vue): `top` matches
+     this element's own negative margin so it stays flush with the dialog's edge instead of
+     jumping down to the padding edge once it starts sticking. */
+  position: sticky;
+  top: -1rem;
+  z-index: 1;
 }
 .dialog-header h2 {
   margin: 0;
