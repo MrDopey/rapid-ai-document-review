@@ -2041,13 +2041,31 @@ describe('Contract: HTTP API (http-api.md)', () => {
   // ---- System prompt ----
 
   describe('GET /api/system-prompt', () => {
-    it('returns the pi agent system prompt, read-only', async () => {
+    it('returns the canvas pi agent system prompt, read-only, by default', async () => {
       const res = await call(ctx.app, 'GET', '/api/system-prompt');
       expect(res.status).toBe(200);
       const parsed = SystemPromptDto.parse(res.json);
       expect(parsed.systemPrompt).toContain(
         'AI reviewer embedded in a document review application',
       );
+      expect(parsed.systemPrompt).toContain('read_document');
+    });
+
+    it('?mode=thread returns the Thread-mode variant, with no read_document/propose_document_edit references (011-linear-thread-mode)', async () => {
+      const res = await call(ctx.app, 'GET', '/api/system-prompt?mode=thread');
+      expect(res.status).toBe(200);
+      const parsed = SystemPromptDto.parse(res.json);
+      expect(parsed.systemPrompt).toContain(
+        'AI reviewer embedded in a document review application',
+      );
+      expect(parsed.systemPrompt).not.toContain('Anchor discipline');
+      expect(parsed.systemPrompt).not.toContain('Proposal etiquette');
+    });
+
+    it('rejects an unrecognized ?mode value', async () => {
+      const res = await call(ctx.app, 'GET', '/api/system-prompt?mode=bogus');
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
     });
   });
 });

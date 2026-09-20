@@ -953,7 +953,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
     </Transition>
     <Transition name="modal">
       <div v-if="systemPromptOpen" class="modal-overlay blocking-overlay">
-        <SystemPromptDialog @close="systemPromptOpen = false" />
+        <SystemPromptDialog mode="thread" @close="systemPromptOpen = false" />
       </div>
     </Transition>
 
@@ -1178,7 +1178,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
     </Transition>
     <Transition name="modal">
       <div v-if="systemPromptOpen" class="modal-overlay blocking-overlay">
-        <SystemPromptDialog @close="systemPromptOpen = false" />
+        <SystemPromptDialog mode="canvas" @close="systemPromptOpen = false" />
       </div>
     </Transition>
     <div ref="panesEl" class="panes" :style="panesStyle">

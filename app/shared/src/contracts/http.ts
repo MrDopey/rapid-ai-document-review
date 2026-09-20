@@ -226,6 +226,16 @@ export const SystemPromptDto = z.object({
 });
 export type SystemPromptDto = z.infer<typeof SystemPromptDto>;
 
+// 011-linear-thread-mode: canvas and Thread conversations are given different system prompts
+// (`pi/system-prompt.ts`'s `buildSystemPrompt(isThread)`, since a Thread has no `read_document`/
+// `propose_document_edit` tools) — the dialog that displays this prompt is mounted once per app
+// mode (App.vue), so it asks for the variant matching whichever mode it was opened from. Missing/
+// omitted defaults to `'canvas'`, preserving pre-existing callers' behavior.
+export const SystemPromptQuery = z.object({
+  mode: z.enum(['canvas', 'thread']).optional(),
+});
+export type SystemPromptQuery = z.infer<typeof SystemPromptQuery>;
+
 // ---- Pagination ----
 
 export const PaginationQuery = z.object({

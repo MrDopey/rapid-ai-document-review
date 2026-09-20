@@ -3,6 +3,14 @@ import { onMounted, ref } from 'vue';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import { httpClient } from '../../transport/http-client.js';
 
+const props = defineProps<{
+  /** Which of App.vue's two mutually-exclusive view trees this dialog was opened from — mirrors
+   *  KeyboardShortcutsDialog.vue's own `mode` prop. Selects which of `buildSystemPrompt()`'s two
+   *  variants (backend `pi/system-prompt.ts`) the displayed prompt actually reflects, since Thread
+   *  mode's agent has a different tool set than canvas's (011-linear-thread-mode). */
+  mode: 'thread' | 'canvas';
+}>();
+
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const rootEl = ref<HTMLElement | null>(null);
@@ -13,7 +21,7 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 
 onMounted(async () => {
   try {
-    const dto = await httpClient.getSystemPrompt();
+    const dto = await httpClient.getSystemPrompt(props.mode);
     systemPrompt.value = dto.systemPrompt;
   } catch {
     error.value = 'Failed to load the system prompt.';

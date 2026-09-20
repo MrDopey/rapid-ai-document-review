@@ -172,7 +172,7 @@ async function createRealSession(
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: config.piCodingAgentDir,
-    systemPrompt: buildSystemPrompt(),
+    systemPrompt: buildSystemPrompt(false),
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,

@@ -404,7 +404,8 @@ export const httpClient = {
     );
   },
 
-  async getSystemPrompt() {
-    return request('/api/system-prompt', undefined, (j) => SystemPromptDto.parse(j));
+  async getSystemPrompt(mode: 'canvas' | 'thread' = 'canvas') {
+    const qs = mode === 'thread' ? '?mode=thread' : '';
+    return request(`/api/system-prompt${qs}`, undefined, (j) => SystemPromptDto.parse(j));
   },
 };

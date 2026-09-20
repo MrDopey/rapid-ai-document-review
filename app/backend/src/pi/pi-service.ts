@@ -87,6 +87,12 @@ function resolveAgentTurnTimeoutMs(): number {
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_AGENT_TURN_TIMEOUT_MS;
 }
 
+/** Shared by `buildTools` (tool registration) and `getOrCreateSession` (system prompt selection,
+ *  011-linear-thread-mode) so both agree on exactly which conversation kinds are Threads. */
+function isThreadConversation(conversation: ConversationRow): boolean {
+  return conversation.kind === 'thread-root' || conversation.kind === 'thread-branch';
+}
+
 /**
  * The ONLY module in this codebase that imports `@earendil-works/pi-coding-agent`
  * (Constitution Principle II). Owns one live `AgentSession` per conversation — lazily created on
@@ -201,7 +207,7 @@ export class PiService {
    * `FakeAgentSession`, which invokes these same tool objects directly instead of a real model
    * deciding to call them. */
   private buildTools(conversation: ConversationRow): RegisteredToolLike[] {
-    const isThread = conversation.kind === 'thread-root' || conversation.kind === 'thread-branch';
+    const isThread = isThreadConversation(conversation);
 
     const tools: RegisteredToolLike[] = [
       ...(isThread
@@ -289,7 +295,7 @@ export class PiService {
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: config.piCodingAgentDir,
-      systemPrompt: buildSystemPrompt(),
+      systemPrompt: buildSystemPrompt(isThreadConversation(conversation)),
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,
