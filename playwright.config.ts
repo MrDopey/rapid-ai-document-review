@@ -36,6 +36,17 @@ export default defineConfig({
       dependencies: ['stories'],
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'thread-mode-hud',
+      // Self-contained spec (creates its own canvas + thread documents) — same
+      // 'stories'-dependency-for-ordering-only convention as 'history-diff' above, not a shared
+      // fixture. Real-browser-layout regression coverage for 011-linear-thread-mode's page-level
+      // HUD width (jsdom's own `ThreadModeView.spec.ts` component tests cannot assert actual
+      // rendered pixel widths at all — see that spec's own doc comment).
+      testMatch: /thread-mode-hud\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: [
     {

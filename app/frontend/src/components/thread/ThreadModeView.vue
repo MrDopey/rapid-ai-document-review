@@ -142,30 +142,34 @@ async function onExportDocument(): Promise<void> {
          usage of this component reserves for its Active/All filter toggle — rather than a second,
          adjacent toolbar strip.
 
-         Visual-fit bug fix (user report: "the thread's header and expand/collapse all doesn't fit
-         with the thread"): `.thread-mode-hud` below is deliberately just a full-width STICKY
-         POSITIONING SHELL now, not the painted box itself (same "sticky positions the margin edge,
-         not the painted box" split `ThreadCard.vue`'s own `.thread-card-header` doc comment already
-         uses) — the actual bordered/rounded card lives on the new `.thread-mode-hud-card` wrapper
-         just inside it. Root cause: `HudPanel.vue` genuinely IS the same shared component canvas
-         mode uses (no divergent/forked implementation crept back in), but this view used to paint
-         `.thread-mode-hud` itself as a flat, full-viewport-bleed strip (background + a bottom border
-         only, no side borders, no rounding) with no relationship to the width of the actual content
-         beneath it — for the common case of a single un-branched Thread (a narrow, centered,
-         properly-boxed ~640px `.thread-card`), that produced a full-width flat gray bar sitting above
-         a small floating box, looking obviously disconnected from "the thread" it's the header for
-         (confirmed visually via Playwright). `.thread-mode-hud-card` instead reuses the exact same
-         `width: fit-content; max-width: calc(100vw - 2.5rem); margin: 0 auto;` sizing formula
-         `.thread-mode-content` below already uses for the SAME reason (a lone thread stays a
-         modest, centered card; a wide/deep tree grows the header to match, right up to the same
-         viewport cap) — this is what actually makes the header "reuse"/track the thread's own width
-         rather than merely copying canvas mode's unrelated 80/20 toolbar-column proportions, which
-         only coincidentally happened to span similar total width there. It also picks up the same
-         bordered, rounded-card treatment every other box in this app already uses (canvas's own
-         `.hud-box`, and this very page's `.thread-card`/`.thread-card-header`), rather than being the
-         one unboxed, flat exception. -->
+         Two-complaint history, both from real user reports, resolved together below (see
+         `.thread-mode-hud`/`.thread-mode-hud-inner`'s own doc comments for the CSS side):
+          1. Original ("the thread's header and expand/collapse all doesn't fit with the thread"):
+             `.thread-mode-hud` used to paint itself as a flat, full-viewport-bleed strip with no
+             border/rounding/relationship to the narrower, centered, bordered `.thread-card` tree
+             beneath it.
+          2. Regression, introduced by the first fix for (1): that fix made the painted HUD box
+             itself shrink to `.thread-mode-content`'s own content-driven `fit-content` width — for
+             the common single-Thread case (a ~640px trunk box), that reads as "the HUD shrunk" —
+             a tiny floating card in an otherwise-empty full-width strip, no longer resembling a
+             toolbar at all. Confirmed via Playwright against canvas mode's own HUD at the same
+             1440px viewport: canvas's `.hud-box` (77% flex column) + `.actions-group` (19%) together
+             span (nearly) the FULL toolbar row width regardless of how many conversations are
+             open — canvas's HUD box width is never coupled to any content's own width the way this
+             view's first fix mistakenly coupled it to the thread tree's width.
+         Root-cause fix: `.thread-mode-hud` is restored to a real, full-width PAINTED bar (background
+         + bottom border, exactly like this view's own pre-regression version and structurally like
+         canvas's own always-full-width `.toolbar` row) — this alone fixes complaint 2. Nested inside
+         it, `.thread-mode-hud-inner` is a plain (no border/background of its own — the outer bar
+         already supplies both) centering wrapper that reuses `.thread-mode-content`'s own
+         `width: fit-content; max-width: calc(100vw - 2.5rem); margin: 0 auto` formula, so the actual
+         HudPanel/action-button row lines up directly above the thread tree's own left/right edges
+         instead of being flush against the far-off viewport edges — this is what actually fixes
+         complaint 1 (the header's *content* now visibly relates to "the thread" beneath it), without
+         re-coupling the bar's own painted width to that content's width the way the reverted fix
+         did. -->
     <div class="thread-mode-hud">
-      <div class="thread-mode-hud-card">
+      <div class="thread-mode-hud-inner">
         <HudPanel
           label="Threads"
           :items="hudItems"
@@ -239,50 +243,39 @@ async function onExportDocument(): Promise<void> {
   flex-direction: column;
   overflow-y: auto;
 }
-/* 011-linear-thread-mode: the sticky positioning shell around the shared `HudPanel.vue` — the
-   panel itself (`.hud-panel`, `HudPanel.vue`'s own scoped style) stays non-sticky/unstyled-for-
-   position so canvas mode's own (non-sticky) usage in `App.vue`'s toolbar is unaffected; this
-   wrapper is Thread-mode-specific positioning only, same pattern `App.vue`'s own `.hud-box` uses to
-   wrap its canvas-mode `HudPanel` without baking sticky behavior into the shared component.
-   Deliberately a sibling of (not nested inside) `.thread-mode-content` below, and deliberately
-   `width: 100%` with no `max-width` — this shell itself always spans this view's full available
-   width so the sticky positioning math/click target covers the whole header row, exactly like
-   `ThreadCard.vue`'s own `.thread-card-header` doc comment's "sticky positions the margin edge, not
-   the painted box" split. It carries NO visible box styling of its own (no border/background/
-   radius) — see `.thread-mode-hud-card` just below for why, and for the actual box. A previous
-   version of this rule capped it at `max-width: 900px` (matching `.thread-mode-content`'s own
-   pre-tree-layout-redesign width), later removed entirely so it could span full width like canvas
-   mode's own toolbar row — but that made this shell itself the visible, borderless, edge-to-edge
-   painted strip (bug report: "the thread's header and expand/collapse all doesn't fit with the
-   thread"): for a single, un-branched Thread (a narrow, centered, properly-boxed ~640px
-   `.thread-card`), a full-viewport-wide flat gray bar sitting above one small floating box reads as
-   obviously disconnected from the very thread it's the header for. Splitting the sticky shell (this
-   rule) from the painted card (`.thread-mode-hud-card` below) keeps the earlier full-width-shell fix
-   intact while letting the actual visible box track the tree's own width instead. */
+/* 011-linear-thread-mode: the sticky, FULL-WIDTH PAINTED bar behind the shared `HudPanel.vue` —
+   both the sticky positioning shell AND the visible box, unlike the brief `.thread-mode-hud-card`
+   split this rule went through and back out of (see the template's own doc comment above for the
+   two-complaint history). `background`/`border-bottom` restored to this view's own pre-regression
+   values, structurally the same role as canvas mode's own `.toolbar` row (`App.vue`) — a header bar
+   whose OWN width is always the full available width, never coupled to whatever content happens to
+   be inside it (canvas's `.hud-box`+`.actions-group` together span its `.toolbar` row's full width
+   regardless of conversation count; this bar must behave the same way regardless of thread-tree
+   width). `HudPanel.vue`'s own root (`.hud-panel`) stays exactly as generalized/shared with canvas
+   mode — no CSS override of its internals lives here, only this wrapper and `.thread-mode-hud-inner`
+   just inside it. */
 .thread-mode-hud {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky, 2);
+  background: var(--panel-bg, #f7f7f8);
+  border-bottom: 2px solid var(--border-color, #ddd);
   width: 100%;
   padding: 0.6rem 1rem;
 }
-/* The actual painted HUD card — reuses `.thread-mode-content` below's exact
-   `width: fit-content; max-width: calc(100vw - 2.5rem); margin: 0 auto;` sizing formula (see that
-   rule's own doc comment for why: a lone thread stays a modest, centered box; a wide/deep tree
-   grows the header to match, right up to the same per-viewport cap `ThreadCard.vue`'s own boxes
-   use) so the header's own width actually tracks "the thread" beneath it, plus the same bordered/
-   rounded-card treatment every other box in this app already carries (canvas mode's own `.hud-box`,
-   this very page's own `.thread-card`/`.thread-card-header`) instead of being the one unboxed, flat
-   exception. `HudPanel.vue`'s own root (`.hud-panel`) stays exactly as generalized/shared with
-   canvas mode — no CSS override of its internals lives here, only this wrapper around it. */
-.thread-mode-hud-card {
+/* Centers the actual HudPanel/action-button row within the full-width bar above, reusing
+   `.thread-mode-content` below's exact `width: fit-content; max-width: calc(100vw - 2.5rem);
+   margin: 0 auto;` sizing formula so this row's own left/right edges line up with the thread tree's
+   own edges beneath it (the fix for the ORIGINAL "doesn't fit with the thread" complaint — a
+   header's *content* visibly relating to the content below it, the same way a typical page header's
+   full-width background can still carry a centered, width-capped content row). Deliberately carries
+   NO border/background/radius of its own — `.thread-mode-hud` above already paints the full box;
+   nesting a second bordered card here, on top of an already-painted bar, would read as a redundant
+   box-in-a-box rather than "the HUD lines up with the thread." */
+.thread-mode-hud-inner {
   width: fit-content;
   max-width: calc(100vw - 2.5rem);
   margin: 0 auto;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  background: var(--panel-bg, #f7f7f8);
 }
 /* `width: fit-content` (not `width: 100%`) + `margin: 0 auto`: this box shrinks to whatever its
    actual content needs (a lone, branch-free thread's ~640px trunk box, or a wider tree once
@@ -295,10 +288,13 @@ async function onExportDocument(): Promise<void> {
    `ThreadCard.vue`'s own boxes already use — is this view's own outer safety net for genuinely wide/
    deep trees, so they still cap out at a sane width instead of growing edge-to-edge; `.thread-mode-
    list`'s own `overflow-x: auto` below is what actually lets a tree past that cap scroll instead of
-   clipping. Unlike `.thread-mode-hud` above, this box's width is intentionally content-driven, not
-   viewport-spanning — only the HUD needs to match canvas mode's full-width toolbar; the thread tree
-   itself should stay a centered, content-sized column (scrolling sideways only once it outgrows the
-   viewport) exactly as before this fix. */
+   clipping. Unlike `.thread-mode-hud` above (always full width, exactly like canvas mode's own
+   `.toolbar`), this box's width is intentionally content-driven, not viewport-spanning — the thread
+   tree itself should stay a centered, content-sized column (scrolling sideways only once it outgrows
+   the viewport). `.thread-mode-hud-inner` just above deliberately reuses this SAME formula (not a
+   coincidence — see its own doc comment) precisely so the HUD's content row and the tree stay
+   aligned, but only that inner row is coupled to it; the HUD's own outer bar (`.thread-mode-hud`)
+   never is. */
 .thread-mode-content {
   display: flex;
   flex-direction: column;
@@ -311,9 +307,9 @@ async function onExportDocument(): Promise<void> {
 .thread-mode-empty {
   color: var(--neutral-muted-color, #4b5563);
 }
-/* Plain inline text, same tone as `.load-error p` — sits inside `.thread-mode-hud-card` (so it
-   scrolls with, and wraps to, the same centered/width-capped card as the rest of the sticky HUD row,
-   not scrolling away with the page). */
+/* Plain inline text, same tone as `.load-error p` — sits inside `.thread-mode-hud-inner` (so it
+   wraps to the same centered/width-capped row as the rest of the sticky HUD, staying aligned with
+   the thread tree beneath it, not scrolling away with the page). */
 .thread-mode-export-error {
   margin: 0.4rem 0 0;
   color: var(--danger-color, #b91c1c);

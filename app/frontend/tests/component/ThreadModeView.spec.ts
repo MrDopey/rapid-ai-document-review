@@ -149,25 +149,31 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     ]);
   });
 
-  // Visual-fit bug fix regression: the sticky `.thread-mode-hud` shell used to paint the visible
-  // box itself (a flat, full-viewport-bleed strip with no side borders/rounding), which read as
-  // visually disconnected from the narrower, centered, bordered `.thread-card` tree beneath it
-  // (user report: "the thread's header and expand/collapse all doesn't fit with the thread"). The
-  // fix splits the sticky positioning shell (`.thread-mode-hud`, still full-width so its sticky math
-  // covers the whole row) from the actual painted card (`.thread-mode-hud-card`), which now reuses
-  // `.thread-mode-content`'s own `width: fit-content`/centered sizing formula so it tracks the
-  // tree's own width instead of the viewport's. This asserts the shared `HudPanel` still renders
-  // nested inside that dedicated card wrapper rather than directly inside the bare sticky shell.
-  it('renders the shared HudPanel inside a dedicated, centered "card" wrapper (not directly inside the bare sticky shell)', () => {
+  // Regression coverage for BOTH user-reported complaints about this HUD (see
+  // `ThreadModeView.vue`'s own template/CSS doc comments for the full history):
+  //  1. Original: the sticky `.thread-mode-hud` bar used to paint the visible box itself as a flat,
+  //     full-viewport-bleed strip with no border/rounding/relationship to the narrower, centered,
+  //     bordered `.thread-card` tree beneath it.
+  //  2. Regression (from the first fix for #1): making the PAINTED box itself shrink to the tree's
+  //     own content-driven width made the HUD read as "shrunk"/not covering the viewport for the
+  //     common single-Thread case (confirmed visually via Playwright against canvas mode's own HUD,
+  //     which stays full-width regardless of conversation count).
+  // jsdom performs no real CSS layout, so none of this can assert actual rendered pixel widths —
+  // these assertions only cover what jsdom CAN see: the two wrapper elements exist, in the right
+  // nesting, with the right classes. A real committed Playwright test
+  // (`tests/e2e/thread-mode-hud.spec.ts`) covers the actual rendered-width regression this component
+  // test structurally cannot.
+  it('renders the shared HudPanel inside a centered inner wrapper, nested inside the full-width sticky bar', () => {
     seedTree();
     const wrapper = mountView();
     const shell = wrapper.find('.thread-mode-hud');
-    const card = shell.find('.thread-mode-hud-card');
-    expect(card.exists()).toBe(true);
-    expect(card.find('nav.hud-panel').exists()).toBe(true);
-    // The shell itself must not also carry the card's own visible-box class — they're deliberately
-    // two distinct elements (positioning shell vs. painted box), not one dual-purpose element.
-    expect(shell.classes()).not.toContain('thread-mode-hud-card');
+    const inner = shell.find('.thread-mode-hud-inner');
+    expect(inner.exists()).toBe(true);
+    expect(inner.find('nav.hud-panel').exists()).toBe(true);
+    // The outer bar itself must not also carry the inner wrapper's class — they're deliberately two
+    // distinct elements (full-width painted bar vs. centered/width-capped content row), not one
+    // dual-purpose element (that dual-purpose collapse is exactly what caused complaint #1).
+    expect(shell.classes()).not.toContain('thread-mode-hud-inner');
   });
 
   it('keeps the Expand all/Export all/Done actions inside the shared HUD header', () => {
