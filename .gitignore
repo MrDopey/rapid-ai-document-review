@@ -4,6 +4,7 @@ app/backend/data/
 .qa-scratch/
 .scratch-*
 todo.md
+supervisor.md
 
 # Node
 node_modules/
