@@ -17,7 +17,11 @@ import {
   announceConversationStale,
   announceMessageCompleted,
 } from '../a11y/live-regions.js';
-import { loadMessageExpanded, persistMessageExpanded } from '../composables/messageDisplayState.js';
+import {
+  seedExpandedForEntity,
+  setExpandedForEntity,
+  setManyExpandedForEntity,
+} from '../composables/expandableMessages.js';
 import { ensureArray } from './util.js';
 
 /** Module-scoped (not store state — this is transient request bookkeeping, not data the app ever
@@ -278,31 +282,28 @@ export const useConversationsStore = defineStore('conversations', {
      *  `localStorage` (an assistant reply defaults to expanded, a user message defaults to
      *  collapsed). Both `ConversationThreadBox.vue` and `ConversationView.vue` invoke this from a
      *  `watch(messages, …, { immediate: true })`; it's idempotent (only ever fills in *missing*
-     *  keys), so both components calling it for the same conversation is harmless. */
+     *  keys), so both components calling it for the same conversation is harmless. Delegates to
+     *  `composables/expandableMessages.ts`'s shared implementation — see that module's doc comment
+     *  for why: `stores/thread.ts` needs the exact same algorithm for its own `expandedByMessage`. */
     ensureMessageExpandedSeeded(conversationId: string): void {
-      const forConv = (this.expandedByMessage[conversationId] ??= {});
-      for (const message of this.messagesFor(conversationId)) {
-        if (!(message.id in forConv)) {
-          forConv[message.id] = loadMessageExpanded(message.id, message.role === 'assistant');
-        }
-      }
+      seedExpandedForEntity(
+        this.expandedByMessage,
+        conversationId,
+        this.messagesFor(conversationId),
+      );
     },
 
     /** Single-message expand/collapse write — shared by both call sites' own `setMessageExpanded`
      *  wrapper (which additionally handles host-specific scroll-into-view behavior). */
     setMessageExpanded(conversationId: string, messageId: string, expanded: boolean): void {
-      const forConv = (this.expandedByMessage[conversationId] ??= {});
-      forConv[messageId] = expanded;
-      persistMessageExpanded({ [messageId]: expanded });
+      setExpandedForEntity(this.expandedByMessage, conversationId, messageId, expanded);
     },
 
     /** Bulk expand/collapse write (FR-009's "Expand all"/"Collapse all") — one `localStorage`
      *  read-merge-write for every affected message, not one per message. Used by
      *  `useBulkToggleAction` in `conversationActions.ts`. */
     setMessagesExpanded(conversationId: string, entries: Record<string, boolean>): void {
-      const forConv = (this.expandedByMessage[conversationId] ??= {});
-      Object.assign(forConv, entries);
-      persistMessageExpanded(entries);
+      setManyExpandedForEntity(this.expandedByMessage, conversationId, entries);
     },
 
     /** Mirrors `ConversationView.vue`'s own composer `draft` ref for `conversationId` — see

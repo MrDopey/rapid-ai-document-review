@@ -6,7 +6,13 @@ import type {
 import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { httpClient } from '../transport/http-client.js';
 import type { ServerFrame, WsClient } from '../transport/ws-client.js';
-import { loadMessageExpanded, persistMessageExpanded } from '../composables/messageDisplayState.js';
+import {
+  anyCollapsed,
+  buildExpandedEntries,
+  seedExpandedForEntity,
+  setExpandedForEntity,
+  setManyExpandedForEntity,
+} from '../composables/expandableMessages.js';
 import { useDocumentStore } from './document.js';
 import type { ConversationMessageState } from './conversations.js';
 import { ensureArray } from './util.js';
@@ -63,29 +69,21 @@ export const useThreadStore = defineStore('thread', {
 
   actions: {
     /** Mirrors `conversations.ts`'s own `ensureMessageExpandedSeeded` — see that action's doc
-     *  comment for the full rationale. */
+     *  comment for the full rationale. Both stores delegate to the same
+     *  `composables/expandableMessages.ts` implementation rather than each keeping their own copy. */
     ensureMessageExpandedSeeded(threadId: string): void {
-      const forThread = (this.expandedByMessage[threadId] ??= {});
-      for (const message of this.messagesFor(threadId)) {
-        if (!(message.id in forThread)) {
-          forThread[message.id] = loadMessageExpanded(message.id, message.role === 'assistant');
-        }
-      }
+      seedExpandedForEntity(this.expandedByMessage, threadId, this.messagesFor(threadId));
     },
 
     /** Mirrors `conversations.ts`'s own `setMessageExpanded`. */
     setMessageExpanded(threadId: string, messageId: string, expanded: boolean): void {
-      const forThread = (this.expandedByMessage[threadId] ??= {});
-      forThread[messageId] = expanded;
-      persistMessageExpanded({ [messageId]: expanded });
+      setExpandedForEntity(this.expandedByMessage, threadId, messageId, expanded);
     },
 
     /** Mirrors `conversations.ts`'s own `setMessagesExpanded` — one `localStorage`
      *  read-merge-write for every affected message, not one per message. */
     setMessagesExpanded(threadId: string, entries: Record<string, boolean>): void {
-      const forThread = (this.expandedByMessage[threadId] ??= {});
-      Object.assign(forThread, entries);
-      persistMessageExpanded(entries);
+      setManyExpandedForEntity(this.expandedByMessage, threadId, entries);
     },
 
     /** Document-wide "Expand all"/"Collapse all" (`ThreadModeView.vue`'s toolbar) — unlike
@@ -96,7 +94,7 @@ export const useThreadStore = defineStore('thread', {
     anyMessageCollapsed(): boolean {
       for (const threadId of Object.keys(this.messagesByThread)) {
         const forThread = this.expandedByMessage[threadId] ?? {};
-        if (this.messagesFor(threadId).some((m) => !forThread[m.id])) return true;
+        if (anyCollapsed(this.messagesFor(threadId), forThread)) return true;
       }
       return false;
     },
@@ -104,10 +102,7 @@ export const useThreadStore = defineStore('thread', {
     toggleAllMessages(): void {
       const nextExpanded = this.anyMessageCollapsed();
       for (const threadId of Object.keys(this.messagesByThread)) {
-        const entries: Record<string, boolean> = {};
-        for (const message of this.messagesFor(threadId)) {
-          entries[message.id] = nextExpanded;
-        }
+        const entries = buildExpandedEntries(this.messagesFor(threadId), nextExpanded);
         this.setMessagesExpanded(threadId, entries);
       }
     },

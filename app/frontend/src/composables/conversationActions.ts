@@ -2,6 +2,7 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue';
 import { useConversationsStore } from '../stores/conversations.js';
 import { ApiError } from '../transport/http-client.js';
 import { focusCapBranchTooltip } from './focusConfig.js';
+import { anyCollapsed, buildExpandedEntries } from './expandableMessages.js';
 
 /**
  * One rendered action button, consumed by `ConversationActionButtons.vue`'s dumb `v-for` renderer.
@@ -146,15 +147,13 @@ export function useBulkToggleAction(conversationId: () => string): ConversationB
   const store = useConversationsStore();
   const messages = computed(() => store.messagesFor(conversationId()));
   const expandedByMessage = computed(() => store.expandedByMessage[conversationId()] ?? {});
-  const anyCollapsed = computed(() => messages.value.some((m) => !expandedByMessage.value[m.id]));
-  const label = computed(() => (anyCollapsed.value ? 'Expand all' : 'Collapse all'));
+  // Shared with `stores/thread.ts`'s own document-wide toggle — see
+  // `composables/expandableMessages.ts` for the extracted algorithm both now call.
+  const isAnyCollapsed = computed(() => anyCollapsed(messages.value, expandedByMessage.value));
+  const label = computed(() => (isAnyCollapsed.value ? 'Expand all' : 'Collapse all'));
 
   function toggleAllMessages(): void {
-    const nextExpanded = anyCollapsed.value;
-    const entries: Record<string, boolean> = {};
-    for (const message of messages.value) {
-      entries[message.id] = nextExpanded;
-    }
+    const entries = buildExpandedEntries(messages.value, isAnyCollapsed.value);
     store.setMessagesExpanded(conversationId(), entries);
   }
 

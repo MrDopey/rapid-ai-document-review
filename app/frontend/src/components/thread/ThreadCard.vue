@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useThreadSegments } from '../../composables/useThreadSegments.js';
 import { ApiError } from '../../transport/http-client.js';
+import type { ActionDescriptor } from '../../composables/conversationActions.js';
+import ConversationActionButtons from '../conversation/ConversationActionButtons.vue';
 import MessageBubble from '../conversation/MessageBubble.vue';
 import ThreadComposer from './ThreadComposer.vue';
 import HighlightBranchMenu from './HighlightBranchMenu.vue';
@@ -157,6 +159,26 @@ async function onReopen(): Promise<void> {
   doneError.value = null;
   await store.reopen(props.threadId);
 }
+
+// Same `ActionDescriptor` + `ConversationActionButtons.vue` renderer canvas mode's own
+// `ConversationThreadBox.vue`/`ConversationView.vue` header actions already use (its own doc
+// comment: "consolidated from the near-identical `.thread-action-button` rule ... in both" prior
+// hosts) — Mark done/Reopen is this Thread header's exact equivalent of that row's own Close
+// action, so it gets the same real button styling (min 24x24px hit area, danger/hover treatment)
+// for free instead of a third hand-rolled copy of that CSS.
+const doneActions = computed<ActionDescriptor[]>(() => {
+  if (thread.value?.doneAt === null) {
+    return [
+      {
+        key: 'mark-done',
+        label: 'Mark done',
+        disabled: doneBusy.value,
+        onClick: () => void onMarkDone(),
+      },
+    ];
+  }
+  return [{ key: 'reopen', label: 'Reopen', onClick: () => void onReopen() }];
+});
 </script>
 
 <template>
@@ -170,16 +192,7 @@ async function onReopen(): Promise<void> {
       <span class="thread-card-title text-wrap-safe">{{ thread.name }}</span>
       <span v-if="thread.kind === 'thread-root'" class="thread-root-badge">Root</span>
       <span class="thread-card-actions">
-        <button
-          v-if="thread.doneAt === null"
-          type="button"
-          class="thread-done-button"
-          :disabled="doneBusy"
-          @click="onMarkDone"
-        >
-          Mark done
-        </button>
-        <button v-else type="button" class="thread-reopen-button" @click="onReopen">Reopen</button>
+        <ConversationActionButtons :actions="doneActions" />
       </span>
     </header>
     <span v-if="doneError" class="thread-error" role="alert">{{ doneError }}</span>
