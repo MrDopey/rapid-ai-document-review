@@ -22,22 +22,26 @@ describe('buildSystemPrompt', () => {
 
   it('thread variant (isThread: true) never instructs the model to use read_document/propose_document_edit', () => {
     const prompt = buildSystemPrompt(true);
-    // Both tool names may still appear, but only to say they don't exist in this mode — never as
-    // an instruction to call them (the obligations built around actually using them, "Anchor
-    // discipline"/"Proposal etiquette", must be gone entirely).
-    expect(prompt).toContain('`read_document` and `propose_document_edit` do not exist');
+    // The shortened thread prompt doesn't name either tool at all any more (it used to disclaim
+    // them explicitly) — either way, the obligations built around actually using them ("Anchor
+    // discipline"/"Proposal etiquette") must be gone entirely.
+    expect(prompt).not.toContain('read_document');
+    expect(prompt).not.toContain('propose_document_edit');
     expect(prompt).not.toContain('Anchor discipline');
     expect(prompt).not.toContain('Proposal etiquette');
     expect(prompt).not.toMatch(/always read the relevant part/);
     expect(prompt).not.toMatch(/copied verbatim from the most recent/);
   });
 
-  it('thread variant describes the actual thread tool surface and branch-from-highlight context', () => {
+  it('thread variant no longer describes the thread tool surface or branch-from-highlight context', () => {
     const prompt = buildSystemPrompt(true);
     expect(prompt).toContain('threaded conversation');
-    expect(prompt).toContain('web_search');
-    expect(prompt).toContain('web_fetch');
-    expect(prompt).toContain('highlights a passage from an earlier');
+    // The shortened prompt dropped its "Tool discipline"/"Branch context" obligations entirely —
+    // it no longer names the available tools or describes how a branch's highlighted excerpt fits
+    // in (that context is left implicit rather than spelled out in the prompt).
+    expect(prompt).not.toContain('web_search');
+    expect(prompt).not.toContain('web_fetch');
+    expect(prompt).not.toContain('highlights a passage from an earlier');
   });
 
   it('thread variant frames the role as explaining concepts, not reviewing/editing', () => {
