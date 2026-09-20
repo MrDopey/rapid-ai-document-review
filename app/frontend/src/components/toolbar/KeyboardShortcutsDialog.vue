@@ -1,8 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { KEYBOARD_SHORTCUTS } from '../../a11y/keymap-registry.js';
+import { KEYBOARD_SHORTCUTS, MODE_EXCLUSIVE_SCOPES } from '../../a11y/keymap-registry.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 import ShortcutGroup from './ShortcutGroup.vue';
+
+const props = defineProps<{
+  /** Which of App.vue's two mutually-exclusive view trees this dialog was opened from — 'thread'
+   *  (Thread mode's own branch) or 'canvas' (the canvas/document-editor branch). Drives which
+   *  scopes get filtered out below via `MODE_EXCLUSIVE_SCOPES` (a11y/keymap-registry.ts), so a
+   *  dialog opened from Thread mode never lists 'Document editor' shortcuts (Thread mode has no
+   *  document editor) or 'Conversation list' ones (canvas-only; Thread mode's own equivalent is
+   *  'Thread list'), and vice versa. */
+  mode: 'thread' | 'canvas';
+}>();
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -18,8 +28,10 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 // from a11y/keymap-registry.ts (the single source of truth for every shortcut) rather than
 // re-deriving the list here.
 const groups = computed(() => {
+  const excludedScopes = MODE_EXCLUSIVE_SCOPES[props.mode];
   const byScope = new Map<string, (typeof KEYBOARD_SHORTCUTS)[number][]>();
   for (const shortcut of KEYBOARD_SHORTCUTS) {
+    if (excludedScopes.has(shortcut.scope)) continue;
     const list = byScope.get(shortcut.scope);
     if (list) {
       list.push(shortcut);

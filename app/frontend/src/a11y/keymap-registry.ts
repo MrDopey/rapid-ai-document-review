@@ -620,6 +620,34 @@ const MUTUALLY_EXCLUSIVE_VIEW_SCOPES = new Set<KeyboardShortcut['scope']>([
   'Thread list',
 ]);
 
+/**
+ * Which of `KeyboardShortcut['scope']`'s values are mode-exclusive — reachable in only one of
+ * App.vue's two mutually-exclusive view trees (`isThreadDocument`'s canvas/document-editor branch
+ * vs. its Thread mode branch) — keyed by the same `'thread' | 'canvas'` mode name
+ * `KeyboardShortcutsDialog.vue`'s own `mode` prop takes, so that dialog can filter `KEYBOARD_SHORTCUTS`
+ * down to only the scopes actually reachable from wherever it was opened.
+ *
+ * `'Document editor'`: CodeMirror only exists in the canvas branch (`EditorComponent.vue`) — Thread
+ * mode has no document editor at all.
+ *
+ * `'Conversation list'` / `'Thread list'`: the same mutual exclusivity already encoded above by
+ * `MUTUALLY_EXCLUSIVE_VIEW_SCOPES`/`reachableTogether` for conflict-checking purposes — canvas mode's
+ * `HudPanel.vue` instance is mounted with `hotkeyScope="Conversation list"` (its default), Thread
+ * mode's own instance (`ThreadModeView.vue`) with `hotkeyScope="Thread list"`; only one of the two
+ * document-level listeners is ever actually registered, so the other scope's bindings are dead
+ * (unreachable, not just "unlikely") in that mode.
+ *
+ * Every other scope (`'Conversation composer'`, `'Dialogs'`, `'Global'`) is dispatched from
+ * listeners/components that exist regardless of which branch is mounted (App.vue's own
+ * `onGlobalKeydown`, `useFocusTrap`, the composer's `@keydown`), so they stay shown in both modes.
+ */
+export const MODE_EXCLUSIVE_SCOPES: Readonly<
+  Record<'thread' | 'canvas', ReadonlySet<KeyboardShortcut['scope']>>
+> = {
+  thread: new Set<KeyboardShortcut['scope']>(['Document editor', 'Conversation list']),
+  canvas: new Set<KeyboardShortcut['scope']>(['Thread list']),
+};
+
 function reachableTogether(a: KeyboardShortcut['scope'], b: KeyboardShortcut['scope']): boolean {
   if (a === 'Document editor' || b === 'Document editor') return a === b;
   if (a !== b && MUTUALLY_EXCLUSIVE_VIEW_SCOPES.has(a) && MUTUALLY_EXCLUSIVE_VIEW_SCOPES.has(b)) {

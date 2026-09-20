@@ -943,7 +943,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
 
     <Transition name="modal">
       <div v-if="shortcutsOpen" class="modal-overlay blocking-overlay">
-        <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
+        <KeyboardShortcutsDialog mode="thread" @close="shortcutsOpen = false" />
       </div>
     </Transition>
     <Transition name="modal">
@@ -1168,7 +1168,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
 
     <Transition name="modal">
       <div v-if="shortcutsOpen" class="modal-overlay blocking-overlay">
-        <KeyboardShortcutsDialog @close="shortcutsOpen = false" />
+        <KeyboardShortcutsDialog mode="canvas" @close="shortcutsOpen = false" />
       </div>
     </Transition>
     <Transition name="modal">
