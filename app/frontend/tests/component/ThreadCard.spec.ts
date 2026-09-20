@@ -364,6 +364,82 @@ describe('ThreadCard — branch connector alignment (bug fix)', () => {
     expect((groupEl as HTMLElement).style.marginTop).toBe('250px');
   });
 
+  // Regression test for the "jiggle" bug: a naive implementation reset `margin-top` to `0px` before
+  // every measurement, then wrote the real nudge back — two writes per pass, either of which changes
+  // `.thread-branch-group`'s margin and so (since a flex column's auto height includes child
+  // margins) `.thread-branches`' own rendered height, which is exactly what the `ResizeObserver`
+  // below watches — a write-triggers-observer-triggers-write loop, made worse by `margin-top`'s own
+  // `transition` restarting on every intermediate `0px` write. This proves the fix converges instead:
+  // once a nudge is applied, re-running the exact same alignment pass against an UNCHANGED layout
+  // (simulating the `ResizeObserver` re-firing itself, or any other spurious re-trigger) must not
+  // write a different value — `style.marginTop` should hold steady, not oscillate — and must not
+  // keep touching the style at all once converged, which is what actually breaks a real feedback
+  // loop (a real browser only restarts the `transition`/re-fires `ResizeObserver` on an actual
+  // change).
+  it('converges instead of oscillating when re-run against an unchanged layout (no feedback loop)', async () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+    const wrapper = mountCard('root-1');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const cardWrapper = wrapper.find('.thread-card');
+    const cardEl = cardWrapper.element;
+    const segmentEls = cardWrapper.findAll('.thread-segment');
+    const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
+
+    stubRect(cardEl, { top: 100 } as DOMRect);
+    stubRect(segmentEls[0]!.element, { bottom: 500 } as DOMRect);
+    // Unlike the fixed-rect stubs the other two tests in this suite use, this one has to behave like
+    // a REAL element's `getBoundingClientRect()` — i.e. move by however much `margin-top` currently
+    // pushes it down — specifically so a second alignment pass over an unchanged layout re-measures
+    // the group at its NEW (already-nudged) rendered position, the same way a real browser's layout
+    // engine would after the previous pass's write actually took effect. A naive fixed-rect stub
+    // can't exercise this regression at all: it would silently hide exactly the kind of
+    // double-subtraction bug that made an earlier draft of this fix re-inflate `margin-top` by
+    // another full nudge on every subsequent pass instead of converging.
+    const groupNaturalTop = 250;
+    groupEl.getBoundingClientRect = () =>
+      ({ top: groupNaturalTop + (parseFloat(groupEl.style.marginTop) || 0) }) as DOMRect;
+
+    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+    await waitFor(() => groupEl.style.marginTop === '250px');
+
+    // Same rects, same story (nothing in the layout actually changed) — re-trigger alignment
+    // several more times in a row, the way a self-triggering `ResizeObserver` would, and confirm the
+    // margin never drifts away from its converged value (no oscillation) and no write is even
+    // attempted once converged (a real no-op, matching what stops a real observer loop).
+    let writeCount = 0;
+    let currentValue = groupEl.style.marginTop;
+    Object.defineProperty(groupEl.style, 'marginTop', {
+      configurable: true,
+      get: () => currentValue,
+      set: (v: string) => {
+        writeCount += 1;
+        currentValue = v;
+      },
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(currentValue).toBe('250px');
+    }
+    expect(writeCount).toBe(0);
+  });
+
   it('never nudges a branch group upward (never overlaps the group above it)', async () => {
     const store = useThreadStore();
     store.threads = [

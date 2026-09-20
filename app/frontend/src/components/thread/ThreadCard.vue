@@ -339,6 +339,10 @@ const threadCardRef = ref<HTMLElement | null>(null);
 const branchesRef = ref<HTMLElement | null>(null);
 const segmentEls = new Map<string, HTMLElement>();
 const branchGroupEls = new Map<string, HTMLElement>();
+// The nudge (in px) this component itself last applied to each group's `margin-top`, keyed the same
+// way as `branchGroupEls` — see `syncBranchAlignment`'s own doc comment for why this is tracked here
+// in JS rather than read back off the DOM (`getComputedStyle`) on every pass.
+const appliedMargins = new Map<string, number>();
 
 function segmentKey(segment: Pick<ThreadSegment, 'startIndex' | 'endIndex'>): string {
   return `${segment.startIndex}-${segment.endIndex}`;
@@ -374,8 +378,15 @@ function setSegmentEl(segment: ThreadSegment, el: Element | null): void {
 
 function setBranchGroupEl(segment: ThreadSegment, el: Element | null): void {
   const key = segmentKey(segment);
-  if (el) branchGroupEls.set(key, el as HTMLElement);
-  else branchGroupEls.delete(key);
+  if (el) {
+    branchGroupEls.set(key, el as HTMLElement);
+  } else {
+    branchGroupEls.delete(key);
+    // A freshly (re)mounted group (e.g. this segment's last branch went `doneAt`, then a new one
+    // was created off it later) starts from a clean, un-nudged `margin-top` — any earlier nudge
+    // this component applied belonged to a DOM node that's already gone.
+    appliedMargins.delete(key);
+  }
   scheduleAlignSync();
 }
 
@@ -388,6 +399,34 @@ function setBranchGroupEl(segment: ThreadSegment, el: Element | null): void {
  *  the group above it): the existing `.thread-branches`/`.thread-branch-group` CSS `gap` already
  *  guarantees that floor for free, exactly like `computeConversationLayout`'s own
  *  `Math.max(base, cursorBottom + minGap)`. */
+// Bug fix (jiggle regression from the initial `syncBranchAlignment` above): this used to reset a
+// group's `margin-top` to `0px`, measure, then write the real nudge back — three DOM writes per
+// pass. Any one of those writes is a genuine change to `.thread-branch-group`'s `margin-top`, which
+// (since a flex container's auto height includes its children's margins) changes `.thread-branches`'
+// own rendered height — exactly what the `ResizeObserver` below watches for. Worse, `.thread-branch-
+// group` has `transition: margin-top`, so writing a *different* value than what's currently applied
+// (0px, when a real nudge was already in place) restarts that transition from scratch, which then
+// keeps changing `.thread-branches`' height on every single animation frame until the transition
+// would otherwise finish — re-firing the `ResizeObserver` every frame, which re-scheduled this exact
+// function, which reset-and-restarted the transition again, forever. That perpetual restart-and-
+// never-finish is what actually read as a visual jiggle, independent of whether the computed nudge
+// itself was even changing.
+//
+// Fixed by never writing an intermediate value: this recovers the same natural, un-nudged position
+// the old reset-to-0 step was after by subtracting the nudge back out arithmetically instead —
+// `appliedMargins` (declared above, next to `branchGroupEls`) is this component's own record of
+// whatever `margin-top` IT last wrote to each group, so `renderedTop - lastAppliedMargin` is exactly
+// that group's natural top, with zero extra DOM writes to get there. (Deliberately tracked in JS,
+// not read back via `getComputedStyle` on the element itself: besides the general fragility of
+// treating a style read as authoritative — subject to whatever else touches this element, and to
+// `getComputedStyle` support/behavior quirks the value written here doesn't depend on — a
+// mid-`transition` computed read would reflect the CURRENT animated frame, not the settled target
+// this function itself last asked for, which is the number this math actually needs.) The final
+// write is then skipped entirely (via an epsilon, to absorb sub-pixel measurement noise) whenever it
+// would just reassert the value already in place — setting a CSS property to the value it already
+// holds is a no-op in every browser (no transition restart, no layout change, no `ResizeObserver`
+// re-fire), which is what actually breaks the loop: a genuine change still nudges and transitions
+// smoothly exactly once, then reliably converges and goes quiet.
 function syncBranchAlignment(): void {
   const cardEl = threadCardRef.value;
   if (!cardEl || branchSegments.value.length === 0) return;
@@ -399,12 +438,16 @@ function syncBranchAlignment(): void {
     const segEl = segmentEls.get(key);
     if (!groupEl || !segEl) continue;
 
-    // Reset before measuring so this group's own natural (un-nudged) flow position is what gets
-    // read below, not whatever nudge was applied on a previous pass.
-    groupEl.style.marginTop = '0px';
-    const naturalTop = groupEl.getBoundingClientRect().top - cardTop;
+    const currentMargin = appliedMargins.get(key) ?? 0;
+    const naturalTop = groupEl.getBoundingClientRect().top - cardTop - currentMargin;
     const targetTop = segEl.getBoundingClientRect().bottom - cardTop;
     const delta = Math.max(0, targetTop - naturalTop);
+
+    // Sub-pixel-tolerant no-op guard: without this, two passes over an otherwise-unchanged layout
+    // could still disagree by a fraction of a pixel (measurement noise) and write a "new" value
+    // forever. 0.5px is well below anything visibly distinguishable.
+    if (Math.abs(delta - currentMargin) < 0.5) continue;
+    appliedMargins.set(key, delta);
     groupEl.style.marginTop = delta > 0 ? `${delta}px` : '';
   }
 }
