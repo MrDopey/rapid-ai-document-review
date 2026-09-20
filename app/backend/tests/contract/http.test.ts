@@ -2056,7 +2056,7 @@ describe('Contract: HTTP API (http-api.md)', () => {
       expect(res.status).toBe(200);
       const parsed = SystemPromptDto.parse(res.json);
       expect(parsed.systemPrompt).toContain(
-        'AI reviewer embedded in a document review application',
+        'AI assistant embedded in a document review application',
       );
       expect(parsed.systemPrompt).not.toContain('Anchor discipline');
       expect(parsed.systemPrompt).not.toContain('Proposal etiquette');

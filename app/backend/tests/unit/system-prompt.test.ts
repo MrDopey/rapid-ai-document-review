@@ -40,6 +40,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('highlights a passage from an earlier');
   });
 
+  it('thread variant frames the role as explaining concepts, not reviewing/editing', () => {
+    const prompt = buildSystemPrompt(true);
+    expect(prompt).toContain('explain, not to review or edit');
+    expect(prompt).toContain('Brevity');
+    expect(prompt).toContain('Diagnose the gap');
+    expect(prompt).toContain('4 ideas or fewer');
+    // The canvas-only "AI reviewer" framing must not leak into the thread variant.
+    expect(prompt).not.toContain('AI reviewer embedded in a document review application');
+  });
+
   it('the two variants are genuinely different text', () => {
     expect(buildSystemPrompt(false)).not.toEqual(buildSystemPrompt(true));
   });
