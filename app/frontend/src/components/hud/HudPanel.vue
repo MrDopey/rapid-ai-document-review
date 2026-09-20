@@ -114,7 +114,12 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   if (event.metaKey) return;
   const binding = scopedBindings.value.find((b) => matchesBinding(event, b));
   if (!binding || !binding.action) return;
-  if (isEditingContext(event)) return;
+  // Bug fix: this used to call `isEditingContext(event)` with no options at all, so a binding's own
+  // `composerExempt` flag (`a11y/keymap-registry.ts`) was silently never honored here — invisible
+  // until Thread mode's `thread-cycle-next`/`thread-cycle-prev` became the first bindings in either
+  // of this component's own scopes to actually set it (App.vue's own `onGlobalKeydown` already
+  // threads this through correctly for its own `Global`-scope bindings).
+  if (isEditingContext(event, { allowComposer: binding.composerExempt === true })) return;
   event.preventDefault();
   bindingHandlersByAction[binding.action]?.();
 }

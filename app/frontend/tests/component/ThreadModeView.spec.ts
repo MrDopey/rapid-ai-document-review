@@ -231,6 +231,34 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
+  // Bug fix regression: before this fix, Ctrl+Alt+J/K silently did nothing while the keyboard
+  // event's target was a Thread's own composer textarea — `HudPanel.vue`'s own `onGlobalKeydown`
+  // never threaded a binding's `composerExempt` flag through to `isEditingContext` at all, and even
+  // once it did, `isEditingContext`'s `allowComposer` id-prefix check only recognized canvas mode's
+  // `composer-` prefix, not `ThreadComposer.vue`'s own `thread-composer-` one. Since a Thread's
+  // composer is the one control a reviewer's cursor sits in most of the time in this mode (unlike
+  // canvas mode, which has a separate, already-composer-exempt fallback hotkey), this made the
+  // Ctrl+Alt+J/K hotkeys read as "not working" for their single most common real-world trigger
+  // point. Dispatched with an explicit `target` (unlike the other tests here, which dispatch
+  // targetless and rely on `isEditingContext`'s early-return for a target with no `.closest`) so
+  // this actually exercises the composer-textarea branch.
+  it('Ctrl+Alt+J still cycles the active thread while the keyboard event targets a Thread composer textarea', async () => {
+    seedTree();
+    const wrapper = mountView();
+
+    const composerTextarea = wrapper.get('textarea[id^="thread-composer-"]').element;
+    const event = new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true });
+    Object.defineProperty(event, 'target', { value: composerTextarea });
+    document.dispatchEvent(event);
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+  });
+
   it('Ctrl+Alt+J wraps from the last thread back to the first', async () => {
     seedTree();
     const wrapper = mountView();

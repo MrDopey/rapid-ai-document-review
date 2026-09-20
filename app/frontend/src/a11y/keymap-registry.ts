@@ -259,15 +259,25 @@ const BLOCKING_DIALOG_SELECTOR = '[aria-modal="true"]:not(.conversation-detail-d
 
 export interface IsEditingContextOptions {
   /**
-   * Exempts a conversation composer's own `<textarea>` (id prefix `composer-`) from the blanket
-   * "any textarea is an editing context" rule below — added for the cycle-focused-conversations
-   * hotkey (Ctrl+Alt+H/L, Ctrl+Alt+ArrowLeft/Right), whose primary trigger point is FROM INSIDE a
-   * composer while typing (see `HOTKEY_BINDINGS`' `composerExempt` field further down). Every other
-   * check still applies with this option set — a blocking dialog, the document editor's
-   * `contenteditable` surface, or a plain `<input>` (the conversation-rename field) all still
-   * count as an editing context regardless, since this only ever widens the *composer's own
-   * textarea* exception, never any other element. Defaults to `false`, matching every pre-existing
-   * caller's behavior unchanged.
+   * Exempts a conversation composer's own `<textarea>` (id prefix `composer-`, or Thread mode's own
+   * `thread-composer-` — see `ThreadComposer.vue`) from the blanket "any textarea is an editing
+   * context" rule below — added for the cycle-focused-conversations hotkey (Ctrl+Alt+H/L,
+   * Ctrl+Alt+ArrowLeft/Right), whose primary trigger point is FROM INSIDE a composer while typing
+   * (see `HOTKEY_BINDINGS`' `composerExempt` field further down). Every other check still applies
+   * with this option set — a blocking dialog, the document editor's `contenteditable` surface, or a
+   * plain `<input>` (the conversation-rename field) all still count as an editing context
+   * regardless, since this only ever widens the *composer's own textarea* exception, never any
+   * other element. Defaults to `false`, matching every pre-existing caller's behavior unchanged.
+   *
+   * 011-linear-thread-mode (bug fix): Thread mode's `Ctrl+Alt+J`/`Ctrl+Alt+K` (`thread-cycle-next`/
+   * `thread-cycle-prev`, `composerExempt: true`) is its ONLY keyboard way to move between threads —
+   * unlike canvas mode, which also has the separate, already-composer-exempt cycle-focused-
+   * conversations hotkey as a fallback. A Thread's own composer (`ThreadComposer.vue`) is also the
+   * single interactive control most of a reviewer's time in this mode is spent inside, so leaving it
+   * blocked there (as it was before this fix — `HudPanel.vue`'s `onGlobalKeydown` never threaded
+   * `composerExempt` through to this function at all, a latent gap invisible until Thread mode's
+   * bindings were the first in this component's own scopes to actually set the flag) made the
+   * hotkey read as "not working" for its single most common real-world trigger point.
    */
   allowComposer?: boolean;
 }
@@ -290,7 +300,11 @@ export function isEditingContext(
   const target = event.target as HTMLElement | null;
   if (!target || typeof target.closest !== 'function') return false;
   if (target.closest(BLOCKING_DIALOG_SELECTOR)) return true;
-  if (options.allowComposer && target.tagName === 'TEXTAREA' && target.id.startsWith('composer-'))
+  if (
+    options.allowComposer &&
+    target.tagName === 'TEXTAREA' &&
+    (target.id.startsWith('composer-') || target.id.startsWith('thread-composer-'))
+  )
     return false;
   if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
     return true;
@@ -550,6 +564,16 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
   // list' vs 'Thread list' as mutually exclusive, since App.vue only ever mounts one of canvas
   // mode's or Thread mode's whole view tree at a time (never both), matching the same rationale
   // already used for 'Document editor'.
+  //
+  // `composerExempt: true` (bug fix, unlike canvas mode's own `cycle-next`/`cycle-prev` above,
+  // deliberately left unset): Thread mode has no equivalent of canvas mode's separate
+  // already-composer-exempt cycle-focused-conversations hotkey (Ctrl+Alt+H/L) to fall back on —
+  // `threadFocusState.ts`'s single-cursor model means these two bindings are the ONLY keyboard way
+  // to move between threads, and a Thread's own composer (`ThreadComposer.vue`) is also the one
+  // control a reviewer's cursor sits in most of the time in this mode. Leaving this unset (as
+  // before this fix) made the hotkey silently do nothing for its single most common real-world
+  // trigger point — see `isEditingContext`'s own doc comment on `allowComposer` for the full
+  // root-cause writeup, including the separate `HudPanel.vue`-side gap this alone doesn't fix.
   {
     id: 'thread-cycle-next',
     modifiers: { ctrl: true, alt: true, shift: false },
@@ -557,6 +581,7 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     scope: 'Thread list',
     description: 'Select the next thread in the thread list (tree/DFS order, wraps).',
     action: 'cycle-next',
+    composerExempt: true,
   },
   {
     id: 'thread-cycle-prev',
@@ -565,6 +590,7 @@ export const HOTKEY_BINDINGS: readonly HotkeyBinding[] = [
     scope: 'Thread list',
     description: 'Select the previous thread in the thread list (tree/DFS order, wraps).',
     action: 'cycle-prev',
+    composerExempt: true,
   },
 ];
 

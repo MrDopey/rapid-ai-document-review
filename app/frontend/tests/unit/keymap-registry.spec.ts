@@ -54,6 +54,21 @@ describe('findConflicts', () => {
     });
   });
 
+  // Bug fix regression: Thread mode's own Ctrl+Alt+J/K (`thread-cycle-next`/`thread-cycle-prev`,
+  // 'Thread list' scope) must be composer-exempt — unlike canvas mode's own 'Conversation list'
+  // `cycle-next`/`cycle-prev`, which have a separate composer-exempt fallback (Ctrl+Alt+H/L) and so
+  // deliberately stay unset — since they're Thread mode's ONLY keyboard way to move between threads,
+  // and `ThreadComposer.vue`'s own textarea is the one control a reviewer's cursor sits in most of
+  // the time in this mode. See `isEditingContext`'s own `allowComposer` doc comment for the full
+  // root-cause writeup.
+  it('both thread-cycle-next and thread-cycle-prev are composer-exempt', () => {
+    const threadBindings = HOTKEY_BINDINGS.filter((b) => b.scope === 'Thread list');
+    expect(threadBindings).toHaveLength(2);
+    for (const b of threadBindings) {
+      expect(b.composerExempt).toBe(true);
+    }
+  });
+
   it('flags two distinct bindings sharing an identical modifiers+code combo within reachable scopes', () => {
     const bindings = [
       binding({ id: 'a', code: 'KeyZ', scope: 'Global' }),
@@ -198,5 +213,20 @@ describe('isEditingContext — allowComposer option', () => {
     Object.defineProperty(event, 'target', { value: el });
     expect(isEditingContext(event, { allowComposer: true })).toBe(true);
     dialog.remove();
+  });
+
+  // Bug fix regression (Thread mode's Ctrl+Alt+J/K "not working" while typing): `ThreadComposer.vue`
+  // deliberately uses a `thread-composer-` id prefix (distinct from canvas mode's own `composer-`),
+  // which this option must recognize too, or Thread mode's own `composerExempt` bindings
+  // (`thread-cycle-next`/`thread-cycle-prev` in HOTKEY_BINDINGS below) would still be silently
+  // swallowed by the blanket textarea rule despite the flag being set.
+  it('with allowComposer, a Thread-mode composer textarea (id prefix thread-composer-) is exempted', () => {
+    const el = document.createElement('textarea');
+    el.id = 'thread-composer-thread-1';
+    document.body.appendChild(el);
+    const event = new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true });
+    Object.defineProperty(event, 'target', { value: el });
+    expect(isEditingContext(event, { allowComposer: true })).toBe(false);
+    el.remove();
   });
 });
