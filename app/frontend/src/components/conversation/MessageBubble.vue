@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, watch } from 'vue';
 import { useSettingsStore } from '../../stores/settings.js';
 import { render } from '../../render/markdown-pipeline.js';
 import { domPurifySanitizer } from '../../render/sanitizer.js';
 import type { ConversationMessageState } from '../../stores/conversations.js';
+import { useClampToggle } from '../../composables/clampToggle.js';
 
 // FR-008/data-model.md's MessageDisplayState: `expanded` defaults to `true` (no clamp) purely as a
 // safe default for any caller that omits the prop entirely (e.g. `ConversationThreadBox.vue`'s own
@@ -21,118 +22,6 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ (e: 'update:expanded', value: boolean): void }>();
 const settings = useSettingsStore();
-
-/** research.md: "comfortably show a few lines of text" — a fixed pixel value (not an ideal-lines
- *  count) so the JS overflow check below and the CSS clamp applied in the template agree on
- *  exactly the same number, with a single source of truth. Shared by every clampable block in this
- *  bubble (the message text and each tool call) via `useClampToggle` below, so they all clamp/
- *  expand identically. */
-const CLAMP_HEIGHT_PX = 160;
-
-/**
- * One clamp/expand/collapse controller, shared by the message text (the "primary" id) and every
- * tool-call block in this bubble (each a "secondary" id, keyed by `toolCallId`) — every clampable
- * region registers its element under its own id rather than getting its own separate set of
- * refs/computeds, so "is this block tall enough to need a toggle" and "clamp to CLAMP_HEIGHT_PX
- * until expanded" are implemented exactly once.
- *
- * The primary id's expanded flag is owned by the caller (here, the message text defers to the
- * `expanded` prop/`update:expanded` emit, since that's owned by the parent per data-model.md); every
- * secondary id gets its own independently-toggleable, local/unpersisted flag instead — EXCEPT that
- * whenever the primary's expanded value actually changes, for *any* reason (its own toggle here, or
- * a parent's bulk "Expand all"/"Collapse all", FR-009, changing the `expanded` prop directly), every
- * currently-registered secondary id snaps to match it. This cascade rule lives here, in the shared
- * controller, rather than as separate wiring in the component, so any future secondary clampable
- * block gets it automatically just by registering under this same controller — a bulk collapse can
- * never leave one individually-expanded block stuck open.
- */
-function useClampToggle(
-  primaryId: string,
-  getPrimaryExpanded: () => boolean,
-  setPrimaryExpanded: (value: boolean) => void,
-) {
-  const els = new Map<string, HTMLElement>();
-  // Whether a given id's content is actually taller than the clamp — the expand/collapse button
-  // only appears when there's something to expand/collapse. `scrollHeight` reports the true,
-  // unclipped content height regardless of whether `overflow: hidden`/`max-height` happens to be
-  // applied at the time it's read, so this is accurate whether currently expanded or collapsed.
-  const overflowing = ref<Record<string, boolean>>({});
-  // 011-linear-thread-mode follow-up: each overflowing id's own measured `scrollHeight`, kept in
-  // step with `overflowing` by the same `recompute()` pass. `clampStyle` below uses this so
-  // *both* the collapsed and expanded states of an overflowing block resolve to a concrete pixel
-  // `max-height` (160px vs. this element's own real height) rather than expanded meaning "no
-  // `max-height` at all" — two concrete numbers is what lets the `transition: max-height` in this
-  // component's `<style>` actually animate the toggle instead of snapping instantly, which is what
-  // Thread mode's tree layout (`ThreadCard.vue`) needs: its branch-connector lines have no
-  // coordinates of their own to recalculate (they're `position: absolute` purely relative to their
-  // own `.thread-branch-fork`, at a fixed offset — see that file's own doc comment), so the only
-  // thing standing between a toggle and a fluid reflow was this instant snap.
-  const heights = ref<Record<string, number>>({});
-  const secondaryExpanded = ref<Record<string, boolean>>({});
-
-  watch(getPrimaryExpanded, (value) => {
-    for (const id of els.keys()) {
-      if (id !== primaryId) secondaryExpanded.value[id] = value;
-    }
-  });
-
-  function isExpanded(id: string): boolean {
-    return id === primaryId ? getPrimaryExpanded() : (secondaryExpanded.value[id] ?? false);
-  }
-
-  function setExpanded(id: string, value: boolean): void {
-    if (id === primaryId) {
-      setPrimaryExpanded(value);
-    } else {
-      secondaryExpanded.value[id] = value;
-    }
-  }
-
-  function setEl(id: string, el: Element | null): void {
-    if (el instanceof HTMLElement) {
-      els.set(id, el);
-    } else {
-      els.delete(id);
-    }
-  }
-
-  function recompute(): void {
-    for (const [id, el] of els) {
-      overflowing.value[id] = el.scrollHeight > CLAMP_HEIGHT_PX;
-      heights.value[id] = el.scrollHeight;
-    }
-  }
-
-  function isOverflowing(id: string): boolean {
-    return overflowing.value[id] ?? false;
-  }
-
-  // Non-overflowing content is left completely alone (`undefined`, exactly as before this doc
-  // comment's `heights` addition) — it never had a toggle, so it never needs a `max-height` at
-  // all. An overflowing id, though, now always resolves to a concrete `max-height` on *both*
-  // sides of its toggle (this element's own measured height at rest — no clip, and visually
-  // identical to the old unclamped/`undefined` expanded state) rather than losing `max-height`
-  // altogether once expanded, so the CSS `transition: max-height` below has two real numbers to
-  // animate between instead of jumping from 160px to "none".
-  function clampStyle(id: string): { maxHeight: string; overflow: string } | undefined {
-    if (!isOverflowing(id)) return undefined;
-    const collapsed = !isExpanded(id);
-    return {
-      maxHeight: `${collapsed ? CLAMP_HEIGHT_PX : (heights.value[id] ?? CLAMP_HEIGHT_PX)}px`,
-      overflow: 'hidden',
-    };
-  }
-
-  function label(id: string): string {
-    return isExpanded(id) ? 'Show less' : 'Show more';
-  }
-
-  function toggle(id: string): void {
-    setExpanded(id, !isExpanded(id));
-  }
-
-  return { setEl, recompute, isOverflowing, isExpanded, toggle, clampStyle, label };
-}
 
 const TEXT_ID = '__text__';
 const clamp = useClampToggle(
