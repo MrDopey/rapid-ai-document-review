@@ -972,7 +972,7 @@ onBeforeUnmount(() => {
 .thread-branch-group {
   display: flex;
   flex-direction: column;
-  transition: margin-top 0.15s ease;
+  transition: margin-top 0.1s ease;
 }
 /* Fills the same vertical space the old flex `gap` used to (0.75rem) between two stacked sibling
    `.thread-branch-fork`s off the same fork point, drawing a plain continuation of the vertical line
