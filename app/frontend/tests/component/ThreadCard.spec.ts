@@ -278,3 +278,127 @@ describe('ThreadCard — per-thread "Expand all"/"Collapse all"', () => {
     expect(store.expandedByMessage['root-1']).toEqual({ m0: false, m1: false });
   });
 });
+
+// Regression test for the bug fix described in `ThreadCard.vue`'s own `syncBranchAlignment` doc
+// comment: `.thread-card` (the trunk) and `.thread-branches` (the branch column) are two
+// independently-stacking flex columns with no CSS relationship between a `.thread-branch-group`'s
+// position and the `.thread-segment` it forked from — jsdom gives every element a zero-size
+// `getBoundingClientRect()` by default (same caveat `App.spec.ts`/`DocumentCanvas.spec.ts` already
+// document for their own layout-math tests), so this stubs the three elements the alignment math
+// actually reads to prove the *arithmetic* itself is correct, not just that it runs without
+// throwing.
+describe('ThreadCard — branch connector alignment (bug fix)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  function stubRect(el: Element, rect: Partial<DOMRect>): void {
+    (el as HTMLElement).getBoundingClientRect = () => rect as DOMRect;
+  }
+
+  // `syncBranchAlignment` runs off a `requestAnimationFrame`/`setTimeout(cb, 0)`-scheduled callback
+  // chained behind a `flush: 'post'` watcher's own `nextTick` — polling sidesteps having to
+  // replicate that exact microtask/macrotask interleaving here.
+  async function waitFor(check: () => boolean, timeoutMs = 500): Promise<void> {
+    const start = Date.now();
+    while (!check()) {
+      if (Date.now() - start > timeoutMs) throw new Error('waitFor: condition never became true');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  it("nudges a branch group's margin-top so it lands level with the trunk segment it forked from", async () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+    const wrapper = mountCard('root-1');
+    // Let the initial (all-zero-rect) alignment pass run and settle before installing the stubs
+    // below, so it can't race with — or mask — the assertions that follow.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Scoped to the ROOT card's own `.thread-card` wrapper — `.thread-segment` also appears inside
+    // the nested branch `ThreadCard`'s own (sibling, not descendant) `.thread-card`, which an
+    // unscoped `wrapper.findAll` would otherwise also pick up.
+    const cardWrapper = wrapper.find('.thread-card');
+    const cardEl = cardWrapper.element;
+    const segmentEls = cardWrapper.findAll('.thread-segment');
+    const groupEl = wrapper.find('.thread-branch-group').element;
+    expect(segmentEls.length).toBe(2); // one ending at the fork anchor (m0), one the tip segment
+    expect(groupEl).toBeTruthy();
+
+    stubRect(cardEl, { top: 100 } as DOMRect);
+    // The forked-from segment (ends at `m0`) sits far down the trunk (e.g. `m0` is a long message)…
+    stubRect(segmentEls[0]!.element, { bottom: 500 } as DOMRect);
+    // …while the branch column's own natural (un-nudged) stacking would put this group much higher.
+    stubRect(groupEl, { top: 250 } as DOMRect);
+
+    // Re-triggers `syncBranchAlignment` the same way a real expand/collapse toggle would (the
+    // `watch([branchSegments, expandedByMessage], ...)` in `ThreadCard.vue`).
+    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+
+    // target (segment bottom, relative to card top) = 500 - 100 = 400
+    // natural (group top, relative to card top) = 250 - 100 = 150
+    // required nudge = 400 - 150 = 250px
+    await waitFor(() => (groupEl as HTMLElement).style.marginTop === '250px');
+    expect((groupEl as HTMLElement).style.marginTop).toBe('250px');
+  });
+
+  it('never nudges a branch group upward (never overlaps the group above it)', async () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+
+    const wrapper = mountCard('root-1');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const cardWrapper = wrapper.find('.thread-card');
+    const cardEl = cardWrapper.element;
+    const segmentEls = cardWrapper.findAll('.thread-segment');
+    const groupEl = wrapper.find('.thread-branch-group').element;
+
+    stubRect(cardEl, { top: 100 } as DOMRect);
+    // The forked-from segment sits HIGHER than the branch group's own natural stacking position —
+    // the group must stay put (margin-top 0), never move up to "chase" it. Spied so the test can
+    // positively confirm a sync pass actually re-read it (rather than just asserting a margin that
+    // was already '' before the toggle, which would trivially "pass" without proving anything).
+    const groupRectSpy = vi.fn(() => ({ top: 400 }) as DOMRect);
+    stubRect(segmentEls[0]!.element, { bottom: 150 } as DOMRect);
+    (groupEl as HTMLElement).getBoundingClientRect = groupRectSpy;
+
+    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
+    await waitFor(() => groupRectSpy.mock.calls.length > 0);
+
+    expect((groupEl as HTMLElement).style.marginTop).toBe('');
+  });
+});

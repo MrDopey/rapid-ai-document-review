@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
-import { useThreadSegments } from '../../composables/useThreadSegments.js';
+import { useThreadSegments, type ThreadSegment } from '../../composables/useThreadSegments.js';
 import { ApiError } from '../../transport/http-client.js';
 import type { ActionDescriptor } from '../../composables/conversationActions.js';
 import ConversationActionButtons from '../conversation/ConversationActionButtons.vue';
@@ -28,6 +28,11 @@ import HighlightBranchMenu from './HighlightBranchMenu.vue';
  * nested inside the other's padding. Recursion still grows the DOM to the right (a branch's own
  * branches render inside ITS `.thread-branches`, one more flex row deep), it just no longer grows
  * the visual border nesting.
+ *
+ * Because `.thread-card` and `.thread-branches` are two independently-stacking flex columns, this
+ * component also has to keep a `.thread-branch-group` visually level with the `.thread-segment` it
+ * forked from itself — see `syncBranchAlignment` below (bug fix: the connector used to only look
+ * aligned by coincidence).
  */
 const props = withDefaults(
   defineProps<{
@@ -305,11 +310,157 @@ const DEEPER_CARD_MAX_WIDTH_PX = 300;
 const cardStyle = computed(() => ({
   width: `min(${CARD_MAX_WIDTH_PX[props.depth] ?? DEEPER_CARD_MAX_WIDTH_PX}px, calc(100vw - 2.5rem))`,
 }));
+
+// ---------------------------------------------------------------------------------------------
+// Connector alignment (bug fix): `.thread-card` (the trunk — one continuous flex column of every
+// segment) and `.thread-branches` (a wholly SEPARATE flex column, sibling to it — see this file's
+// top doc comment) have no CSS relationship tying a `.thread-branch-group`'s vertical position to
+// the `.thread-segment` it forked from. Each column simply stacks its own children from the top,
+// so a group's natural position depends only on the height of the branch groups *above it in that
+// same column* — never on the (unrelated) height of the trunk segments above the segment it
+// actually points at. The two columns' stacking only ever agreed by coincidence (e.g. every earlier
+// segment/group happening to be about the same height). `86dacd1` gave a toggled message's own
+// height change a `transition`, correctly reasoning that `.thread-branch-fork`'s `top`/`left` offsets
+// are fixed relative to its OWN box so ordinary reflow repositions the connector "for free" — but
+// that box's *position within the branches column* was never actually tied to the trunk segment's
+// position in the first place, so there was nothing correct for that reflow to reveal: expanding
+// ANY earlier trunk message changes a segment's height without changing any branch group's height,
+// which was already enough to desync the two columns even before `86dacd1`.
+//
+// Fixed the same way `DocumentCanvas.vue`'s own `computeConversationLayout` already solves the
+// analogous canvas-mode problem (siblings stacking near a target position without overlapping) —
+// measure the real boxes and nudge into place — rather than reaching for CSS Grid `subgrid` (which
+// could express this declaratively but would require reshaping `.thread-card`'s single bordered box
+// spanning one continuous column into one grid cell per segment purely to satisfy this constraint,
+// and isn't yet used anywhere else in this codebase). This is the flow-layout equivalent: a
+// `margin-top` nudge on the group in place of an absolute `top`.
+// ---------------------------------------------------------------------------------------------
+const threadCardRef = ref<HTMLElement | null>(null);
+const branchesRef = ref<HTMLElement | null>(null);
+const segmentEls = new Map<string, HTMLElement>();
+const branchGroupEls = new Map<string, HTMLElement>();
+
+function segmentKey(segment: Pick<ThreadSegment, 'startIndex' | 'endIndex'>): string {
+  return `${segment.startIndex}-${segment.endIndex}`;
+}
+
+// jsdom (this component's own test environment — `ThreadCard.spec.ts`) has no
+// `requestAnimationFrame` at all, unlike a real browser — same fallback `DocumentCanvas.vue`'s own
+// `scheduleFrame`/`cancelScheduledFrame` already uses for the exact same reason.
+const scheduleFrame: (cb: () => void) => number =
+  typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (cb) => setTimeout(cb, 0) as unknown as number;
+const cancelScheduledFrame: (handle: number) => void =
+  typeof cancelAnimationFrame === 'function'
+    ? cancelAnimationFrame
+    : (handle) => clearTimeout(handle);
+
+let alignFrame: number | null = null;
+function scheduleAlignSync(): void {
+  if (alignFrame !== null) return;
+  alignFrame = scheduleFrame(() => {
+    alignFrame = null;
+    syncBranchAlignment();
+  });
+}
+
+function setSegmentEl(segment: ThreadSegment, el: Element | null): void {
+  const key = segmentKey(segment);
+  if (el) segmentEls.set(key, el as HTMLElement);
+  else segmentEls.delete(key);
+  scheduleAlignSync();
+}
+
+function setBranchGroupEl(segment: ThreadSegment, el: Element | null): void {
+  const key = segmentKey(segment);
+  if (el) branchGroupEls.set(key, el as HTMLElement);
+  else branchGroupEls.delete(key);
+  scheduleAlignSync();
+}
+
+/** A `.thread-segment` ENDS right at its fork anchor message (`useThreadSegments.ts`), so that
+ *  segment's own BOTTOM edge — not its top — is the actual point in the trunk a branch group's
+ *  connector should read as pointing at. Walks `branchSegments` top-to-bottom (their real render
+ *  order in both columns) nudging each group's `margin-top` by however much farther down its target
+ *  sits than where it would otherwise land purely from the height of branch groups above it — never
+ *  negative, so a group is never pulled up past its own column's normal flow (and so never overlaps
+ *  the group above it): the existing `.thread-branches`/`.thread-branch-group` CSS `gap` already
+ *  guarantees that floor for free, exactly like `computeConversationLayout`'s own
+ *  `Math.max(base, cursorBottom + minGap)`. */
+function syncBranchAlignment(): void {
+  const cardEl = threadCardRef.value;
+  if (!cardEl || branchSegments.value.length === 0) return;
+  const cardTop = cardEl.getBoundingClientRect().top;
+
+  for (const segment of branchSegments.value) {
+    const key = segmentKey(segment);
+    const groupEl = branchGroupEls.get(key);
+    const segEl = segmentEls.get(key);
+    if (!groupEl || !segEl) continue;
+
+    // Reset before measuring so this group's own natural (un-nudged) flow position is what gets
+    // read below, not whatever nudge was applied on a previous pass.
+    groupEl.style.marginTop = '0px';
+    const naturalTop = groupEl.getBoundingClientRect().top - cardTop;
+    const targetTop = segEl.getBoundingClientRect().bottom - cardTop;
+    const delta = Math.max(0, targetTop - naturalTop);
+    groupEl.style.marginTop = delta > 0 ? `${delta}px` : '';
+  }
+}
+
+// Recomputed whenever this Thread's own segment/branch structure or any message's expand/collapse
+// state changes — covers the trunk message a branch anchors to, the branch's own messages (a
+// nested `ThreadCard`'s height change bubbles up as a resize of `branchesRef` below), and multiple
+// sibling branches sharing one segment (all still stacked correctly, see `syncBranchAlignment`'s own
+// doc comment). `flush: 'post'` so refs/DOM already reflect the new state before measuring.
+watch([branchSegments, expandedByMessage], () => void nextTick(scheduleAlignSync), {
+  deep: true,
+  flush: 'post',
+});
+
+// Catches everything the watcher above can't: text reflow from a viewport/column-width change, a
+// deeply-nested descendant's own async content growth, fonts loading, etc. — anything that changes
+// a segment's or a branch group's real rendered height without this Thread's own reactive state
+// changing. Two targets, not one per segment/group: `cardEl`'s own border-box height already changes
+// whenever any segment inside it does (segments stack in one continuous column), and likewise for
+// `branchesEl` and its branch groups — one observer per column captures every interior resize that
+// matters here without the bookkeeping of one observer per segment/group.
+let resizeObserver: ResizeObserver | null = null;
+function ensureResizeObserver(): ResizeObserver | null {
+  if (typeof ResizeObserver === 'undefined') return null;
+  if (!resizeObserver) resizeObserver = new ResizeObserver(() => scheduleAlignSync());
+  return resizeObserver;
+}
+// `branchesRef` (unlike `threadCardRef`) only exists while `branchSegments.length > 0` (the
+// `v-if` above `.thread-branches`) — so its element can appear/disappear well after this component
+// already mounted (the first branch off a previously-childless segment, or the last one going
+// `doneAt`), not just once at mount time, hence a `watch` on each ref rather than a one-time
+// `observe` call in `onMounted`.
+watch(threadCardRef, (el, prev) => {
+  const ro = ensureResizeObserver();
+  if (!ro) return;
+  if (prev) ro.unobserve(prev);
+  if (el) ro.observe(el);
+});
+watch(branchesRef, (el, prev) => {
+  const ro = ensureResizeObserver();
+  if (!ro) return;
+  if (prev) ro.unobserve(prev);
+  if (el) ro.observe(el);
+});
+onMounted(() => scheduleAlignSync());
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (alignFrame !== null) cancelScheduledFrame(alignFrame);
+});
 </script>
 
 <template>
   <div v-if="thread" class="thread-node">
     <article
+      ref="threadCardRef"
       class="thread-card"
       :class="{ 'thread-card--active': threadId === activeThreadId }"
       :style="cardStyle"
@@ -339,6 +490,7 @@ const cardStyle = computed(() => ({
       <div
         v-for="segment in segments"
         :key="`${segment.startIndex}-${segment.endIndex}`"
+        :ref="(el) => setSegmentEl(segment, el as Element | null)"
         class="thread-segment"
         :class="{ 'is-tip-segment': segment.isTipSegment }"
       >
@@ -370,10 +522,11 @@ const cardStyle = computed(() => ({
     <!-- Branches render as their own sibling column, connected by a line to the segment they
          forked from — never nested inside `.thread-card`'s own border. See the layout doc comment
          at the top of this file. -->
-    <div v-if="branchSegments.length > 0" class="thread-branches">
+    <div v-if="branchSegments.length > 0" ref="branchesRef" class="thread-branches">
       <div
         v-for="segment in branchSegments"
         :key="`branches-${segment.startIndex}-${segment.endIndex}`"
+        :ref="(el) => setBranchGroupEl(segment, el as Element | null)"
         class="thread-branch-group"
       >
         <div
@@ -501,9 +654,12 @@ const cardStyle = computed(() => ({
 }
 /* FR-005b: the sibling column of branch boxes to the right of `.thread-card` (never nested inside
    it — see this file's top doc comment). One `.thread-branch-group` per source segment that has
-   any active children, stacked top-to-bottom in the same order as the segments themselves so a
-   group still reads as roughly across from the segment it forked from; `align-items: flex-start`
-   for the same fit-content-not-stretch reason as `.thread-node` above. */
+   any active children, stacked top-to-bottom in the same order as the segments themselves;
+   `align-items: flex-start` for the same fit-content-not-stretch reason as `.thread-node` above.
+   Plain top-to-bottom flex stacking alone does NOT keep a group "across from" the segment it forked
+   from (this column's stacking depends only on branch-group heights, never on trunk-segment
+   heights) — the script's own `syncBranchAlignment` nudges each group's `margin-top` to actually
+   land it there; see that function's doc comment for why this couldn't be expressed in CSS alone. */
 .thread-branches {
   display: flex;
   flex-direction: column;
@@ -513,25 +669,27 @@ const cardStyle = computed(() => ({
 }
 /* Multiple sibling branches forked from the very same segment (FR-005b's "these are siblings of
    each other, not nested") stack vertically within one group, each getting its own connector via
-   `.thread-branch-fork` below rather than one shared border wrapping all of them. */
+   `.thread-branch-fork` below rather than one shared border wrapping all of them. `transition:
+   margin-top` smooths `syncBranchAlignment`'s own JS-computed nudges (script, above) the same way
+   `MessageBubble.vue`'s own `transition: max-height` smooths the toggle that typically causes them,
+   rather than snapping straight to the new position. */
 .thread-branch-group {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  transition: margin-top 0.15s ease;
 }
 /* Each branch box's own connector line + arrowhead back to the segment it forked from
    (mockup's "───▶"). `padding-left` reserves the room the line/arrowhead draw into, so this
    completely owns its own spacing from `.thread-card`'s right edge — `.thread-node`'s row has no
    extra `gap` of its own (see below), meaning it's this padding alone, not a shared gap, that keeps
    the whole tree's per-branch connector self-contained no matter how many groups/forks stack up.
-   Deliberately never needs recalculating when a message's expand/collapse toggle changes some
-   box's height: `top`/`left` below are fixed offsets purely relative to THIS `.thread-branch-fork`'s
-   own (`position: relative`) box, never a measured coordinate on the trunk or a sibling fork, so
-   ordinary reflow already carries this connector to the right place for free — there is no
-   JS-computed position to go stale. The one thing standing between a toggle and *smooth* (not
-   instant-snap) motion was the toggled box's own height change having no transition —
-   `MessageBubble.vue`'s `.message-text`/`.tool-call-body` `transition: max-height` now covers
-   that; see its own doc comment. */
+   `top`/`left` below are fixed offsets purely relative to THIS `.thread-branch-fork`'s own
+   (`position: relative`) box — which only ever positions the line/arrowhead correctly *within* a
+   branch group that itself already sits level with its trunk segment. That leveling is this
+   component's real, previously-missing anchor: see `.thread-branches`'/`.thread-branch-group`'s own
+   doc comments above and `syncBranchAlignment` in the script for why a fixed offset here was never
+   enough on its own. */
 .thread-branch-fork {
   position: relative;
   padding-left: 1.75rem;
