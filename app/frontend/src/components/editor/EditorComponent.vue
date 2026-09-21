@@ -234,7 +234,16 @@ defineExpose({
    *  their highlighted anchor. */
   anchorTop: (pos: number): number | null => {
     if (!view || !paneRef.value) return null;
-    const coords = view.coordsAtPos(pos);
+    // `pos` can be stale relative to the live document (e.g. an edit shrank the content since
+    // this anchor was recorded) -- `coordsAtPos` throws a RangeError for a position past the
+    // document's end rather than returning null, so callers relying on the null-fallback
+    // convention above need this caught here.
+    let coords: ReturnType<typeof view.coordsAtPos>;
+    try {
+      coords = view.coordsAtPos(pos);
+    } catch {
+      return null;
+    }
     if (!coords) return null;
     return coords.top - paneRef.value.getBoundingClientRect().top;
   },
