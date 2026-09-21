@@ -68,14 +68,15 @@ async function findConversation(
 
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1-us4 in the same `npm run test:e2e` process
- * (document already exists) — mirrors us3.spec.ts/us4.spec.ts's `ensureFixtureDocument`. */
+ * (document already exists) — mirrors us3.spec.ts/us4.spec.ts's `ensureFixtureDocument` (incl.
+ * its stale-`.toolbar h1`-selector fix — see us3.spec.ts). */
 async function ensureFixtureDocument(page: Page): Promise<void> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US5 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
-    await expect(page.locator('.toolbar h1')).toBeVisible();
+    await expect(page.locator('.preview-pane')).toBeVisible();
     return;
   }
 
@@ -98,7 +99,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
-  await expect(page.locator('.toolbar h1')).toBeVisible();
+  await expect(page.locator('.preview-pane')).toBeVisible();
 }
 
 async function waitIdle(page: Page): Promise<void> {

@@ -340,7 +340,10 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         await expect(page.getByRole('button', { name: 'Start reviewing' })).toBeFocused();
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+        // `.toolbar h1` no longer exists (006-toolbar-reorg); `.preview-pane` presence is the
+        // resilient "a document is loaded" signal used throughout this file below, matching
+        // us1.spec.ts/us3.spec.ts's already-fixed convention.
+        await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
       } else {
         // A document already exists — this backend/database is shared across the whole e2e
         // run (see env.ts), and the story specs run before this one, so the (single, global)
@@ -350,7 +353,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         // a "select all" keypress whose effect depends on exactly which CodeMirror keymap
         // extensions are registered — everything from here on (edit, branch, propose, preview,
         // accept) still exercises the real UI keyboard-only.
-        await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
         const docRes = await page.request.get('/api/document');
         const docBody = (await docRes.json()) as {
           document: { currentRevision: number };
@@ -461,7 +464,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
   test('live-region announcements fire for every FR-043b event type', async ({ page }) => {
     await installLiveRegionRecorder(page);
     await page.goto('/');
-    await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
 
     const main = (await getConversations(page)).find((c) => c.kind === 'main');
     if (!main)
@@ -534,7 +537,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     page,
   }) => {
     await page.goto('/');
-    await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
 
     async function runAuditAndAssert(viewName: string, scheme: 'light' | 'dark'): Promise<void> {
       const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);
@@ -673,7 +676,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         .fill('# A11y Canvas Fixture\n\nA11Y-CANVAS-FIXTURE-INTRO');
       await page.getByRole('button', { name: 'Start reviewing' }).click();
     }
-    await expect(page.locator('.toolbar h1')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
 
     await test.step('manual WCAG audit of the canvas surface (roles/names + contrast)', async () => {
       const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);

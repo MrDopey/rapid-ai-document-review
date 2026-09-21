@@ -16,7 +16,14 @@ test.describe('US1 — create and edit a document with tracked history', () => {
         .getByLabel('Document content')
         .fill(`# Review Doc\n\nOriginal paragraph.\n\n${MERMAID_BLOCK}\n\n${XSS_PAYLOAD}`);
       await page.getByRole('button', { name: 'Start reviewing' }).click();
-      await expect(page.locator('.toolbar h1')).toHaveText('Review Doc');
+      // Fix: `.toolbar h1` no longer exists (006-toolbar-reorg moved the document title out of
+      // the topbar into the browser tab only — see App.vue's `document.title` watch comment) —
+      // this assertion was stale from before that refactor. `.preview-pane`'s own rendered
+      // heading is the resilient replacement, matching history-diff.spec.ts's already-fixed
+      // convention.
+      await expect(
+        page.locator('.preview-pane').getByRole('heading', { name: 'Review Doc' }),
+      ).toBeVisible();
     });
 
     await test.step('sanitizer strips the XSS payload from the DOM', async () => {

@@ -91,14 +91,14 @@ async function getConversationMessages(
 
 /** Mirrors us7.spec.ts's ensureFixtureDocument — works whether this spec runs in isolation (paste
  *  screen appears) or after earlier usN specs in the same `npm run test:e2e` process (document
- *  already exists). */
+ *  already exists). Also mirrors its stale-`.toolbar h1`-selector fix (see us3.spec.ts). */
 async function ensureFixtureDocument(page: Page): Promise<void> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US8 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
-    await expect(page.locator('.toolbar h1')).toBeVisible();
+    await expect(page.locator('.preview-pane')).toBeVisible();
     return;
   }
 
@@ -121,7 +121,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
     .toBeGreaterThan(before.currentRevision);
 
   await page.reload();
-  await expect(page.locator('.toolbar h1')).toBeVisible();
+  await expect(page.locator('.preview-pane')).toBeVisible();
 }
 
 /** Selects the line containing `markerText` via keyboard-only navigation (mirrors
@@ -539,7 +539,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
       secondHighlightId = ((await secondResponse.json()) as { id: string }).id;
 
       await page.reload();
-      await expect(page.locator('.toolbar h1')).toBeVisible();
+      await expect(page.locator('.preview-pane')).toBeVisible();
       await expect(
         page.locator(`.conversation-thread-box[data-conversation-id="${secondHighlightId}"]`),
       ).toBeVisible({

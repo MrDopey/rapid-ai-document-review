@@ -58,14 +58,16 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1/us2 in the same `npm run test:e2e` process
  * (document already exists — the marker block is appended via the same PATCH /api/document path
- * US1's manual-edit flow already uses, so nothing here bypasses the application's real write path). */
+ * US1's manual-edit flow already uses, so nothing here bypasses the application's real write path).
+ * Fix: was asserting the stale `.toolbar h1` selector (removed by 006-toolbar-reorg); now uses
+ * `.preview-pane` visibility as the "document loaded" signal, per us1.spec.ts/history-diff.spec.ts. */
 async function ensureFixtureDocument(page: Page): Promise<void> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US3 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
-    await expect(page.locator('.toolbar h1')).toBeVisible();
+    await expect(page.locator('.preview-pane')).toBeVisible();
     return;
   }
 
@@ -84,7 +86,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
     },
   });
   await page.reload();
-  await expect(page.locator('.toolbar h1')).toBeVisible();
+  await expect(page.locator('.preview-pane')).toBeVisible();
 }
 
 async function waitIdle(page: Page): Promise<void> {

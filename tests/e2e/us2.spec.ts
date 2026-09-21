@@ -21,7 +21,9 @@ test.describe('US2 — ask the main conversation about the document', () => {
         pasteStartedAt = Date.now();
         await page.getByRole('button', { name: 'Start reviewing' }).click();
       }
-      await expect(page.locator('.toolbar h1')).toBeVisible();
+      // `.toolbar h1` no longer exists (006-toolbar-reorg); `.preview-pane` presence is the
+      // resilient "a document is loaded" signal (see us1.spec.ts/history-diff.spec.ts).
+      await expect(page.locator('.preview-pane')).toBeVisible();
     });
 
     await test.step('Main is visible in the HUD; clicking its row focuses its detail view (FR-009)', async () => {
