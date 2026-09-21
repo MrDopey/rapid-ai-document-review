@@ -258,6 +258,66 @@ afterEach(() => {
   trackedKeydownListeners.clear();
 });
 
+// Shared by the three "focus multiple conversation panels via a hotkey" suites below (auto-focus
+// on branch, Ctrl+Alt+1..9 digit toggle, cycle-focused-conversations hotkey) — previously
+// copy-pasted verbatim into each of the three, now consolidated here.
+
+/** The do-nothing `ResizeObserverStub` above never actually invokes its callback, which pins
+ *  every other suite in this file to `viewportFitCount === 1` (see `focusConfig.ts`'s
+ *  `useFocusCap`) — fine for suites that don't care about the focus cap, but each of the three
+ *  suites below needs real headroom (cap 3, the default) to exercise both "still room" and
+ *  "already full" — so `.panes`' `ResizeObserver` is given a wide measured width the moment it
+ *  starts observing, simulating a viewport with room for several focused panels side by side. */
+class WideResizeObserverStub {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(_target: Element): void {
+    this.callback(
+      [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+/** `ConversationDetailPanel` is deliberately left out of this stub set in every one of the three
+ *  suites below — each needs a real, focused-panel instance to observe/interact with, not a stub. */
+const FOCUS_PANEL_STUBS = {
+  DocumentCanvas: true,
+  PreviewComponent: true,
+  HudPanel: true,
+  HistoryPanel: true,
+  KeyboardShortcutsDialog: true,
+  HelpDialog: true,
+  EditsList: true,
+};
+
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
+  return {
+    name: overrides.id,
+    kind: 'branch',
+    parentId: null,
+    branchDepth: 1,
+    status: 'idle',
+    isPrimary: false,
+    contextRevision: 1,
+    isStale: false,
+    pendingEditCount: 0,
+    canEdit: true,
+    canBranch: true,
+    errorMessage: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    closedAt: null,
+    readOnly: false,
+    anchorOrphaned: false,
+    seedSelection: null,
+    forkedFromMessageId: null,
+    ...overrides,
+  };
+}
+
 describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
   let pinia: Pinia;
 
