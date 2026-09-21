@@ -142,32 +142,47 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
  * plus the `conversation_one_current_main` partial unique index enforcing exactly one current
  * Main per document.
  */
-function indexNames(db: DatabaseSync, table: string): string[] {
-  return (db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map(
-    (i) => i.name,
-  );
-}
-
 describe('migration version 2: is_current_main (specs/006-archivable-main-conversation)', () => {
-  it('a fresh install gets the column and the unique index at the latest user_version', () => {
+  it('a fresh install gets the column at the latest user_version, and its unique index rejects a second current-Main row for the same document', () => {
     const db = new DatabaseSync(':memory:');
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
-    expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
       4,
     );
+
+    db.prepare(
+      `INSERT INTO document (id, title, pi_session_dir, created_at, updated_at)
+       VALUES ('doc_a', 'Doc A', '/tmp/pi', 'now', 'now')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO conversation
+         (id, document_id, name, kind, pi_session_path, status, is_current_main, context_revision, created_at, updated_at)
+       VALUES ('conv_a1', 'doc_a', 'Main', 'main', '/tmp/a1.jsonl', 'idle', 1, 1, 'now', 'now')`,
+    ).run();
+
+    // The unique partial index (`WHERE is_current_main = 1`) enforces at most one current-Main
+    // per document — a second one for the same document is rejected outright, not silently allowed.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO conversation
+             (id, document_id, name, kind, pi_session_path, status, is_current_main, context_revision, created_at, updated_at)
+           VALUES ('conv_a2', 'doc_a', 'Second', 'branch', '/tmp/a2.jsonl', 'idle', 1, 1, 'now', 'now')`,
+        )
+        .run(),
+    ).toThrow();
+
     db.close();
   });
 
-  it('an existing database missing the column gets it added, its single non-closed Main backfilled, and the index created', () => {
+  it('an existing database missing the column gets it added, its single non-closed Main backfilled, and its unique index rejects a second current-Main row for the same document', () => {
     const db = createPreMigration1Database();
     expect(tableColumns(db, 'conversation')).not.toContain('is_current_main');
 
     migrate(db);
 
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
-    expect(indexNames(db, 'conversation')).toContain('conversation_one_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
       4,
     );
@@ -176,6 +191,20 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
       .prepare('SELECT * FROM conversation WHERE id = ?')
       .get('conv_old') as Record<string, unknown>;
     expect(conversation.is_current_main).toBe(1);
+
+    db.prepare(
+      `INSERT INTO document (id, title, pi_session_dir, created_at, updated_at)
+       VALUES ('doc_old', 'Old Doc', '/tmp/pi', 'now', 'now')`,
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO conversation
+             (id, document_id, name, kind, pi_session_path, status, is_current_main, context_revision, created_at, updated_at)
+           VALUES ('conv_old2', 'doc_old', 'Second Main', 'branch', '/tmp/old2.jsonl', 'idle', 1, 1, 'now', 'now')`,
+        )
+        .run(),
+    ).toThrow();
 
     db.close();
   });
@@ -283,12 +312,25 @@ describe('migration version 4: document_type + widened conversation.kind (011-li
     expect(conversation.pi_leaf_entry_id).toBeNull();
     expect(conversation.done_at).toBeNull();
     expect(conversation.seed_excerpt_text).toBeNull();
-    expect(indexNames(db, 'conversation')).toContain('conversation_one_primary');
 
     db.prepare(
       `INSERT INTO document (id, title, pi_session_dir, document_type, created_at, updated_at)
        VALUES ('doc_old', 'Old Doc', '/tmp/pi', 'thread', 'now', 'now')`,
     ).run();
+
+    // The rebuilt table's conversation_one_primary unique partial index is still enforced after
+    // the rebuild: a second Primary for the same document (conv_old is already Primary, per the
+    // fixture) is rejected outright, not silently allowed.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO conversation
+             (id, document_id, name, kind, pi_session_path, status, is_primary, context_revision, created_at, updated_at)
+           VALUES ('conv_old_dup_primary', 'doc_old', 'Duplicate Primary', 'branch', '/tmp/dup.jsonl', 'idle', 1, 1, 'now', 'now')`,
+        )
+        .run(),
+    ).toThrow();
+
     expect(() =>
       db
         .prepare(

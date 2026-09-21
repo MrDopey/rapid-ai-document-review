@@ -103,48 +103,25 @@ describe('toConversationDto anchorOrphaned', () => {
   });
 });
 
-// specs/005-canvas-conversation-threads — NEW desired behavior, not yet implemented: the data
-// model gains a field naming which specific parent-conversation message a branch forked from
-// (today the only anchor a branch carries at all is `seedSelection`, a document character-range
-// excerpt — see conversation-service.ts's `branch()` doc comment and
-// ConversationThreadBox.vue's `parentConversation` doc comment, both of which currently state
-// plainly that no message-level anchor exists anywhere in the domain model). Named
-// `forkedFromMessageId` here to match this codebase's existing naming style for a nullable
-// identifier field (`parentId`, `stagedEditId`, `restoredFrom` in RevisionRow/RevisionDto).
-//
-// Neither `ConversationRow` (storage-adapter.ts) nor `ConversationDto` (contracts/http.ts) has
-// this field yet — this test file is test-authoring only, so it does NOT add the field to those
-// production types. Instead it widens the row/dto shapes locally with an intersection type, purely
-// so these tests can express the field they expect `toConversationDto` to pass through once a
-// separate implementation pass adds it for real. Until then, `row.forkedFromMessageId` is simply
-// not read by `toConversationDto`, so `dto.forkedFromMessageId` comes back `undefined` — these
-// tests fail on that missing passthrough, not on a typo.
-type ConversationRowWithFork = ConversationRow & { forkedFromMessageId: string | null };
-type ConversationDtoWithFork = { forkedFromMessageId?: string | null };
-
-describe('toConversationDto forkedFromMessageId (message-level fork anchor — NEW field)', () => {
+// specs/005-canvas-conversation-threads: `forkedFromMessageId` names which specific
+// parent-conversation message a branch forked from (today the only OTHER anchor a branch carries
+// is `seedSelection`, a document character-range excerpt). It is a first-class, nullable field on
+// both `ConversationRow` (storage-adapter.ts) and `ConversationDto` (contracts/http.ts), so
+// `toConversationDto` is expected to pass it through unchanged.
+describe('toConversationDto forkedFromMessageId (message-level fork anchor)', () => {
   it('passes the row value through unchanged when the branch was created from within a conversation (populated with the id of the last message shown at the point of branching)', () => {
-    const row: ConversationRowWithFork = {
-      ...baseRow({ kind: 'branch', parentId: 'conv_parent' }),
+    const row = baseRow({
+      kind: 'branch',
+      parentId: 'conv_parent',
       forkedFromMessageId: 'msg_42',
-    };
-    const dto = toConversationDto(
-      fakeStorage(),
-      row,
-      1,
-      'content',
-    ) as unknown as ConversationDtoWithFork;
+    });
+    const dto = toConversationDto(fakeStorage(), row, 1, 'content');
     expect(dto.forkedFromMessageId).toBe('msg_42');
   });
 
   it('is null for Main, and for a branch created from a document selection with no message context', () => {
-    const row: ConversationRowWithFork = { ...baseRow(), forkedFromMessageId: null };
-    const dto = toConversationDto(
-      fakeStorage(),
-      row,
-      1,
-      'content',
-    ) as unknown as ConversationDtoWithFork;
+    const row = baseRow({ forkedFromMessageId: null });
+    const dto = toConversationDto(fakeStorage(), row, 1, 'content');
     expect(dto.forkedFromMessageId).toBeNull();
   });
 });

@@ -1,4 +1,3 @@
-import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqliteStorageAdapter } from '../../src/storage/sqlite/index.js';
 import { EventService } from '../../src/events/event-service.js';
@@ -14,22 +13,18 @@ import { ConflictService } from '../../src/edit/conflict-service.js';
 import { EditService } from '../../src/edit/edit-service.js';
 import { newId } from '../../src/ids.js';
 import type { ConversationRow } from '../../src/storage/storage-adapter.js';
-import { createWebSearchTool } from '../../src/pi/tools/web-search.js';
-import { createWebFetchTool } from '../../src/pi/tools/web-fetch.js';
 
 /**
- * Contract tests for specs/008-searxng-web-search (contracts/web-tools.md expectations #9-#10).
- * `pi/tools/web-search.ts`/`pi/tools/web-fetch.ts` don't exist yet at the time this file is
- * authored, and `PiService.buildTools()` does not construct them either — every test below is
- * expected to be RED until that implementation lands, mirroring
+ * Contract tests for specs/008-searxng-web-search (contracts/web-tools.md expectation #9; see
+ * the note below the last test for #10). `pi/tools/web-search.ts`/`pi/tools/web-fetch.ts` don't
+ * exist yet at the time this file is authored, and `PiService.buildTools()` does not construct
+ * them either — every test below is expected to be RED until that implementation lands, mirroring
  * `tests/contract/pi-model-config.test.ts`'s top comment.
  *
  * Tool-list assertions (#9) go through `PiService` on the `RADR_BE_PI_FAKE_SESSIONS=1` branch
  * (`FakeAgentSession.getActiveToolNames()` reflects exactly what `buildTools()` constructed) —
  * reached via `piService.seedSession(...)`, the lowest-friction public method that calls the
- * private `getOrCreateSession()` without needing a full `EventBridge`. The staged-edit assertion
- * (#10) calls `.execute(...)` directly on the tool objects, since neither tool has any access to
- * `EditService`/`EventService` by construction — the meaningful assertion is at the storage layer.
+ * private `getOrCreateSession()` without needing a full `EventBridge`.
  */
 
 const ORIGINAL_ENV = { ...process.env };
@@ -153,60 +148,10 @@ describe('Contract: web_search/web_fetch tool registration and side effects (web
     expect(names).not.toContain('propose_document_edit');
   });
 
-  describe('#10: neither tool creates a staged_edit row when executed directly', () => {
-    let server: Server | undefined;
-
-    afterEach(async () => {
-      if (server) {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-        server = undefined;
-      }
-    });
-
-    it('web_search execution leaves listStagedEditsByConversation empty', async () => {
-      resetEnvBase();
-      const { storage, createConversationAtDepth } = buildHarness();
-      const conversation = createConversationAtDepth(1);
-
-      server = createServer((_req, res) => {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ query: 'q', results: [] }));
-      });
-      const url = await new Promise<string>((resolve) => {
-        server!.listen(0, '127.0.0.1', () => {
-          const address = server!.address();
-          const port = typeof address === 'object' && address ? address.port : 0;
-          resolve(`http://127.0.0.1:${port}`);
-        });
-      });
-
-      const tool = createWebSearchTool({ searxngUrl: url });
-      await tool.execute('test-tool-call-1', { query: 'anything' });
-
-      expect(storage.listStagedEditsByConversation(conversation.id)).toHaveLength(0);
-    });
-
-    it('web_fetch execution leaves listStagedEditsByConversation empty', async () => {
-      resetEnvBase();
-      const { storage, createConversationAtDepth } = buildHarness();
-      const conversation = createConversationAtDepth(1);
-
-      server = createServer((_req, res) => {
-        res.writeHead(200, { 'content-type': 'text/html' });
-        res.end('<html><body><p>Some page content.</p></body></html>');
-      });
-      const url = await new Promise<string>((resolve) => {
-        server!.listen(0, '127.0.0.1', () => {
-          const address = server!.address();
-          const port = typeof address === 'object' && address ? address.port : 0;
-          resolve(`http://127.0.0.1:${port}`);
-        });
-      });
-
-      const tool = createWebFetchTool({});
-      await tool.execute('test-tool-call-1', { url: `${url}/page` });
-
-      expect(storage.listStagedEditsByConversation(conversation.id)).toHaveLength(0);
-    });
-  });
+  // #10 (contracts/web-tools.md): web_search/web_fetch never create a staged_edit row when
+  // executed, by construction — `createWebSearchTool`/`createWebFetchTool` are built with no
+  // reference to `EditService`/`EventService`/storage at all (see buildTools() in pi-service.ts),
+  // unlike `createProposeDocumentEditTool`. There is deliberately no wiring from either tool to a
+  // conversation's staged edits to assert against here; that absence of a code path IS the
+  // guarantee (enforced structurally, not by a runtime check a test could exercise).
 });

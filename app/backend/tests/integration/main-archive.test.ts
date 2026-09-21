@@ -8,6 +8,7 @@ import {
   ConversationDto,
   CreateDocumentResponse,
   GetConversationResponse,
+  ListConversationsResponse,
   ListRevisionsResponse,
   SendMessageResponse,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -101,9 +102,10 @@ describe('main-archive (specs/006-archivable-main-conversation, US1)', () => {
     await waitFor(() => storage.getConversation(oldMainId)?.status === 'idle');
 
     // ---- Before archiving: exactly one isCurrentMain=true row, and it's the original Main. ----
-    const beforeCurrentMains = storage
-      .listAllConversations(documentId)
-      .filter((c) => c.isCurrentMain);
+    const beforeList = ListConversationsResponse.parse(
+      (await call(app, 'GET', `/api/documents/${documentId}/conversations`)).json,
+    );
+    const beforeCurrentMains = beforeList.conversations.filter((c) => c.isCurrentMain);
     expect(beforeCurrentMains).toHaveLength(1);
     expect(beforeCurrentMains[0]!.id).toBe(oldMainId);
 
@@ -119,9 +121,10 @@ describe('main-archive (specs/006-archivable-main-conversation, US1)', () => {
 
     // ---- Immediately after: still exactly one isCurrentMain=true row — never zero, never more
     // than one — and it is a brand-new conversation, not the one just archived. ----
-    const afterCurrentMains = storage
-      .listAllConversations(documentId)
-      .filter((c) => c.isCurrentMain);
+    const afterList = ListConversationsResponse.parse(
+      (await call(app, 'GET', `/api/documents/${documentId}/conversations`)).json,
+    );
+    const afterCurrentMains = afterList.conversations.filter((c) => c.isCurrentMain);
     expect(afterCurrentMains).toHaveLength(1);
     const newMain = afterCurrentMains[0]!;
     expect(newMain.id).not.toBe(oldMainId);

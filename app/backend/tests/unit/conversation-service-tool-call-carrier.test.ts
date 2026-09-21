@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { computeIsToolCallCarrier } from '@rapid-ai-document-review/shared/domain';
 import { SqliteStorageAdapter } from '../../src/storage/sqlite/index.js';
 import { EventService } from '../../src/events/event-service.js';
 import { EventHub, type DocumentSnapshot } from '../../src/events/event-hub.js';
@@ -20,11 +21,14 @@ import { EventPublisher } from '../../src/events/event-publisher.js';
 
 /**
  * `MessageDto.isToolCallCarrier` (shared/contracts/http.ts) is computed fresh from the stored
- * `message_completed` event's `text`/`reasoning` facts by `ConversationService`'s private
- * `buildMessages` (`getOne` is the public entry point that calls it) — not persisted anywhere.
- * These tests append raw `message_completed` events directly (bypassing `EventBridge`/any agent
- * session) to drive that computation with exactly the stored data it has to work with, proving
- * `getOne` derives the same tagging the app previously computed and persisted at publish time.
+ * `message_completed` event's `text`/`reasoning` facts by the pure `computeIsToolCallCarrier`
+ * (shared/domain) — not persisted anywhere. That function is the single source of truth used by
+ * both the backend's `message-log.ts` `buildMessages` (this file's first describe block tests it
+ * directly, with no service harness) and the frontend's live WS handler.
+ *
+ * The second describe block below is genuinely integration-level: it exercises the full
+ * `ConversationService`/`EventService` join of `tool_started`/`tool_completed` events onto a
+ * carrier message's `toolCalls`, which `computeIsToolCallCarrier` itself has no part in.
  */
 
 interface Harness {
@@ -124,59 +128,17 @@ function appendMessageCompleted(
   h.eventService.append(documentId, conversationId, 'message_completed', data);
 }
 
-describe('ConversationService.getOne: isToolCallCarrier is derived at read time', () => {
-  it('tags an empty tool-call-carrier segment (no text, no reasoning) as isToolCallCarrier: true', () => {
-    const h = buildHarness();
-    const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
-    const documentId = created.document.id;
-    const mainId = created.mainConversation.id;
-
-    appendMessageCompleted(h, documentId, mainId, {
-      messageId: 'msg_carrier',
-      role: 'assistant',
-      text: '',
-      reasoning: null,
-    });
-
-    const { messages } = h.conversationService.getOne(mainId);
-    const carrier = messages.find((m) => m.id === 'msg_carrier');
-    expect(carrier?.isToolCallCarrier).toBe(true);
+describe('computeIsToolCallCarrier (pure function, shared/domain)', () => {
+  it('is true for an empty segment (no text, no reasoning)', () => {
+    expect(computeIsToolCallCarrier({ text: '', reasoning: null })).toBe(true);
   });
 
-  it('does not tag a normal reply with text as isToolCallCarrier', () => {
-    const h = buildHarness();
-    const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
-    const documentId = created.document.id;
-    const mainId = created.mainConversation.id;
-
-    appendMessageCompleted(h, documentId, mainId, {
-      messageId: 'msg_reply',
-      role: 'assistant',
-      text: 'Here is the answer.',
-      reasoning: null,
-    });
-
-    const { messages } = h.conversationService.getOne(mainId);
-    const reply = messages.find((m) => m.id === 'msg_reply');
-    expect(reply?.isToolCallCarrier).toBe(false);
+  it('is false for a normal reply with text', () => {
+    expect(computeIsToolCallCarrier({ text: 'Here is the answer.', reasoning: null })).toBe(false);
   });
 
-  it('does not tag a reasoning-only segment (empty text, non-empty reasoning) as isToolCallCarrier', () => {
-    const h = buildHarness();
-    const created = h.documentService.create('# Doc\n\nHello.\n', 'Doc');
-    const documentId = created.document.id;
-    const mainId = created.mainConversation.id;
-
-    appendMessageCompleted(h, documentId, mainId, {
-      messageId: 'msg_reasoning',
-      role: 'assistant',
-      text: '',
-      reasoning: 'Thinking it through.',
-    });
-
-    const { messages } = h.conversationService.getOne(mainId);
-    const reasoningOnly = messages.find((m) => m.id === 'msg_reasoning');
-    expect(reasoningOnly?.isToolCallCarrier).toBe(false);
+  it('is false for a reasoning-only segment (empty text, non-empty reasoning)', () => {
+    expect(computeIsToolCallCarrier({ text: '', reasoning: 'Thinking it through.' })).toBe(false);
   });
 });
 

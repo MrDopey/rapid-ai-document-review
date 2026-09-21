@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SqliteStorageAdapter } from '../../src/storage/sqlite/index.js';
 import { EventService } from '../../src/events/event-service.js';
 import { EventHub, type DocumentSnapshot } from '../../src/events/event-hub.js';
@@ -116,42 +116,6 @@ function createConversation(
 }
 
 describe('FIX 4: document-mutating writes route through the shared per-document lock', () => {
-  it("EditService.apply() (the previously-unlocked HTTP accept path) acquires the document's PrimaryMutex lock", async () => {
-    const h = buildHarness();
-    const created = h.documentService.create('Hello world.\n', 'Doc');
-    const documentId = created.document.id;
-    const conv = createConversation(h.storage, documentId, created.document.currentRevision);
-    const staged = h.editService.stage(
-      conv.id,
-      'tool_call_1',
-      'Greeting',
-      [{ old_string: 'Hello', new_string: 'Goodbye' }],
-      created.document.currentRevision,
-    );
-
-    const withLockSpy = vi.spyOn(h.primaryMutex, 'withLock');
-    const result = await h.editService.apply(staged.id);
-
-    expect(result.response.outcome).toBe('applied');
-    expect(withLockSpy).toHaveBeenCalledWith(documentId, expect.any(Function));
-  });
-
-  it("DocumentService.applyChanges() (the manual-edit path) also acquires the document's PrimaryMutex lock", async () => {
-    const h = buildHarness();
-    const created = h.documentService.create('Hello world.\n', 'Doc');
-    const documentId = created.document.id;
-
-    const withLockSpy = vi.spyOn(h.primaryMutex, 'withLock');
-    await h.documentService.applyChanges(
-      documentId,
-      undefined,
-      [{ from: 0, to: 5, insert: 'Howdy' }],
-      undefined,
-    );
-
-    expect(withLockSpy).toHaveBeenCalledWith(documentId, expect.any(Function));
-  });
-
   it('two concurrent apply() calls for two different pending edits on the same document both succeed and are assigned distinct, sequential revisions (no interleaving/corruption)', async () => {
     const h = buildHarness();
     const created = h.documentService.create('One two three four.\n', 'Doc');

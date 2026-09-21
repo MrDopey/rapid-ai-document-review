@@ -151,8 +151,17 @@ function createBranch(
   });
 }
 
-function sessionsMap(piService: PiService): Map<string, AgentSessionLike> {
-  return (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions;
+/** Reaches into `PiService`'s private session cache to pre-register a `FakeAgentSession` for a
+ *  known conversation id, so `close()`'s eviction logic has something to evict. This suite runs
+ *  without `RADR_BE_PI_FAKE_SESSIONS=1`, so there is no public way to get a session created and
+ *  cached other than actually running a real turn — this is a test-only seam accessed via a type
+ *  assertion rather than a production code change. Reading the cache back, by contrast, has a
+ *  public hook (`getSessionForTesting`) and every assertion below uses that instead. */
+function registerFakeSession(piService: PiService, conversationId: string, path: string): void {
+  (piService as unknown as { sessions: Map<string, AgentSessionLike> }).sessions.set(
+    conversationId,
+    new FakeAgentSession(path, []),
+  );
 }
 
 describe("FIX 5: PiService evicts a conversation's cached session once it closes", () => {
@@ -163,14 +172,14 @@ describe("FIX 5: PiService evicts a conversation's cached session once it closes
     const main = h.storage.getConversation(created.mainConversation.id)!;
     const branch = createBranch(h.storage, documentId, main.id, created.document.currentRevision);
 
-    sessionsMap(h.piService).set(branch.id, new FakeAgentSession(branch.piSessionPath, []));
-    expect(sessionsMap(h.piService).has(branch.id)).toBe(true);
+    registerFakeSession(h.piService, branch.id, branch.piSessionPath);
+    expect(h.piService.getSessionForTesting(branch.id)).toBeDefined();
 
     // No fold requested (`foldSummaryIntoParent: false`) — the session is dropped synchronously,
     // within `close()` itself, not left cached for the rest of the process's lifetime.
     h.conversationService.close(branch.id, false);
 
-    expect(sessionsMap(h.piService).has(branch.id)).toBe(false);
+    expect(h.piService.getSessionForTesting(branch.id)).toBeUndefined();
   });
 
   it("does not evict the closing conversation's session before its fold-summary flow has finished using it, but does evict it once that flow completes", async () => {
@@ -182,24 +191,24 @@ describe("FIX 5: PiService evicts a conversation's cached session once it closes
 
     // Registered for both: the closing conversation's own session answers `generateFoldSynopsis`;
     // the parent's session receives the folded summary via `deliverFoldSummary`.
-    sessionsMap(h.piService).set(branch.id, new FakeAgentSession(branch.piSessionPath, []));
-    sessionsMap(h.piService).set(main.id, new FakeAgentSession(main.piSessionPath, []));
+    registerFakeSession(h.piService, branch.id, branch.piSessionPath);
+    registerFakeSession(h.piService, main.id, main.piSessionPath);
 
     h.conversationService.close(branch.id, true);
 
     // Immediately after `close()` returns, the fold-summary flow is still in flight (it needs
     // `generateFoldSynopsis` against the closing conversation's own session first) — evicting
     // the session here would break that still-pending use of it.
-    expect(sessionsMap(h.piService).has(branch.id)).toBe(true);
+    expect(h.piService.getSessionForTesting(branch.id)).toBeDefined();
 
     // Once the (fire-and-forget) fold flow actually completes, the closing conversation's session
     // is evicted — but the parent's is left alone; it's still an open, live conversation.
-    await waitFor(() => !sessionsMap(h.piService).has(branch.id), {
+    await waitFor(() => h.piService.getSessionForTesting(branch.id) === undefined, {
       timeoutMs: 2000,
       message:
         "expected the closing conversation's session to be evicted once its fold flow finished",
     });
-    expect(sessionsMap(h.piService).has(main.id)).toBe(true);
+    expect(h.piService.getSessionForTesting(main.id)).toBeDefined();
 
     const events = h.storage.listEventsSince(documentId, null);
     expect(events.some((e) => e.eventType === 'conversation_summary_folded')).toBe(true);

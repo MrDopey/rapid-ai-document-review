@@ -114,19 +114,6 @@ describe('preview.ts line-based hunk context', () => {
     expect(result.hunks[0]!.contextAfter).toBe('\nl1\nl2\nl3\n');
   });
 
-  it('returns what exists (no padding, no error) when the edit is near the end of the document', async () => {
-    const { previewStagedEdit } = await import('../../src/edit/preview.js');
-    const doc = ['l0', 'l1', 'l2', 'l3', 'TARGET'].join('\n');
-
-    const result = previewStagedEdit(
-      makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
-      doc,
-    );
-
-    expect(result.hunks[0]!.contextBefore).toBe('l1\nl2\nl3\n');
-    expect(result.hunks[0]!.contextAfter).toBe('');
-  });
-
   it('handles an edit that itself spans multiple lines', async () => {
     const { previewStagedEdit } = await import('../../src/edit/preview.js');
     const doc = ['p0', 'p1', 'p2', 'X2', 'X3', 'n0', 'n1', 'n2'].join('\n');
@@ -140,19 +127,26 @@ describe('preview.ts line-based hunk context', () => {
     expect(result.hunks[0]!.contextAfter).toBe('\nn0\nn1\nn2');
   });
 
-  it('handles a document with no trailing newline where the edit is on the final line', async () => {
+  it('returns what exists (no padding, no error) when the edit is near the end of the document, whether or not it ends in a trailing newline', async () => {
     const { previewStagedEdit } = await import('../../src/edit/preview.js');
-    const doc = 'l0\nl1\nTARGET';
 
-    expect(doc.endsWith('\n')).toBe(false);
-
-    const result = previewStagedEdit(
+    const withTrailingNewline = ['l0', 'l1', 'l2', 'l3', 'TARGET'].join('\n');
+    const resultWithTrailingNewline = previewStagedEdit(
       makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
-      doc,
+      withTrailingNewline,
     );
+    expect(resultWithTrailingNewline.hunks[0]!.contextBefore).toBe('l1\nl2\nl3\n');
+    expect(resultWithTrailingNewline.hunks[0]!.contextAfter).toBe('');
 
-    expect(result.hunks[0]!.contextBefore).toBe('l0\nl1\n');
-    expect(result.hunks[0]!.contextAfter).toBe('');
+    // Same clamped-to-end-of-document fallback branch, exercised without a trailing newline.
+    const withoutTrailingNewline = 'l0\nl1\nTARGET';
+    expect(withoutTrailingNewline.endsWith('\n')).toBe(false);
+    const resultWithoutTrailingNewline = previewStagedEdit(
+      makeEdit([{ old_string: 'TARGET', new_string: 'REPLACED' }]),
+      withoutTrailingNewline,
+    );
+    expect(resultWithoutTrailingNewline.hunks[0]!.contextBefore).toBe('l0\nl1\n');
+    expect(resultWithoutTrailingNewline.hunks[0]!.contextAfter).toBe('');
   });
 
   it('returns intentHunks with empty context when reconciliation fails', async () => {

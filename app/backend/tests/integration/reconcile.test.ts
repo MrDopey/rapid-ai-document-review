@@ -311,176 +311,134 @@ describe('conflict/reconciliation pipeline (US6)', () => {
     assertCrossEntityInvariants(h.storage, documentId);
   });
 
-  it('supersedes on not_found, requests a replacement, and applies it (FR-032)', async () => {
-    const edit1 = h.editService.stage(
-      branch.id,
-      'tool_notfound_1',
-      'Swap quick for swift',
-      [
+  // The three conflict reasons (`not_found`/`ambiguous`/`overlapping`, text-anchor.ts) drive the
+  // exact same supersede-and-replace round trip through `EditService`/`ConflictService` — only the
+  // fixture, the resulting `conflictDetail.operations`, and the replacement's content differ.
+  const REPLACEMENT_ROUND_TRIP_CASES = [
+    {
+      reason: 'not_found',
+      toolCallPrefix: 'tool_notfound',
+      summary1: 'Swap quick for swift',
+      operations1: [
         {
           old_string: 'The quick fox jumps over the lazy dog.',
           new_string: 'The swift fox jumps over the lazy dog.',
         },
       ],
-      branch.contextRevision,
-    );
-
-    // Rewrite the exact region the proposal targets — its anchor no longer exists at all.
-    advance(
-      h,
-      documentId,
-      'The quick fox jumps over the lazy dog.',
-      'The swift wolf leaps over the sleepy dog.',
-    );
-
-    const result = await h.editService.apply(edit1.id);
-    expect(result.response.outcome).toBe('conflict');
-    if (result.response.outcome !== 'conflict') throw new Error('unreachable');
-    expect(result.response.conflictDetail.operations).toEqual([
-      { index: 0, reason: 'not_found', occurrences: 0 },
-    ]);
-    expect(result.response.replacementRequested).toBe(true);
-    expect(result.response.replacementAttempt).toBe(1);
-
-    await flushMicrotasks();
-    expect(h.storage.getConversation(branch.id)?.status).toBe('working');
-    expect(fakeSession.prompts).toHaveLength(1);
-
-    // Simulate the agent proposing a replacement informed by the conflict detail it was sent.
-    const toolCallId2 = 'tool_notfound_2';
-    fakeSession.emitToolStarted(toolCallId2, 'propose_document_edit');
-    const replacement = h.editService.stage(
-      branch.id,
-      toolCallId2,
-      'Swap quick for swift (revised)',
-      [
+      // Rewrite the exact region the proposal targets — its anchor no longer exists at all.
+      advance: {
+        oldStr: 'The quick fox jumps over the lazy dog.',
+        newStr: 'The swift wolf leaps over the sleepy dog.',
+      },
+      expectedConflictOps: [{ index: 0, reason: 'not_found', occurrences: 0 }],
+      summary2: 'Swap quick for swift (revised)',
+      operations2: [
         {
           old_string: 'The swift wolf leaps over the sleepy dog.',
           new_string: 'The swift fox leaps over the sleepy dog.',
         },
       ],
-      branch.contextRevision,
-    );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
-      result: { details: { stagedEditId: replacement.id } },
-    });
-    fakeSession.emitMessageStart('msg_1');
-    fakeSession.emitMessageCompleted('msg_1', 'Here is a revised proposal.');
-    fakeSession.completeRun();
-    await flushMicrotasks();
-
-    expect(replacement.status).toBe('pending');
-    expect(replacement.supersedesId).toBe(edit1.id);
-    expect(replacement.replacementAttempt).toBe(1);
-    expect(h.storage.getStagedEdit(edit1.id)?.status).toBe('superseded');
-    expect(h.storage.getStagedEdit(edit1.id)?.conflictDetail).toEqual({
-      operations: [{ index: 0, reason: 'not_found', occurrences: 0 }],
-    });
-    expect(h.storage.getConversation(branch.id)?.status).toBe('idle');
-
-    const applied = await h.editService.apply(replacement.id);
-    expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get(documentId).getContent()).toContain(
-      'The swift fox leaps over the sleepy dog.',
-    );
-
-    assertCrossEntityInvariants(h.storage, documentId);
-  });
-
-  it('supersedes on ambiguous and requests a replacement (FR-032)', async () => {
-    const edit1 = h.editService.stage(
-      branch.id,
-      'tool_ambiguous_1',
-      'Rename dog',
-      [{ old_string: 'lazy dog', new_string: 'sleepy dog' }],
-      branch.contextRevision,
-    );
-
-    // Duplicate the anchored text elsewhere so it is no longer unique.
-    advance(h, documentId, 'abcdefgh', 'abcdefgh and one more lazy dog');
-
-    const result = await h.editService.apply(edit1.id);
-    expect(result.response.outcome).toBe('conflict');
-    if (result.response.outcome !== 'conflict') throw new Error('unreachable');
-    expect(result.response.conflictDetail.operations).toEqual([
-      { index: 0, reason: 'ambiguous', occurrences: 2 },
-    ]);
-    expect(result.response.replacementRequested).toBe(true);
-
-    await flushMicrotasks();
-    const toolCallId2 = 'tool_ambiguous_2';
-    fakeSession.emitToolStarted(toolCallId2, 'propose_document_edit');
-    const replacement = h.editService.stage(
-      branch.id,
-      toolCallId2,
-      'Rename dog (revised, unique anchor)',
-      [{ old_string: 'jumps over the lazy dog', new_string: 'jumps over the sleepy dog' }],
-      branch.contextRevision,
-    );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
-      result: { details: { stagedEditId: replacement.id } },
-    });
-    fakeSession.emitMessageStart('msg_1');
-    fakeSession.emitMessageCompleted('msg_1', 'Revised with more context.');
-    fakeSession.completeRun();
-    await flushMicrotasks();
-
-    expect(replacement.supersedesId).toBe(edit1.id);
-    const applied = await h.editService.apply(replacement.id);
-    expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get(documentId).getContent()).toContain('jumps over the sleepy dog');
-
-    assertCrossEntityInvariants(h.storage, documentId);
-  });
-
-  it('supersedes on overlapping operations within one proposal and requests a replacement (FR-032)', async () => {
-    // "abcdefgh" is present verbatim in the fixture; these two operations resolve to overlapping
-    // ranges within it (research R4 / text-anchor.ts), independent of any concurrent document change.
-    const edit1 = h.editService.stage(
-      branch.id,
-      'tool_overlap_1',
-      'Two overlapping replacements',
-      [
+      message2: 'Here is a revised proposal.',
+      expectedAppliedContent: 'The swift fox leaps over the sleepy dog.',
+    },
+    {
+      reason: 'ambiguous',
+      toolCallPrefix: 'tool_ambiguous',
+      summary1: 'Rename dog',
+      operations1: [{ old_string: 'lazy dog', new_string: 'sleepy dog' }],
+      // Duplicate the anchored text elsewhere so it is no longer unique.
+      advance: { oldStr: 'abcdefgh', newStr: 'abcdefgh and one more lazy dog' },
+      expectedConflictOps: [{ index: 0, reason: 'ambiguous', occurrences: 2 }],
+      summary2: 'Rename dog (revised, unique anchor)',
+      operations2: [
+        { old_string: 'jumps over the lazy dog', new_string: 'jumps over the sleepy dog' },
+      ],
+      message2: 'Revised with more context.',
+      expectedAppliedContent: 'jumps over the sleepy dog',
+    },
+    {
+      reason: 'overlapping',
+      toolCallPrefix: 'tool_overlap',
+      summary1: 'Two overlapping replacements',
+      // "abcdefgh" is present verbatim in the fixture; these two operations resolve to overlapping
+      // ranges within it (research R4 / text-anchor.ts), independent of any concurrent document
+      // change — so, unlike the other two cases, there is no `advance()` step.
+      operations1: [
         { old_string: 'abcdef', new_string: 'X' },
         { old_string: 'cdefgh', new_string: 'Y' },
       ],
-      branch.contextRevision,
-    );
+      advance: null,
+      expectedConflictOps: [
+        { index: 0, reason: 'overlapping', occurrences: 1 },
+        { index: 1, reason: 'overlapping', occurrences: 1 },
+      ],
+      summary2: 'Two disjoint replacements',
+      operations2: [{ old_string: 'abcdefgh', new_string: 'XY' }],
+      message2: 'Revised without overlap.',
+      expectedAppliedContent: 'XY',
+    },
+  ] as const;
 
-    const result = await h.editService.apply(edit1.id);
-    expect(result.response.outcome).toBe('conflict');
-    if (result.response.outcome !== 'conflict') throw new Error('unreachable');
-    expect(result.response.conflictDetail.operations).toHaveLength(2);
-    expect(result.response.conflictDetail.operations.every((o) => o.reason === 'overlapping')).toBe(
-      true,
-    );
-    expect(result.response.replacementRequested).toBe(true);
+  it.each(REPLACEMENT_ROUND_TRIP_CASES)(
+    'supersedes on $reason, requests a replacement, and applies it (FR-032)',
+    async (tc) => {
+      const edit1 = h.editService.stage(
+        branch.id,
+        `${tc.toolCallPrefix}_1`,
+        tc.summary1,
+        tc.operations1,
+        branch.contextRevision,
+      );
 
-    await flushMicrotasks();
-    const toolCallId2 = 'tool_overlap_2';
-    fakeSession.emitToolStarted(toolCallId2, 'propose_document_edit');
-    // Disjoint replacement this time — no overlap.
-    const replacement = h.editService.stage(
-      branch.id,
-      toolCallId2,
-      'Two disjoint replacements',
-      [{ old_string: 'abcdefgh', new_string: 'XY' }],
-      branch.contextRevision,
-    );
-    fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
-      result: { details: { stagedEditId: replacement.id } },
-    });
-    fakeSession.emitMessageStart('msg_1');
-    fakeSession.emitMessageCompleted('msg_1', 'Revised without overlap.');
-    fakeSession.completeRun();
-    await flushMicrotasks();
+      if (tc.advance) {
+        advance(h, documentId, tc.advance.oldStr, tc.advance.newStr);
+      }
 
-    const applied = await h.editService.apply(replacement.id);
-    expect(applied.response.outcome).toBe('applied');
-    expect(h.automerge.get(documentId).getContent()).toContain('XY');
+      const result = await h.editService.apply(edit1.id);
+      expect(result.response.outcome).toBe('conflict');
+      if (result.response.outcome !== 'conflict') throw new Error('unreachable');
+      expect(result.response.conflictDetail.operations).toEqual(tc.expectedConflictOps);
+      expect(result.response.replacementRequested).toBe(true);
+      expect(result.response.replacementAttempt).toBe(1);
 
-    assertCrossEntityInvariants(h.storage, documentId);
-  });
+      await flushMicrotasks();
+      expect(h.storage.getConversation(branch.id)?.status).toBe('working');
+      expect(fakeSession.prompts).toHaveLength(1);
+
+      // Simulate the agent proposing a replacement informed by the conflict detail it was sent.
+      const toolCallId2 = `${tc.toolCallPrefix}_2`;
+      fakeSession.emitToolStarted(toolCallId2, 'propose_document_edit');
+      const replacement = h.editService.stage(
+        branch.id,
+        toolCallId2,
+        tc.summary2,
+        tc.operations2,
+        branch.contextRevision,
+      );
+      fakeSession.emitToolCompleted(toolCallId2, 'propose_document_edit', {
+        result: { details: { stagedEditId: replacement.id } },
+      });
+      fakeSession.emitMessageStart('msg_1');
+      fakeSession.emitMessageCompleted('msg_1', tc.message2);
+      fakeSession.completeRun();
+      await flushMicrotasks();
+
+      expect(replacement.status).toBe('pending');
+      expect(replacement.supersedesId).toBe(edit1.id);
+      expect(replacement.replacementAttempt).toBe(1);
+      expect(h.storage.getStagedEdit(edit1.id)?.status).toBe('superseded');
+      expect(h.storage.getStagedEdit(edit1.id)?.conflictDetail).toEqual({
+        operations: tc.expectedConflictOps,
+      });
+      expect(h.storage.getConversation(branch.id)?.status).toBe('idle');
+
+      const applied = await h.editService.apply(replacement.id);
+      expect(applied.response.outcome).toBe('applied');
+      expect(h.automerge.get(documentId).getContent()).toContain(tc.expectedAppliedContent);
+
+      assertCrossEntityInvariants(h.storage, documentId);
+    },
+  );
 
   it('chains a second replacement when the first replacement itself goes stale (edge case)', async () => {
     const edit1 = h.editService.stage(

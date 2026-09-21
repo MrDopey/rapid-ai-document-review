@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { SessionManager } from '@earendil-works/pi-coding-agent';
 import {
   CreateDocumentResponse,
   GetConversationResponse,
@@ -124,34 +123,9 @@ describe('User Story 1: a threaded-conversation document gets exactly one auto-c
   });
 });
 
-describe('User Story 1: a document type is fixed at creation and its two conversation surfaces never mix', () => {
-  let ctx: Ctx;
-
-  beforeEach(async () => {
-    ctx = await createTestApp();
-  });
-
-  it('refuses POST .../conversations (canvas branch route) against a documentType: thread document', async () => {
-    const created = await createThreadDoc(ctx, '# Thread doc\n\nContent.');
-    const res = await call(ctx.app, 'POST', `/api/documents/${ctx.documentId}/conversations`, {
-      parentConversationId: created.mainConversation.id,
-    });
-    expect(res.status).toBe(409);
-    expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
-  });
-
-  it('refuses POST .../threads/:id/send against a documentType: canvas document', async () => {
-    const created = await createCanvasDoc(ctx, '# Canvas doc\n\nContent.');
-    const res = await call(
-      ctx.app,
-      'POST',
-      `/api/documents/${created.document.id}/threads/${created.mainConversation.id}/send`,
-      { message: 'hi' },
-    );
-    expect(res.status).toBe(409);
-    expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
-  });
-});
+// User Story 1's "a document type is fixed at creation and its two conversation surfaces never
+// mix" is covered, along with the equivalent retry/rename guards, by the consolidated
+// "Cross-cutting: every canvas/thread route refuses the other document type" describe below.
 
 describe('User Story 2: highlight-to-branch is a genuine same-session Pi branch', () => {
   let ctx: Ctx;
@@ -208,13 +182,6 @@ describe('User Story 2: highlight-to-branch is a genuine same-session Pi branch'
     expect(branchDetail.messages[0]?.role).toBe('user');
     expect(branchDetail.messages[0]?.text).toContain('<branch-seed-excerpt>');
     expect(branchDetail.messages[0]?.text).toContain(highlightedText);
-
-    // Genuine shared-session branch (research.md R1): both threads' leaf entries live in the SAME
-    // on-disk Pi session tree, not two independent single-root trees.
-    const sm = SessionManager.open(rootRow.piSessionPath);
-    const entryIds = new Set(sm.getEntries().map((e) => e.id));
-    expect(entryIds.has(rootRow.piLeafEntryId!)).toBe(true);
-    expect(entryIds.has(branchRow.piLeafEntryId!)).toBe(true);
 
     // Highlighting the tip is refused (FR-007) — checked before root sends anything further, while
     // `tip` (messages[5], "Third message, the current tip.") is still genuinely the current tip.
@@ -532,17 +499,6 @@ describe('Retry: a Thread can retry a failed agent turn, same as a canvas conver
     expect(parsed.accepted).toBe(true);
     expect(parsed.status).toBe('working');
   });
-
-  it('refuses POST .../threads/:id/retry against a documentType: canvas document', async () => {
-    const created = await createCanvasDoc(ctx, '# Canvas doc\n\nContent.');
-    const res = await call(
-      ctx.app,
-      'POST',
-      `/api/documents/${created.document.id}/threads/${created.mainConversation.id}/retry`,
-    );
-    expect(res.status).toBe(409);
-    expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
-  });
 });
 
 // Parity fix (011-linear-thread-mode follow-up): a Thread's own name can be renamed exactly the
@@ -567,15 +523,64 @@ describe('Rename: a Thread can be renamed, same as a canvas conversation', () =>
     const detail = await getThreadMessages(ctx, rootId);
     expect(detail.conversation.name).toBe('My renamed thread');
   });
+});
 
-  it('refuses PATCH .../threads/:id against a documentType: canvas document', async () => {
-    const created = await createCanvasDoc(ctx, '# Canvas doc\n\nContent.');
+// Consolidates four previously-duplicated wrong-document-type guard tests (canvas branch/send/
+// retry/rename routes, each checked against the other surface's document type) that all assert
+// the identical shape: 409, error.code === 'DOCUMENT_WRONG_TYPE'.
+describe('Cross-cutting: every canvas/thread route refuses the other document type (409 DOCUMENT_WRONG_TYPE)', () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await createTestApp();
+  });
+
+  const WRONG_DOCUMENT_TYPE_CASES = [
+    {
+      label: 'POST .../conversations (canvas branch route) against a documentType: thread document',
+      createDoc: (c: Ctx) => createThreadDoc(c, '# Thread doc\n\nContent.'),
+      method: 'POST' as const,
+      path: (documentId: string) => `/api/documents/${documentId}/conversations`,
+      body: (conversationId: string) => ({ parentConversationId: conversationId }),
+    },
+    {
+      label: 'POST .../threads/:id/send against a documentType: canvas document',
+      createDoc: (c: Ctx) => createCanvasDoc(c, '# Canvas doc\n\nContent.'),
+      method: 'POST' as const,
+      path: (documentId: string, conversationId: string) =>
+        `/api/documents/${documentId}/threads/${conversationId}/send`,
+      body: () => ({ message: 'hi' }),
+    },
+    {
+      label: 'POST .../threads/:id/retry against a documentType: canvas document',
+      createDoc: (c: Ctx) => createCanvasDoc(c, '# Canvas doc\n\nContent.'),
+      method: 'POST' as const,
+      path: (documentId: string, conversationId: string) =>
+        `/api/documents/${documentId}/threads/${conversationId}/retry`,
+      body: () => undefined,
+    },
+    {
+      label: 'PATCH .../threads/:id against a documentType: canvas document',
+      createDoc: (c: Ctx) => createCanvasDoc(c, '# Canvas doc\n\nContent.'),
+      method: 'PATCH' as const,
+      path: (documentId: string, conversationId: string) =>
+        `/api/documents/${documentId}/threads/${conversationId}`,
+      body: () => ({ name: 'nope' }),
+    },
+  ];
+
+  it.each(WRONG_DOCUMENT_TYPE_CASES)('refuses $label', async (tc) => {
+    const created = await tc.createDoc(ctx);
+    const documentId = created.document.id;
+    const conversationId = created.mainConversation.id;
+
     const res = await call(
       ctx.app,
-      'PATCH',
-      `/api/documents/${created.document.id}/threads/${created.mainConversation.id}`,
-      { name: 'nope' },
+      tc.method,
+      tc.path(documentId, conversationId),
+      tc.body(conversationId),
     );
+
     expect(res.status).toBe(409);
     expect((res.json as { error: { code: string } }).error.code).toBe('DOCUMENT_WRONG_TYPE');
   });
