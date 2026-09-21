@@ -6,6 +6,7 @@ import {
   type EditService,
 } from '../../edit/edit-service.ts';
 import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { conversationBelongsToDocument, editBelongsToDocument } from './document-scope-guard.ts';
 import { sendError } from './errors.ts';
 
 export function registerEditRoutes(
@@ -22,23 +23,10 @@ export function registerEditRoutes(
     return null;
   }
 
-  /** A conversation/staged-edit id is globally unique, so without this a valid id from a
-   *  different document than the URL's `:documentId` would resolve as if it belonged there —
-   *  see `conversations.ts`'s `requireConversationInDocument` for the identical gap/reasoning. */
-  function requireConversationInDocument(documentId: string, conversationId: string): boolean {
-    const conversation = storage.getConversation(conversationId);
-    return conversation !== null && conversation.documentId === documentId;
-  }
-
-  function requireEditInDocument(documentId: string, editId: string): boolean {
-    const edit = storage.getStagedEdit(editId);
-    return edit !== null && edit.documentId === documentId;
-  }
-
   app.get<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/edits',
     async (request, reply) => {
-      if (!requireConversationInDocument(request.params.documentId, request.params.id)) {
+      if (!conversationBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
       }
       const response: ListEditsResponse = {
@@ -51,7 +39,7 @@ export function registerEditRoutes(
   app.get<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/edits/:id/preview',
     async (request, reply) => {
-      if (!requireEditInDocument(request.params.documentId, request.params.id)) {
+      if (!editBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'EDIT_NOT_FOUND', 'Staged edit not found');
       }
       try {
@@ -67,7 +55,7 @@ export function registerEditRoutes(
   app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/edits/:id/apply',
     async (request, reply) => {
-      if (!requireEditInDocument(request.params.documentId, request.params.id)) {
+      if (!editBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'EDIT_NOT_FOUND', 'Staged edit not found');
       }
       try {
@@ -84,7 +72,7 @@ export function registerEditRoutes(
   app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/edits/:id/drop',
     async (request, reply) => {
-      if (!requireEditInDocument(request.params.documentId, request.params.id)) {
+      if (!editBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'EDIT_NOT_FOUND', 'Staged edit not found');
       }
       try {
@@ -101,7 +89,7 @@ export function registerEditRoutes(
   app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/edits/accept-remaining',
     async (request, reply) => {
-      if (!requireConversationInDocument(request.params.documentId, request.params.id)) {
+      if (!conversationBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
       }
       try {
@@ -118,7 +106,7 @@ export function registerEditRoutes(
   app.post<{ Params: { documentId: string; id: string } }>(
     '/api/documents/:documentId/conversations/:id/edits/drop-remaining',
     async (request, reply) => {
-      if (!requireConversationInDocument(request.params.documentId, request.params.id)) {
+      if (!conversationBelongsToDocument(storage, request.params.documentId, request.params.id)) {
         return sendError(reply, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
       }
       try {

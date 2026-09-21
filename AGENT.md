@@ -13,14 +13,29 @@
 
 ## Environment variables
 
-`RADR_` prefix required for every app-defined var. Unprefixed only for third-party/platform vars
-(`ANTHROPIC_API_KEY`, `NODE_ENV`).
+Backend-only vars use the `RADR_BE_` prefix; frontend build/dev-server vars (read via
+`process.env`, e.g. in `vite.config.ts`) use `RADR_FE_`; vars that must also be readable from
+browser code (via `import.meta.env`) use `VITE_RADR_` — Vite only ever inlines `import.meta.env`
+values prefixed `VITE_` into the client bundle, so a plain `RADR_FE_` var is invisible there.
+Unprefixed only for third-party/platform vars (`ANTHROPIC_API_KEY`, `NODE_ENV`). Known pre-existing
+unprefixed exceptions: `PI_FAKE_TURN_TIMEOUT_MS`/`PI_FAKE_CHUNK_DELAY_MS`
+(`app/backend/src/pi/fake-agent-session.ts`), `PI_AGENT_TURN_TIMEOUT_MS`
+(`app/backend/src/pi/pi-service.ts`), and `WEB_TOOL_TIMEOUT_MS` (`app/backend/src/pi/tools/common.ts`)
+— these are grandfathered, not license to add more unprefixed vars. See README.md's Configuration
+table for the full authoritative list.
 
 ## Testing
 
 When a task includes tests: one pass/subagent authors the test from the spec's stated behavior only
 (no implementation visibility), a separate pass implements to green. Test-writing stays optional per
 task — this rule governs how tests are written when they exist, not whether they're required.
+
+Root `npm test` only runs backend tests (`test:unit`/`test:integration`/`test:contract`, all
+`--workspace=app/backend`) — it does not run the frontend's vitest suites. Run those explicitly:
+`npm run test:unit --workspace=app/frontend` and `npm run test:component --workspace=app/frontend`.
+
+Dev-server ports: backend `3000`, frontend Vite dev server `3001` (`app/frontend/vite.config.ts`).
+Run a single e2e story with `npm run test:e2e -- --grep "US<n>"`.
 
 ## Frontend UI verification
 
@@ -30,6 +45,10 @@ missed real bugs (focus-trap, z-index, hotkey dispatch) that only manual browser
 running and reporting precise repro steps for the user to check manually.
 
 ## Frontend layout terminology
+
+Covers Canvas mode only (`App.vue`/`DocumentCanvas.vue`). Thread mode (`ThreadModeView.vue`, spec
+011, class namespace `.thread-mode-*`) is a separate, non-interoperating view with its own terms —
+`.thread-columns` below is Canvas mode's sidebar and is NOT the same thing as "Thread mode."
 
 Disambiguate these terms before acting on layout/UI instructions — grep the class name first, this
 app has active layout-churn history (numbered feature specs have reshuffled it before):

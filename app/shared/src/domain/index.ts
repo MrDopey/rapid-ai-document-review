@@ -94,24 +94,6 @@ export interface EditOperation {
   new_string: string;
 }
 
-export interface StagedEdit {
-  id: string;
-  documentId: string;
-  conversationId: string;
-  piToolCallId: string;
-  sourceRevision: number;
-  summary: string;
-  operations: EditOperation[];
-  status: StagedEditStatus;
-  autoApplied: boolean;
-  appliedRevision: number | null;
-  supersedesId: string | null;
-  conflictDetail: ConflictDetail | null;
-  replacementAttempt: number;
-  createdAt: string;
-  resolvedAt: string | null;
-}
-
 export interface UserSettings {
   thinkingVisible: boolean;
   revisionDebounceMs: number;

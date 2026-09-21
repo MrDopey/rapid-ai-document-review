@@ -14,7 +14,6 @@ export const readDocumentParams = z.object({
     .optional()
     .describe('1-based last line to return, inclusive. Omit to read to the end.'),
 });
-export type ReadDocumentParams = z.infer<typeof readDocumentParams>;
 
 export const editOperation = z.object({
   old_string: z
@@ -44,14 +43,11 @@ export const proposeDocumentEditParams = z.object({
         'reviewed and accepted or dropped together as a single proposal.',
     ),
 });
-export type ProposeDocumentEditParams = z.infer<typeof proposeDocumentEditParams>;
 
 export const webSearchParams = z.object({
   query: z.string().min(1).describe('The search query.'),
 });
-export type WebSearchParams = z.infer<typeof webSearchParams>;
 
 export const webFetchParams = z.object({
   url: z.string().min(1).describe('The URL to fetch.'),
 });
-export type WebFetchParams = z.infer<typeof webFetchParams>;
