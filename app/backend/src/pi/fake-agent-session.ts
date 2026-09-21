@@ -113,7 +113,7 @@ function isHangDirective(text: string): boolean {
 }
 
 /** Default bound on how long one fake turn may run before it is force-settled as `agent_error`.
- *  Overridable via `PI_FAKE_TURN_TIMEOUT_MS` so tests exercising the hang path don't have to wait
+ *  Overridable via `RADR_BE_TEST_FAKE_TURN_TIMEOUT_MS` so tests exercising the hang path don't have to wait
  *  out a production-sized timeout.
  *
  *  Must stay comfortably above the slowest *legitimate* scripted turn any e2e spec drives through
@@ -126,18 +126,18 @@ function isHangDirective(text: string): boolean {
 const DEFAULT_TURN_TIMEOUT_MS = 30_000;
 
 function resolveTurnTimeoutMs(): number {
-  const override = Number(process.env.PI_FAKE_TURN_TIMEOUT_MS);
+  const override = Number(process.env.RADR_BE_TEST_FAKE_TURN_TIMEOUT_MS);
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_TURN_TIMEOUT_MS;
 }
 
 /** Per-chunk delay between streamed `message_update`/`thinking_delta` events (default 5ms,
  *  mirroring a real model's incremental output — see DEFAULT_TURN_TIMEOUT_MS's note on
  *  `us5.spec.ts`'s "act while active" step, which depends on this being nonzero real time).
- *  `PI_FAKE_CHUNK_DELAY_MS=0` (set by `tests/setup/env-defaults.ts` for vitest runs, which don't
+ *  `RADR_BE_TEST_FAKE_CHUNK_DELAY_MS=0` (set by `tests/setup/env-defaults.ts` for vitest runs, which don't
  *  need to observe a streaming window) collapses every turn to settle within a tick, so contract
  *  tests' `waitFor` polling has nothing to wait out. */
 function resolveChunkDelayMs(): number {
-  const override = Number(process.env.PI_FAKE_CHUNK_DELAY_MS);
+  const override = Number(process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS);
   return Number.isFinite(override) && override >= 0 ? override : 5;
 }
 

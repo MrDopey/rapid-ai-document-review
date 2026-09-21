@@ -101,6 +101,9 @@ The backend reads the following environment variables (`app/backend/src/config.t
 | `VITE_RADR_DIFF_CONTEXT_LINES`    | No                      | `3`                             | Lines of unchanged context kept visible around each change in the Full document/Side by side/revision-comparison diff views before collapsing the rest (client-side; baked in at build time).                                                                                       |
 | `ANTHROPIC_API_KEY`               | Only for live agent use | none                            | Model provider credential consumed by the Pi Coding Agent SDK. Not read by the application directly; without it, agent conversations are unavailable.                                                                                                                               |
 
+`RADR_BE_TEST_`-prefixed vars are test/tuning knobs, not application config — read directly via
+`process.env` in their own module rather than `config.ts`, and irrelevant outside test runs.
+
 ### Model configuration precedence
 
 `RADR_BE_PI_AGENT_MODEL` is required — the backend fails fast at startup with an error identifying the problem if it is unset, blank, or set to a value that cannot be parsed or resolved. Once resolved, it is applied alongside the per-agent-directory `models.json` (in `RADR_BE_PI_CODING_AGENT_DIR`) as follows:

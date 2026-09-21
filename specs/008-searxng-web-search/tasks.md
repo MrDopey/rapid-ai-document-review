@@ -55,7 +55,7 @@ colocated module the plan calls for, without yet adding new tool behavior.
 
 - [X] T008 [P] Add `webSearchParams` (`{ query: string, min length 1 }`) and `webFetchParams` (`{ url: string, min length 1 }`) Zod schemas to `app/shared/src/contracts/agent-tools.ts`, per data-model.md
 - [X] T009 [P] Add `searxngUrl` to `Config` in `app/backend/src/config.ts`: read from `RADR_BE_SEARXNG_URL`, default `http://searxng:8080`, per research.md R6
-- [X] T010 [P] Add a bounded, test-overridable timeout resolver to `app/backend/src/pi/tools/common.ts` (default e.g. 8000ms, overridable via `WEB_TOOL_TIMEOUT_MS`, mirroring `pi-service.ts`'s `resolveAgentTurnTimeoutMs` pattern), per research.md R4/R6 (depends on: T004)
+- [X] T010 [P] Add a bounded, test-overridable timeout resolver to `app/backend/src/pi/tools/common.ts` (default e.g. 8000ms, overridable via `RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS`, mirroring `pi-service.ts`'s `resolveAgentTurnTimeoutMs` pattern), per research.md R4/R6 (depends on: T004)
 
 **Checkpoint**: Config, shared schemas, and the shared timeout helper are in place — `web_search`/`web_fetch` implementations can now be written.
 

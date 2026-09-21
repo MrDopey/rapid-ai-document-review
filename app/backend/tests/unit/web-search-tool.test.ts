@@ -94,7 +94,7 @@ describe('web_search tool (unit)', () => {
     expect(text.toLowerCase()).not.toContain('failed');
   });
 
-  it('rejects with an explanatory message for an unreachable backend, bounded by WEB_TOOL_TIMEOUT_MS (contract #3)', async () => {
+  it('rejects with an explanatory message for an unreachable backend, bounded by RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS (contract #3)', async () => {
     // Bind to get a free ephemeral port, then close immediately: the most deterministic way to
     // guarantee "nothing is listening here" without racing another process for a fixed port.
     const stub = await startJsonStub(() => {});

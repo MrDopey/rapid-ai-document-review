@@ -21,7 +21,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
   });
 
   it("FakeAgentSession's own internal timeout force-settles the turn as errored, and a later retry/send both succeed", async () => {
-    process.env.PI_FAKE_TURN_TIMEOUT_MS = '50';
+    process.env.RADR_BE_TEST_FAKE_TURN_TIMEOUT_MS = '50';
     const { app, storage } = await createTestApp();
 
     const createRes = await app.inject({
@@ -65,7 +65,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     // one was evicted), and a plain scripted answer legitimately takes a bit of wall-clock time to
     // stream (several chunked `message_update`s, each with its own small delay); it must not race
     // against the same short timeout the hang tests above rely on.
-    process.env.PI_FAKE_TURN_TIMEOUT_MS = '5000';
+    process.env.RADR_BE_TEST_FAKE_TURN_TIMEOUT_MS = '5000';
 
     // A brand-new, non-hanging message on the very same conversation succeeds normally afterward
     // — proving the conversation is genuinely recoverable, not just capable of erroring again.
@@ -84,8 +84,8 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
   it("PiService's own turn watchdog force-settles a turn a session's own machinery never resolves, and evicts the session too", async () => {
     // FakeAgentSession's own internal timeout is set far longer than the test would ever wait —
     // only PiService's own watchdog (armed in `send()`) can be the one that fires here.
-    process.env.PI_FAKE_TURN_TIMEOUT_MS = '60000';
-    process.env.PI_AGENT_TURN_TIMEOUT_MS = '50';
+    process.env.RADR_BE_TEST_FAKE_TURN_TIMEOUT_MS = '60000';
+    process.env.RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS = '50';
     const { app, storage } = await createTestApp();
 
     const createRes = await app.inject({
@@ -113,7 +113,7 @@ describe('FIX 1: a hung tool call/turn settles to errored, and the conversation 
     // Raise PiService's own watchdog timeout back up before sending a real (non-hanging) message
     // below — a plain scripted answer legitimately takes a bit of wall-clock time to stream and
     // must not race against the same short timeout the hang assertion above relies on.
-    process.env.PI_AGENT_TURN_TIMEOUT_MS = '60000';
+    process.env.RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS = '60000';
 
     const followUp = await app.inject({
       method: 'POST',

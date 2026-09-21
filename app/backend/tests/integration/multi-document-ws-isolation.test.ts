@@ -88,22 +88,22 @@ const LONG_MESSAGE_PARAGRAPH =
   'Sentence five about the rollback plan. Sentence six wraps up the summary nicely.';
 
 describe('Multi-document WebSocket isolation (US2, T028-T029)', () => {
-  const previousChunkDelay = process.env.PI_FAKE_CHUNK_DELAY_MS;
+  const previousChunkDelay = process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS;
 
   beforeEach(() => {
     // A real inter-chunk delay is needed so a concurrently-subscribed socket has a window in which
     // to observe (or fail to observe) in-flight deltas before the turn settles — env-defaults.ts
     // collapses this to 0 for the rest of the suite.
-    process.env.PI_FAKE_CHUNK_DELAY_MS = '15';
+    process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS = '15';
   });
 
   afterEach(() => {
-    if (previousChunkDelay === undefined) delete process.env.PI_FAKE_CHUNK_DELAY_MS;
-    else process.env.PI_FAKE_CHUNK_DELAY_MS = previousChunkDelay;
+    if (previousChunkDelay === undefined) delete process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS;
+    else process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS = previousChunkDelay;
   });
 
   // Longer than the suite default (5000ms): depends on real inter-chunk delays
-  // (PI_FAKE_CHUNK_DELAY_MS) and polling windows, which need slack under CPU contention.
+  // (RADR_BE_TEST_FAKE_CHUNK_DELAY_MS) and polling windows, which need slack under CPU contention.
   it('T028: zero Document-A-scoped events are ever delivered on Document B’s subscription while A streams', async () => {
     const { app, storage, baseUrl } = await setup();
     const docA = await createDoc(app, 'Document A content.');

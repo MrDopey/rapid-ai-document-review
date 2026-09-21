@@ -79,11 +79,11 @@ export interface RegisteredToolLike {
  *  before `PiService` force-completes it as `agent_error` itself. This is a backstop for
  *  the real-session path: `FakeAgentSession` has its own, much shorter, internal timeout and
  *  ordinarily self-heals well before this one would ever fire. Overridable via
- *  `PI_AGENT_TURN_TIMEOUT_MS` for tests. */
+ *  `RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS` for tests. */
 const DEFAULT_AGENT_TURN_TIMEOUT_MS = 5 * 60 * 1000;
 
 function resolveAgentTurnTimeoutMs(): number {
-  const override = Number(process.env.PI_AGENT_TURN_TIMEOUT_MS);
+  const override = Number(process.env.RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS);
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_AGENT_TURN_TIMEOUT_MS;
 }
 
@@ -360,7 +360,7 @@ export class PiService {
    * A turn that never settles (a stuck tool call, or any other hang) does not leave this
    * conversation's session permanently unusable. A watchdog timer force-completes the turn as
    * `agent_error` if neither `agent_settled` nor `agent_error` arrives within
-   * `PI_AGENT_TURN_TIMEOUT_MS`, and — on ANY `agent_error` (immediate `prompt()` rejection, a
+   * `RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS`, and — on ANY `agent_error` (immediate `prompt()` rejection, a
    * scripted/real failure during the run, or this watchdog itself) — the cached session for this
    * conversation is evicted so the *next* send/retry builds a fresh one instead of reusing a
    * session that may be wedged.

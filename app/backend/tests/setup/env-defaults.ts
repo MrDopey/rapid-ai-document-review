@@ -13,9 +13,9 @@ process.env.RADR_BE_PI_AGENT_MODEL ??= 'anthropic/claude-opus-4-5';
 // outcome — usually via `waitFor` polling — so collapsing the delay to 0 here makes every fake
 // turn settle within a tick, with no behavior change, just faster tests. Playwright's own
 // webServer `env` (playwright.config.ts) doesn't source this file, so e2e keeps the real delay.
-process.env.PI_FAKE_CHUNK_DELAY_MS ??= '0';
+process.env.RADR_BE_TEST_FAKE_CHUNK_DELAY_MS ??= '0';
 
 // web_search/web_fetch's outbound HTTP timeout (pi/tools/common.ts) defaults to 8000ms in
 // production; tests that exercise an unreachable/timing-out stub don't need to wait that long to
 // prove the timeout fires, so this collapses it to keep the default suite fast.
-process.env.WEB_TOOL_TIMEOUT_MS ??= '200';
+process.env.RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS ??= '200';

@@ -15,10 +15,10 @@ import { createWebFetchTool, createWebSearchTool } from '../../src/pi/tools/inde
  */
 const LIVE = process.env.RADR_BE_SEARXNG_LIVE_TEST === '1';
 
-// tests/setup/env-defaults.ts forces WEB_TOOL_TIMEOUT_MS=200 (via `??=`) for the fast stub-backed
+// tests/setup/env-defaults.ts forces RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS=200 (via `??=`) for the fast stub-backed
 // unit suite; a real network round-trip needs more than that, so this opt-in suite raises it back
 // up for itself specifically.
-if (LIVE) process.env.WEB_TOOL_TIMEOUT_MS = '10000';
+if (LIVE) process.env.RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS = '10000';
 
 describe.skipIf(!LIVE)('Contract: live web tools (contracts/web-tools.md, opt-in)', () => {
   it('web_search returns real results from the configured SearXNG instance', async () => {

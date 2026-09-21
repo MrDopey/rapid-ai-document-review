@@ -104,10 +104,11 @@ remaining implementation-level unknowns needed to design Phase 1 correctly.
 
 - **Decision**: `RADR_BE_SEARXNG_URL` (optional, default `http://searxng:8080` — the devcontainer/
   production-compose service address), read in `config.ts` alongside the other `RADR_BE_*`
-  variables (FR-011). Per-call timeout for both tools is a code constant, overridable via an
-  unprefixed test-only env var (`WEB_TOOL_TIMEOUT_MS`) for fast test runs — mirroring the existing
-  `PI_AGENT_TURN_TIMEOUT_MS`/`PI_FAKE_CHUNK_DELAY_MS` pattern, which are deliberately not
-  `RADR_BE_`-prefixed because they are test/tuning knobs, not application-facing configuration.
+  variables (FR-011). Per-call timeout for both tools is a code constant, overridable via a
+  test-only env var (`RADR_BE_TEST_WEB_TOOL_TIMEOUT_MS`) for fast test runs — mirroring the existing
+  `RADR_BE_TEST_AGENT_TURN_TIMEOUT_MS`/`RADR_BE_TEST_FAKE_CHUNK_DELAY_MS` pattern, which use a
+  `RADR_BE_TEST_` prefix rather than plain `RADR_BE_` because they are test/tuning knobs, not
+  application-facing configuration.
 - **Rationale**: Matches the existing `Config` shape and naming convention exactly (default + env
   override, `RADR_BE_` prefix only for genuinely operator-facing configuration).
 
