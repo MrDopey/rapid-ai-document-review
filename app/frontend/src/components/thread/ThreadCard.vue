@@ -26,22 +26,35 @@ import HighlightBranchMenu from './HighlightBranchMenu.vue';
  * never one nested inside the other's border. This Thread's own trunk column (`.thread-trunk`, this
  * Thread's sticky header plus a top-to-bottom chain of bordered `.thread-card` "run" boxes — see
  * `runs`' own doc comment below for exactly where a run starts/ends) sits beside its branch children
- * (`.thread-branches`, one column further right, one `.thread-branch-group` per run that forks, each
- * holding one `.thread-branch-fork` — and so one recursively-nested `.thread-node` — per active
- * child) as flex-row SIBLINGS. Every fork point (a run with 1+ active children) draws N diverging
- * lines from that run's own bottom edge: one straight down (`.thread-fork-connector`) into this
- * run's own continuation, if any messages follow, plus one per active branch
- * (`.thread-branch-fork::before`/`::after`, chained by `.thread-branch-spine` when 2+ branches share
- * one fork point) fanning out sideways — rather than either being nested inside the other's padding,
- * and rather than the trunk silently continuing through the fork unbroken the way it used to.
- * Recursion still grows the DOM to the right (a branch's own branches render inside ITS
- * `.thread-branches`, one more flex row deep, getting this exact same Y-split treatment at
- * depth + 1), it just no longer grows the visual border nesting.
+ * (`.thread-branches`, one column further right, one `.thread-branch-group` per run that forks) as
+ * flex-row SIBLINGS. Every fork point (a run with 1+ active children) draws N diverging lines from
+ * that run's own bottom edge: one straight down (`.thread-fork-connector`) into this run's own
+ * continuation, if any messages follow, plus one fanning out toward its active branch(es).
+ *
+ * Horizontal-column redesign (Variant A): TWO DIFFERENT AXES both now read left-to-right, but they
+ * are visually distinct. (1) SIBLING branches off the exact same fork point lay out as a horizontal
+ * ROW of columns (`.thread-branch-row`, one `.thread-branch-column` — or, when there's only one
+ * active child, the simpler single-connector `.thread-branch-fork` — per active child), side by
+ * side, rather than stacking vertically. A single incoming line from the run-card
+ * (`.thread-branch-group--fan::before`) fans out into a horizontal bar that bridges each pair of
+ * adjacent columns (`.thread-branch-column::before`, bridging across the row's own `gap`) with a
+ * downward drop + arrowhead into each column's own box (`.thread-branch-column::after` +
+ * `.thread-branch-fan-arrow`) — this bar is the direct replacement for the old vertical
+ * `.thread-branch-spine` that used to chain 2+ *vertically stacked* siblings; a spine bridged top-to-
+ * bottom, this bar bridges left-to-right. (2) DEPTH (a branch's own further branches) still grows
+ * rightward exactly as before: each column mounts its own recursively-nested `.thread-node`, whose
+ * OWN `.thread-branches` sits one flex-row further right than THAT column's own `.thread-trunk` —
+ * i.e. depth keeps growing right from wherever a given sibling column itself sits, independent of
+ * how many sibling columns share its own fork point. `.thread-branch-row` caps its own rendered
+ * width so `MAX_VISIBLE_BRANCH_COLUMNS` siblings fit before `overflow-x: auto` kicks in (script,
+ * below) — columns never wrap to a second row.
  *
  * Because `.thread-trunk` and `.thread-branches` are two independently-stacking flex columns, this
  * component also has to keep a `.thread-branch-group` visually level with the run-card it forked
  * from itself — see `syncBranchAlignment` below (bug fix: the connector used to only look aligned by
- * coincidence).
+ * coincidence). That alignment axis (the GROUP's own vertical top vs. the run-card's bottom edge) is
+ * orthogonal to the row/column redesign above — a group's internal horizontal layout doesn't move
+ * its own top edge, so `syncBranchAlignment` itself needed no changes for this redesign.
  */
 const props = withDefaults(
   defineProps<{
@@ -126,6 +139,49 @@ function activeChildIds(childBranchIds: readonly string[]): string[] {
 const branchSegments = computed(() =>
   segments.value.filter((s) => activeChildIds(s.childBranchIds).length > 0),
 );
+
+/** Horizontal-column redesign: precomputes each forking segment's own active-children list ONCE
+ *  (rather than the template repeatedly re-deriving it via `activeChildIds` for every class binding
+ *  that needs to know "is this a 2+ way fork") plus whether it's a fan (2+ active children — the
+ *  only case that gets the horizontal-row/fan-bar treatment; exactly one active child keeps the
+ *  simpler single-line `.thread-branch-fork` connector unchanged from before this redesign). See the
+ *  template below for `.thread-branch-row`/`.thread-branch-column`/`.thread-branch-fork`. */
+const branchGroups = computed(() =>
+  branchSegments.value.map((segment) => {
+    const children = activeChildIds(segment.childBranchIds);
+    return { segment, isFan: children.length > 1, children };
+  }),
+);
+
+/** Width-cap (Variant A locked-in decision): 2+ active branches off one fork point now lay out as a
+ *  horizontal row of columns (`.thread-branch-row`) instead of stacking vertically — this caps that
+ *  row's own rendered width so at least this many sibling columns fit before horizontal scrolling
+ *  kicks in (`.thread-branch-row`'s own `overflow-x: auto`, CSS below); columns never wrap to a
+ *  second row no matter how many siblings share one fork point. Named constant (not a magic number
+ *  inline) precisely so this "4" has exactly one place to change. */
+const MAX_VISIBLE_BRANCH_COLUMNS = 4;
+/** The row's own CSS `gap` between sibling columns, kept as one JS constant (rather than a literal
+ *  hand-copied into both this width-cap arithmetic below AND the stylesheet) — threaded into the CSS
+ *  via the `--thread-branch-fan-gap` custom property `branchRowStyle` sets inline, which
+ *  `.thread-branch-row`'s own `gap` and `.thread-branch-column`'s own fan-bar-bridging `::before`
+ *  both read (CSS below). */
+const BRANCH_COLUMN_GAP_PX = 32;
+
+/** Every sibling column in one fork point's row renders at the exact same depth (`depth + 1`) — see
+ *  `cardStyle` above for the per-depth width lookup this mirrors, so the cap below budgets for the
+ *  REAL column width instead of guessing. */
+const branchColumnWidthPx = computed(
+  () => CARD_MAX_WIDTH_PX[props.depth + 1] ?? DEEPER_CARD_MAX_WIDTH_PX,
+);
+const branchRowStyle = computed(() => {
+  const capPx =
+    MAX_VISIBLE_BRANCH_COLUMNS * branchColumnWidthPx.value +
+    (MAX_VISIBLE_BRANCH_COLUMNS - 1) * BRANCH_COLUMN_GAP_PX;
+  return {
+    maxWidth: `min(${capPx}px, calc(100vw - 2.5rem))`,
+    '--thread-branch-fan-gap': `${BRANCH_COLUMN_GAP_PX}px`,
+  };
+});
 
 /** Y-split fork redesign: the trunk visually disconnects at every point it has an active branch,
  *  rather than rendering as one continuous box the whole branch column merely sits beside (the
@@ -366,13 +422,17 @@ const headerActions = computed<ActionDescriptor[]>(() => [
  *  blows well past a typical laptop viewport at a *uniform* 640px per box (the previous behavior,
  *  which left horizontal scrolling as the only mitigation). Concretely (see this component's own
  *  `<style>` doc comment on `.thread-branches`'/`.thread-branch-fork`'s widths for the full budget):
- *  a single depth-1 branch (or several depth-1 siblings, which stack vertically in one column
- *  rather than each costing their own width) adds trunk(640) + connector(28) + branch(420) = 1088px
- *  — comfortably under a 1280–1440px viewport even before `ThreadModeView.vue`'s own container-width
- *  fix. A depth-2 branch-of-a-branch adds another connector(28) + 300px, for 1416px total — still
- *  under ~1440px, though it can start to press a 1280px-wide window; deeper/wider trees than that
- *  fall back to `.thread-mode-list`'s own `overflow-x: auto`, exactly as intended (scroll as a last
- *  resort for genuinely wide/deep trees, not as the routine experience for 1–2 levels). */
+ *  a single depth-1 branch adds trunk(640) + connector(28) + branch(420) = 1088px — comfortably
+ *  under a 1280–1440px viewport even before `ThreadModeView.vue`'s own container-width fix. A
+ *  depth-2 branch-of-a-branch adds another connector(28) + 300px, for 1416px total — still under
+ *  ~1440px, though it can start to press a 1280px-wide window; deeper/wider trees than that fall back
+ *  to `.thread-mode-list`'s own `overflow-x: auto`, exactly as intended (scroll as a last resort for
+ *  genuinely wide/deep trees, not as the routine experience for 1–2 levels). 2+ SIBLING branches off
+ *  one fork point no longer share this budget for free the way they did when they stacked vertically
+ *  — each sibling now costs its own column width in the row (`branchRowStyle`, `.thread-branch-row`
+ *  below) — so `MAX_VISIBLE_BRANCH_COLUMNS` (below) is what keeps a wide fan from blowing the layout
+ *  budget above, falling back to that same `.thread-branch-row`-local `overflow-x: auto` (not
+ *  `.thread-mode-list`'s page-level one) once a fork point has more siblings than fit. */
 const CARD_MAX_WIDTH_PX: Record<number, number> = { 0: 640, 1: 420 };
 const DEEPER_CARD_MAX_WIDTH_PX = 300;
 const cardStyle = computed(() => ({
@@ -789,30 +849,50 @@ onBeforeUnmount(() => {
 
     <!-- Branches render as their own sibling column, connected by a line to the run-card they
          forked from — never nested inside a `.thread-card`'s own border. See the layout doc comment
-         at the top of this file. -->
-    <div v-if="branchSegments.length > 0" ref="branchesRef" class="thread-branches">
+         at the top of this file. Independent fork points (distinct `branchGroups` entries) still
+         stack top-to-bottom here, one `.thread-branch-group` per source segment — the horizontal-
+         column redesign only rotates the axis WITHIN one group (`.thread-branch-row` below), for
+         siblings sharing that exact same fork point. -->
+    <div v-if="branchGroups.length > 0" ref="branchesRef" class="thread-branches">
       <div
-        v-for="segment in branchSegments"
-        :key="`branches-${segment.startIndex}-${segment.endIndex}`"
-        :ref="(el) => setBranchGroupEl(segment, el as Element | null)"
+        v-for="group in branchGroups"
+        :key="`branches-${group.segment.startIndex}-${group.segment.endIndex}`"
+        :ref="(el) => setBranchGroupEl(group.segment, el as Element | null)"
         class="thread-branch-group"
+        :class="{ 'thread-branch-group--fan': group.isFan }"
         :style="branchGroupStyle"
       >
-        <template v-for="(childId, ci) in activeChildIds(segment.childBranchIds)" :key="childId">
-          <!-- Two or more active branches off the exact same segment (an N-way fork, N > 2):
-               a spine link between each pair of stacked sibling forks so the whole stack still
-               reads as diverging from one shared point (this group's own top, aligned to the
-               fork run-card's bottom edge above) rather than each sibling past the first floating
-               a disconnected line from nothing. -->
-          <div v-if="ci > 0" class="thread-branch-spine" aria-hidden="true"></div>
-          <div class="thread-branch-fork">
+        <!-- Exactly one active child: the simple single-line connector, unchanged from before this
+             redesign (`.thread-branch-fork`'s own `::before`/`::after`, CSS below). Two or more
+             active children off this exact same fork point (an N-way fork, N > 1): a horizontal ROW
+             of columns (`.thread-branch-column`, one per child) fed by a single incoming line
+             (`.thread-branch-group--fan::before`) that fans out into a horizontal bar bridging each
+             pair of adjacent columns (`.thread-branch-column::before`) with its own downward drop +
+             arrowhead into each column's own box — this bar is the row-layout replacement for the
+             old vertical `.thread-branch-spine`, which used to chain 2+ *stacked* siblings instead.
+             `.thread-branch-row`'s own width is capped so `MAX_VISIBLE_BRANCH_COLUMNS` siblings fit
+             before it falls back to `overflow-x: auto` (script/CSS) — columns never wrap. -->
+        <div class="thread-branch-row" :style="branchRowStyle">
+          <div
+            v-for="(childId, ci) in group.children"
+            :key="childId"
+            :class="
+              group.isFan
+                ? [
+                    'thread-branch-column',
+                    { 'thread-branch-column--last': ci === group.children.length - 1 },
+                  ]
+                : 'thread-branch-fork'
+            "
+          >
+            <span v-if="group.isFan" class="thread-branch-fan-arrow" aria-hidden="true"></span>
             <ThreadCard
               :thread-id="childId"
               :depth="depth + 1"
               :active-thread-id="activeThreadId"
             />
           </div>
-        </template>
+        </div>
       </div>
     </div>
 
@@ -1016,48 +1096,77 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
   padding-top: 0.25rem;
 }
-/* Multiple sibling branches forked from the very same segment (FR-005b's "these are siblings of
-   each other, not nested") stack vertically within one group, each getting its own connector via
-   `.thread-branch-fork` below. No `gap` here (unlike before the Y-split redesign): the vertical
-   space between stacked siblings is now an explicit `.thread-branch-spine` element (template,
-   above) rather than a plain flex gap, so a 3rd+ sibling's connector still reads as one continuous
-   line down from the shared fork point instead of a disconnected stub floating from nothing (see
-   `.thread-branch-spine` below). The `margin-top` transition that smooths `syncBranchAlignment`'s
-   own JS-computed nudges (the same way `MessageBubble.vue`'s own `transition: max-height` smooths
-   the toggle that typically causes them, rather than snapping straight to the new position) is
-   deliberately NOT a static rule here — it's the inline `branchGroupStyle` computed in the script
-   above, `none` until this card's own initial alignment settles and permanently the real transition
-   after that, so a freshly loaded/refreshed page snaps directly into its final position instead of
-   visibly animating every corrective pass a fresh mount's asynchronous data/content settling
-   triggers (bug report: "~2 seconds of animations" on refresh) — see `alignTransitionsReady`'s own
-   doc comment for the full rationale. */
+/* Horizontal-column redesign (Variant A): this now wraps a SINGLE child (`.thread-branch-row`,
+   below) rather than laying out multiple stacked `.thread-branch-fork`/`.thread-branch-spine`
+   children directly — the sibling-branch axis rotated from vertical stacking to a horizontal row
+   lives entirely in `.thread-branch-row`'s own CSS now. This element's one remaining job is the
+   exact one `syncBranchAlignment` (script) still depends on: being the DOM node whose OWN top edge
+   that function nudges (`margin-top`) to align with the run-card it forked from — see that
+   function's doc comment, UNCHANGED by this redesign, since the vertical alignment axis it operates
+   on is orthogonal to the row's internal horizontal layout (neither the plain single-fork case nor
+   the fan case below shifts this element's own top edge away from its row's top edge). The
+   `margin-top` transition that smooths `syncBranchAlignment`'s own JS-computed nudges (the same way
+   `MessageBubble.vue`'s own `transition: max-height` smooths the toggle that typically causes them,
+   rather than snapping straight to the new position) is deliberately NOT a static rule here — it's
+   the inline `branchGroupStyle` computed in the script above, `none` until this card's own initial
+   alignment settles and permanently the real transition after that, so a freshly loaded/refreshed
+   page snaps directly into its final position instead of visibly animating every corrective pass a
+   fresh mount's asynchronous data/content settling triggers (bug report: "~2 seconds of animations"
+   on refresh) — see `alignTransitionsReady`'s own doc comment for the full rationale. */
 .thread-branch-group {
+  display: block;
+}
+/* Two or more active branches off the exact same fork point (an N-way fork, N > 1) reserve room for
+   the single incoming line from the run-card (`syncBranchAlignment`'s own alignment target, this
+   group's own top edge) to fan out sideways into `.thread-branch-row`'s own horizontal bar below —
+   `position: relative` so this `::before` can anchor to this group's own top-left corner exactly the
+   way `.thread-branch-fork`'s single-branch connector already anchors to ITS own top-left below
+   (same 1.75rem budget, now spent once per GROUP instead of once per fork, since every sibling in
+   the row shares this one fan-in point rather than each drawing its own). */
+.thread-branch-group--fan {
+  position: relative;
+  padding-left: 1.75rem;
+}
+.thread-branch-group--fan::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.75rem;
+  height: 0;
+  border-top: 2px solid var(--neutral-muted-color, #4b5563);
+}
+/* FR-005b: the sibling ROW of branch columns for one fork point (rotated from the old vertical
+   stack — see this file's top doc comment). `align-items: flex-start` keeps every column's own top
+   edge level with the row's own top (load-bearing for the fan-bar math below: every column's
+   `::before`/`::after` connector assumes `top: 0` IS the shared fan-in level). `flex-wrap` is
+   deliberately omitted — the locked-in width-cap decision is horizontal SCROLL past
+   `MAX_VISIBLE_BRANCH_COLUMNS` siblings (script), never a second row. `max-width`/the
+   `--thread-branch-fan-gap` custom property both come from the inline `branchRowStyle` (script)
+   rather than a static rule here, since the cap depends on this row's own child depth (`depth + 1`,
+   which varies per `ThreadCard` instance) the way `cardStyle`'s per-depth width already does. */
+.thread-branch-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--thread-branch-fan-gap, 2rem);
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
-/* Fills the same vertical space the old flex `gap` used to (0.75rem) between two stacked sibling
-   `.thread-branch-fork`s off the same fork point, drawing a plain continuation of the vertical line
-   each fork's own `::before` already draws from its own top (below) — together, one unbroken line
-   runs from the shared fork point (this group's own top, JS-aligned to the run-card's bottom edge —
-   see `syncBranchAlignment`) down past every sibling's own horizontal tick. */
-.thread-branch-spine {
-  height: 0.75rem;
-  width: 0;
-  border-left: 2px solid var(--neutral-muted-color, #4b5563);
-}
-/* Each branch box's own connector line + arrowhead back to the run-card it forked from
-   (mockup's "───▶"). `padding-left` reserves the room the line/arrowhead draw into, so this
-   completely owns its own spacing from `.thread-card`'s right edge — `.thread-node`'s row has no
-   extra `gap` of its own (see below), meaning it's this padding alone, not a shared gap, that keeps
-   the whole tree's per-branch connector self-contained no matter how many groups/forks stack up.
-   `top: 0` (touching this fork's own top edge exactly, not some offset into it) is load-bearing: the
-   FIRST fork in a group sits exactly level with the run-card's bottom edge (`syncBranchAlignment`'s
-   own alignment target), so a line drawn any lower than that floats disconnected from the trunk
-   entirely — the bug an earlier fixed `1.15rem` offset here actually had, confirmed visually (the
-   line landed inside this box's own header text, never touching the trunk boundary at all). */
+/* Exactly one active child at this fork point: the simple single-line connector, UNCHANGED from
+   before this redesign (a plain horizontal line + arrowhead, mockup's "───▶") — there is nothing to
+   fan out when there's only one destination, so this keeps the exact pixel-identical look a
+   single-branch fork point already had. `padding-left` reserves the room the line/arrowhead draw
+   into, so this completely owns its own spacing from `.thread-card`'s right edge. `top: 0` (touching
+   this fork's own top edge exactly, not some offset into it) is load-bearing: this fork sits exactly
+   level with the run-card's bottom edge (`syncBranchAlignment`'s own alignment target), so a line
+   drawn any lower than that floats disconnected from the trunk entirely — the bug an earlier fixed
+   `1.15rem` offset here actually had, confirmed visually (the line landed inside this box's own
+   header text, never touching the trunk boundary at all). */
 .thread-branch-fork {
   position: relative;
   padding-left: 1.75rem;
+  flex: 0 0 auto;
 }
 .thread-branch-fork::before {
   content: '';
@@ -1079,6 +1188,62 @@ onBeforeUnmount(() => {
   border-left-color: var(--neutral-muted-color, #4b5563);
   border-right-width: 0;
   transform: translateX(-1px);
+}
+/* Two or more active children at this fork point: a fan-bar column instead of the single-branch
+   `.thread-branch-fork` above — the horizontal-row replacement for the old vertical
+   `.thread-branch-spine` (which used to chain 2+ *stacked* siblings top-to-bottom; this bridges them
+   left-to-right instead). `flex: 0 0 auto` so a column never shrinks below its own nested
+   `ThreadCard`'s fixed inline width (`cardStyle`) — the whole point of the width-cap/scroll decision
+   is that columns keep their real width and the ROW scrolls, rather than columns silently squashing
+   to fit. `padding-top` reserves the vertical "fan zone" above each box (same 1.25rem height
+   `.thread-fork-connector` already uses for its own vertical connector, for visual consistency) that
+   the bridging bar (`::before`) and the drop-tick (`::after`) below draw into. */
+.thread-branch-column {
+  position: relative;
+  padding-top: 1.25rem;
+  flex: 0 0 auto;
+}
+/* The horizontal bar segment: spans this column's own full width PLUS the row's own `gap` past its
+   right edge, landing exactly on the NEXT column's own left edge (where that column's identical
+   drop-tick — `::after` below — starts) — so each non-last column's segment, chained end-to-end,
+   draws one continuous bar from the first column's own top-left (where the incoming line from
+   `.thread-branch-group--fan::before` lands) through to the last column's own top-left. The LAST
+   column has nothing further right to bridge to, so it alone skips this segment. */
+.thread-branch-column:not(.thread-branch-column--last)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: calc(-1 * var(--thread-branch-fan-gap, 2rem));
+  height: 0;
+  border-top: 2px solid var(--neutral-muted-color, #4b5563);
+}
+/* Every column's own downward drop from the shared fan-bar level (`top: 0`, this column's own
+   top-left corner) down into its own box's top edge — the vertical half of the rotated connector,
+   paired with `.thread-branch-fan-arrow` (template) for the actual arrowhead, the same way
+   `.thread-fork-connector`'s own vertical line pairs with its `is-terminal::after` arrowhead. */
+.thread-branch-column::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 1.25rem;
+  border-left: 2px solid var(--neutral-muted-color, #4b5563);
+}
+/* A real templated element (not a 3rd pseudo-element — `::before`/`::after` above are already
+   spoken for by the bridging bar and the drop line) marking this column's own real destination —
+   the downward-pointing counterpart of `.thread-fork-connector.is-terminal::after`/the old
+   `.thread-branch-fork::after`'s rightward-pointing one, rotated 90° to match the drop-tick it caps. */
+.thread-branch-fan-arrow {
+  position: absolute;
+  top: calc(1.25rem - 5px);
+  left: -5px;
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-top-color: var(--neutral-muted-color, #4b5563);
+  border-bottom-width: 0;
 }
 /* The trunk's own equivalent of `.thread-branch-fork`'s connector — marks a run-card's own fork
    point continuing straight down into its next run (this run's continuation), the sibling-below

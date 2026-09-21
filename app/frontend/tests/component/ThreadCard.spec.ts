@@ -694,10 +694,17 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     // — never one continuous box spanning both, now that the trunk visually disconnects at m0.
     expect(trunkWrapper.findAll('.thread-card').length).toBe(2);
     expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(1);
-    // The branch itself still renders in the sibling `.thread-branches` column, one fork, no spine
-    // link needed (a spine only bridges 2+ siblings sharing the same fork point).
-    expect(wrapper.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
-    expect(wrapper.find('.thread-branches .thread-branch-spine').exists()).toBe(false);
+    // The branch itself still renders in the sibling `.thread-branches` column, inside a
+    // `.thread-branch-row` (now always the immediate wrapper — see the horizontal-column redesign's
+    // doc comment), as the plain single-line `.thread-branch-fork` connector — never the fan/column
+    // treatment, which only kicks in for 2+ siblings sharing the same fork point.
+    expect(wrapper.find('.thread-branches .thread-branch-row .thread-branch-fork').exists()).toBe(
+      true,
+    );
+    expect(wrapper.find('.thread-branch-group').classes()).not.toContain(
+      'thread-branch-group--fan',
+    );
+    expect(wrapper.find('.thread-branches .thread-branch-column').exists()).toBe(false);
   });
 
   it('a branch off the actual tip message forks WITHOUT a trunk continuation (nothing follows it)', () => {
@@ -726,7 +733,7 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     expect(wrapper.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
   });
 
-  it('two active branches off the very same segment share one fork point, joined by a spine link (3-way fork: continuation + 2 branches)', () => {
+  it('two active branches off the very same segment share one fork point, laid out as a horizontal row of columns (2-way sibling fork)', () => {
     const store = useThreadStore();
     store.threads = [
       threadFixture({ id: 'root-1', kind: 'thread-root' }),
@@ -755,11 +762,120 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     // Still just one fork point in the trunk (m0), so one continuation run-card + one connector...
     expect(trunkWrapper.findAll('.thread-card').length).toBe(2);
     expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(1);
-    // ...but now 2 branch forks sharing that SAME `.thread-branch-group`, bridged by exactly one
-    // spine link (N forks need N-1 spine links).
+    // ...but now 2 sibling columns sharing that SAME `.thread-branch-group`, marked as a fan (2+
+    // active children) and laid out side by side inside one `.thread-branch-row`, each with its own
+    // fan-bar drop arrow — never the old vertical `.thread-branch-spine` (removed by the
+    // horizontal-column redesign; a fan bridges siblings left-to-right instead of top-to-bottom).
     const group = wrapper.find('.thread-branch-group');
-    expect(group.findAll('.thread-branch-fork').length).toBe(2);
-    expect(group.findAll('.thread-branch-spine').length).toBe(1);
+    expect(group.classes()).toContain('thread-branch-group--fan');
+    expect(wrapper.find('.thread-branch-spine').exists()).toBe(false);
+    const row = group.find('.thread-branch-row');
+    expect(row.exists()).toBe(true);
+    const columns = row.findAll('.thread-branch-column');
+    expect(columns.length).toBe(2);
+    // Single-branch fork's own `.thread-branch-fork` connector never appears once this is a fan.
+    expect(group.findAll('.thread-branch-fork').length).toBe(0);
+    // Every column is a direct child of the row (side by side, not nested inside one another).
+    expect(row.element.children.length).toBe(2);
+    expect(
+      Array.from(row.element.children).every(
+        (el) => el === columns[0]!.element || el === columns[1]!.element,
+      ),
+    ).toBe(true);
+    // Every column gets its own drop-arrow into its own box; only the LAST column skips the
+    // rightward bridging segment (`::before`, unchecked here since jsdom can't compute pseudo-
+    // element geometry) — the structural signal checkable here is the `--last` modifier class.
+    expect(row.findAll('.thread-branch-fan-arrow').length).toBe(2);
+    expect(columns[0]!.classes()).not.toContain('thread-branch-column--last');
+    expect(columns[1]!.classes()).toContain('thread-branch-column--last');
+  });
+
+  it('three active branches off the very same segment fan out as a 3-column row (N-way fan-bar)', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt one',
+      }),
+      threadFixture({
+        id: 'branch-2',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt two',
+      }),
+      threadFixture({
+        id: 'branch-3',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt three',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+    store.messagesByThread['branch-2'] = [makeMessage('seed-1')];
+    store.messagesByThread['branch-3'] = [makeMessage('seed-2')];
+
+    const wrapper = mountCard('root-1');
+    const group = wrapper.find('.thread-branch-group');
+    const row = group.find('.thread-branch-row');
+    const columns = row.findAll('.thread-branch-column');
+
+    expect(columns.length).toBe(3);
+    expect(row.findAll('.thread-branch-fan-arrow').length).toBe(3);
+    // Exactly one column (the 3rd) is marked last — the other two each still bridge rightward to
+    // their own next sibling.
+    expect(columns.filter((c) => c.classes().includes('thread-branch-column--last')).length).toBe(
+      1,
+    );
+    expect(columns[2]!.classes()).toContain('thread-branch-column--last');
+  });
+
+  it('two independent fork points in the same trunk each get their own stacked `.thread-branch-group`', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm0',
+        seedExcerptText: 'excerpt one',
+      }),
+      threadFixture({
+        id: 'branch-2',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'm1',
+        seedExcerptText: 'excerpt two',
+      }),
+    ];
+    // Three trunk messages: m0 (fork #1's anchor), m1 (fork #2's anchor), m2 (the tip, no branch).
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1'), makeMessage('m2')];
+    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
+    store.messagesByThread['branch-2'] = [makeMessage('seed-1')];
+
+    const wrapper = mountCard('root-1');
+    const trunkWrapper = wrapper.find('.thread-trunk');
+
+    // Three run-cards (one ending at m0, one ending at m1, one for the m2 tip), two fork connectors.
+    expect(trunkWrapper.findAll('.thread-card').length).toBe(3);
+    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(2);
+    // Two SEPARATE groups, stacked top-to-bottom in `.thread-branches` — the horizontal-column
+    // redesign only rotates the axis WITHIN one group, never merges independent fork points into
+    // one row.
+    const groups = wrapper.findAll('.thread-branch-group');
+    expect(groups.length).toBe(2);
+    // Neither is a fan (each has exactly one active child) — each keeps the plain single-line
+    // `.thread-branch-fork` connector, not a `.thread-branch-row` fan/column.
+    expect(groups.every((g) => !g.classes().includes('thread-branch-group--fan'))).toBe(true);
+    expect(wrapper.findAll('.thread-branch-fork').length).toBe(2);
+    expect(wrapper.findAll('.thread-branch-column').length).toBe(0);
   });
 
   it('a done branch never forks the trunk (segment break stays a plain dashed continuation, not a Y-split)', () => {
@@ -833,6 +949,126 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     expect(branchTrunk.findAll('.thread-card').length).toBe(2);
     expect(branchTrunk.findAll('.thread-fork-connector').length).toBe(1);
     expect(branchNode.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
+  });
+
+  it('a depth-2 nested fork point (a fan inside a branch-of-a-branch) gets its own fan/row treatment independently of its ancestor', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      threadFixture({
+        id: 'branch-1',
+        kind: 'thread-branch',
+        parentId: 'root-1',
+        forkedFromMessageId: 'r0',
+        seedExcerptText: 'excerpt',
+      }),
+      threadFixture({
+        id: 'nested-1',
+        kind: 'thread-branch',
+        parentId: 'branch-1',
+        forkedFromMessageId: 'b0',
+        seedExcerptText: 'nested excerpt one',
+      }),
+      threadFixture({
+        id: 'nested-2',
+        kind: 'thread-branch',
+        parentId: 'branch-1',
+        forkedFromMessageId: 'b0',
+        seedExcerptText: 'nested excerpt two',
+      }),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('r0')];
+    // branch-1's own two active children (nested-1, nested-2) both fork from b0 — a 2-way fan one
+    // level deeper than root-1's own (single-branch, non-fan) fork point.
+    store.messagesByThread['branch-1'] = [makeMessage('b0'), makeMessage('b1')];
+    store.messagesByThread['nested-1'] = [makeMessage('seed-0')];
+    store.messagesByThread['nested-2'] = [makeMessage('seed-1')];
+
+    const wrapper = mountCard('root-1');
+
+    // root-1's own fork point is still the plain single-branch case (depth 0 -> depth 1).
+    expect(wrapper.find('.thread-branch-group').classes()).not.toContain(
+      'thread-branch-group--fan',
+    );
+
+    // One level deeper, inside branch-1's own recursively-mounted `ThreadCard`, its fork point IS a
+    // fan (2 active children sharing b0) — depth keeps growing rightward (this is still nested
+    // inside root-1's `.thread-branch-fork .thread-node`) independently of the sibling-column axis
+    // rotating within branch-1's own `.thread-branches`.
+    const branchNode = wrapper.find('.thread-branches .thread-branch-fork .thread-node');
+    const nestedGroup = branchNode.find('.thread-branch-group');
+    expect(nestedGroup.classes()).toContain('thread-branch-group--fan');
+    const nestedColumns = nestedGroup.find('.thread-branch-row').findAll('.thread-branch-column');
+    expect(nestedColumns.length).toBe(2);
+  });
+});
+
+// Structural coverage for the horizontal-column redesign's own locked-in width-cap decision
+// (`MAX_VISIBLE_BRANCH_COLUMNS` in `ThreadCard.vue`'s script): jsdom never computes real CSS layout
+// (no real box widths, no real `overflow-x` scrollbar), so this can't verify the actual visual
+// scroll behavior with 5+ siblings — that's covered separately via Playwright against the real dev
+// server per this repo's own convention (see the supervisor log). What IS checkable here is the
+// STRUCTURAL/arithmetic precondition that visual behavior depends on: `.thread-branch-row`'s own
+// inline `max-width` is computed from the real constant (`MAX_VISIBLE_BRANCH_COLUMNS` siblings' own
+// column width, at the children's real depth, plus the gaps between them) rather than some
+// unrelated/magic value, and every sibling (including the 5th, past the 4-column cap) still renders
+// as a real column inside the row rather than being dropped or wrapped to a second row.
+describe('ThreadCard — branch row width cap (structural)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  it('caps the row at exactly 4 columns worth of width, with a 5th sibling still rendered (no wrap) rather than dropped', () => {
+    const store = useThreadStore();
+    store.threads = [
+      threadFixture({ id: 'root-1', kind: 'thread-root' }),
+      ...['branch-1', 'branch-2', 'branch-3', 'branch-4', 'branch-5'].map((id) =>
+        threadFixture({
+          id,
+          kind: 'thread-branch',
+          parentId: 'root-1',
+          forkedFromMessageId: 'm0',
+          seedExcerptText: `excerpt for ${id}`,
+        }),
+      ),
+    ];
+    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
+    for (const id of ['branch-1', 'branch-2', 'branch-3', 'branch-4', 'branch-5']) {
+      store.messagesByThread[id] = [makeMessage(`seed-${id}`)];
+    }
+
+    const wrapper = mountCard('root-1');
+    const row = wrapper.find('.thread-branch-row');
+    const columns = row.findAll('.thread-branch-column');
+
+    // All 5 siblings render as real columns in the SAME row (no wrap to a second row, no dropped
+    // sibling) — the width cap is purely a `max-width`/`overflow-x` concern, never a rendering limit.
+    expect(columns.length).toBe(5);
+    expect(row.element.children.length).toBe(5);
+    // Only the LAST (5th) column is marked `--last`.
+    expect(columns.filter((c) => c.classes().includes('thread-branch-column--last')).length).toBe(
+      1,
+    );
+
+    // The row's own inline `max-width` budgets for exactly `MAX_VISIBLE_BRANCH_COLUMNS` (4) siblings
+    // at their real per-depth column width (420px, depth 1's own `CARD_MAX_WIDTH_PX`) plus 3 gaps
+    // between them (32px each, `BRANCH_COLUMN_GAP_PX`): 4*420 + 3*32 = 1680 + 96 = 1776px — NOT
+    // sized for all 5 actual siblings (which would need a 4th gap too), which is exactly what forces
+    // the 5th column past the cap into `overflow-x: auto` territory in a real browser.
+    // (`overflow-x: auto`/no-wrap themselves are static CSS, not inline style — see this file's own
+    // top-of-suite comment for why the real scroll behavior is verified via Playwright instead.)
+    const style = row.attributes('style') ?? '';
+    expect(style).toContain('1776px');
   });
 });
 
