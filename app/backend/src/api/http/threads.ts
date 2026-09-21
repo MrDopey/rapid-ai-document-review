@@ -8,6 +8,7 @@ import {
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
   AgentUnavailableError,
+  ConversationBusyError,
   ConversationClosedError,
   ConversationNotErroredError,
   ConversationNotFoundError,
@@ -23,6 +24,7 @@ import {
 } from '../../conversation/thread-service.ts';
 import { DocumentNotFoundError } from '../../document/document-service.ts';
 import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { requireThreadInDocument } from './document-scope-guard.ts';
 import { DocumentWrongTypeError, requireDocumentType } from './document-type-guard.ts';
 import { parseOrFail, sendError } from './errors.ts';
 
@@ -44,6 +46,9 @@ function handleThreadError(
   }
   if (err instanceof ConversationNotErroredError) {
     return { status: 409, code: 'CONVERSATION_NOT_ERRORED' };
+  }
+  if (err instanceof ConversationBusyError) {
+    return { status: 409, code: 'CONVERSATION_BUSY' };
   }
   if (err instanceof AgentUnavailableError) {
     return { status: 502, code: 'AGENT_UNAVAILABLE' };
@@ -82,19 +87,6 @@ async function withThreadErrors(reply: FastifyReply, fn: () => Promise<unknown>)
     if (mapped)
       return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
     throw err;
-  }
-}
-
-/** Same defense as conversations.ts's `requireConversationInDocument` — a valid thread id from a
- *  different document than the URL's `:documentId` must 404, not silently resolve. */
-function requireThreadInDocument(
-  storage: StorageAdapter,
-  documentId: string,
-  threadId: string,
-): void {
-  const thread = storage.getConversation(threadId);
-  if (!thread || thread.documentId !== documentId) {
-    throw new ConversationNotFoundError(`Thread not found: ${threadId}`);
   }
 }
 

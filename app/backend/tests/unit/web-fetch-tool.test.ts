@@ -53,7 +53,7 @@ describe('web_fetch tool (unit)', () => {
     });
     server = stub.server;
 
-    const tool = createWebFetchTool({});
+    const tool = createWebFetchTool({ checkUrlIsBlocked: async () => null });
     const outcome = (await tool.execute('test-tool-call-1', {
       url: `${stub.url}/page`,
     })) as ToolResult;
@@ -75,7 +75,7 @@ describe('web_fetch tool (unit)', () => {
     });
     server = stub.server;
 
-    const tool = createWebFetchTool({});
+    const tool = createWebFetchTool({ checkUrlIsBlocked: async () => null });
     const outcome = (await tool.execute('test-tool-call-1', {
       url: `${stub.url}/big`,
     })) as ToolResult;
@@ -96,7 +96,7 @@ describe('web_fetch tool (unit)', () => {
     });
     server = stub.server;
 
-    const tool = createWebFetchTool({});
+    const tool = createWebFetchTool({ checkUrlIsBlocked: async () => null });
     const outcome = (await tool.execute('test-tool-call-1', {
       url: `${stub.url}/image.png`,
     })) as ToolResult;
@@ -106,18 +106,28 @@ describe('web_fetch tool (unit)', () => {
     expect(text).not.toContain(binary.toString('binary'));
   });
 
-  it('returns an explanatory error result for an unreachable backend (contract #8)', async () => {
+  it('rejects with an explanatory message for an unreachable backend (contract #8)', async () => {
     const stub = await startStub(() => {});
     const unreachableUrl = stub.url;
     await closeServer(stub.server);
     server = undefined;
 
+    const tool = createWebFetchTool({ checkUrlIsBlocked: async () => null });
+
+    // A genuine network failure now rejects (so the Pi SDK's isError/failureReason path fires)
+    // rather than resolving with a graceful textResult — see web-fetch.ts's catch block.
+    await expect(
+      tool.execute('test-tool-call-1', { url: `${unreachableUrl}/page` }),
+    ).rejects.toThrow(/could not fetch|request failed/i);
+  });
+
+  it('blocks a loopback/private-address URL by default, without needing a test override (SSRF guard)', async () => {
     const tool = createWebFetchTool({});
     const outcome = (await tool.execute('test-tool-call-1', {
-      url: `${unreachableUrl}/page`,
+      url: 'http://127.0.0.1:1/',
     })) as ToolResult;
     const text = outcome.content[0]?.text ?? '';
 
-    expect(text.toLowerCase()).toMatch(/could not|fail|error|unreachable|timed? ?out/);
+    expect(text.toLowerCase()).toMatch(/blocked|private address/);
   });
 });

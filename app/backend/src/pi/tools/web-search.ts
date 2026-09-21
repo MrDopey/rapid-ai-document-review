@@ -75,7 +75,12 @@ export function createWebSearchTool(deps: WebSearchToolDeps) {
         const message = isTimeout
           ? `could not reach the search backend (timed out after ${timeoutMs}ms)`
           : `could not reach the search backend (${err instanceof Error ? err.message : String(err)})`;
-        return textResult(`Web search failed: ${message}.`);
+        // Thrown, not returned as a `textResult`: a genuine network/timeout failure must surface
+        // through the Pi SDK's own `isError`/`failureReason` tool-result path (spec 009, Agent
+        // Activity Logging) rather than being logged as an ordinary successful tool call — see
+        // `web-fetch.ts`'s matching catch block for why throwing here is safe (caught by the SDK's
+        // own `executePreparedToolCall`, not an unhandled crash of the agent turn).
+        throw new Error(`Web search failed: ${message}.`);
       } finally {
         clearTimeout(timer);
       }

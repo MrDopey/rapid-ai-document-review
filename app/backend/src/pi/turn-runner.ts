@@ -71,6 +71,11 @@ export class TurnRunner {
       turnId,
       conversation.contextRevision,
       run,
+      // Sibling Threads can share one underlying Pi session `.jsonl` file
+      // (011-linear-thread-mode) — this additionally serializes `run` against any other turn
+      // currently holding the same file, so two sibling Threads can never race-write it even
+      // though they're distinct `conversationId`s under `max_concurrent_agents`'s own admission.
+      conversation.piSessionPath,
     );
   }
 }

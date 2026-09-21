@@ -282,15 +282,7 @@ export class PiService {
     // own tip before the SDK starts appending, which the generic open/forkFrom/create derivation
     // below has no way to know how to do.
     const sessionManager =
-      sessionManagerOverride ??
-      (existsSync(conversation.piSessionPath)
-        ? SessionManager.open(conversation.piSessionPath, sessionDir, cwd)
-        : parent && existsSync(parent.piSessionPath)
-          ? // Branches fork from the parent's own Pi session file (design.md §21 deviation, plan.md) so
-            // the conversation tree lives in one per-document session directory; the seeded excerpt
-            // itself still arrives as an ordinary first message (FR-012), never via this fork alone.
-            SessionManager.forkFrom(parent.piSessionPath, cwd, sessionDir, { id: conversation.id })
-          : SessionManager.create(cwd, sessionDir, { id: conversation.id }));
+      sessionManagerOverride ?? this.deriveSessionManager(conversation, parent, sessionDir, cwd);
 
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -330,6 +322,34 @@ export class PiService {
       this.sessions.set(conversation.id, agentSession);
     }
     return agentSession;
+  }
+
+  /**
+   * Derives the `SessionManager` `getOrCreateSession` should use when no
+   * `sessionManagerOverride` was supplied (a thread-kind conversation always supplies its own —
+   * see that method's doc comment on why the generic derivation here has no notion of a shared
+   * leaf to reposition). Three cases, in priority order: reopen this conversation's own session
+   * file if it already exists; else fork from the parent's session file if the parent has one;
+   * else create a brand-new session file.
+   */
+  private deriveSessionManager(
+    conversation: ConversationRow,
+    parent: ConversationRow | null,
+    sessionDir: string,
+    cwd: string,
+  ): SessionManager {
+    if (existsSync(conversation.piSessionPath)) {
+      return SessionManager.open(conversation.piSessionPath, sessionDir, cwd);
+    }
+    if (parent && existsSync(parent.piSessionPath)) {
+      // Branches fork from the parent's own Pi session file (design.md §21 deviation, plan.md) so
+      // the conversation tree lives in one per-document session directory; the seeded excerpt
+      // itself still arrives as an ordinary first message (FR-012), never via this fork alone.
+      return SessionManager.forkFrom(parent.piSessionPath, cwd, sessionDir, {
+        id: conversation.id,
+      });
+    }
+    return SessionManager.create(cwd, sessionDir, { id: conversation.id });
   }
 
   /**

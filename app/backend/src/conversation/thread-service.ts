@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { DocumentNotFoundError } from '../document/document-service.ts';
+import { logger } from '../logging.ts';
 import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
@@ -10,6 +11,7 @@ import type { PiService } from '../pi/pi-service.ts';
 import { buildThreadBranchSeedMessage } from '@rapid-ai-document-review/shared/domain';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import {
+  ConversationBusyError,
   ConversationNotFoundError,
   MaxConversationDepthExceededError,
   type ConversationService,
@@ -198,7 +200,19 @@ export class ThreadService {
     // exists and its own HTTP response has already returned by the time this settles or fails.
     void this.conversationService
       .send(row.id, buildThreadBranchSeedMessage(request.highlightedText), { isSeed: true })
-      .catch(() => {});
+      .catch((err) => {
+        // `event: 'agent_error'` — same reasoning as `ConversationService.sendBranchSeedMessage`'s/
+        // `seedMain`'s own seed-message catch blocks.
+        logger.warn(
+          {
+            event: 'agent_error',
+            conversationId: row.id,
+            parentConversationId: parent.id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'failed to deliver thread branch seed message',
+        );
+      });
 
     return toConversationDto(this.storage, row, document.currentRevision, '');
   }
@@ -206,10 +220,16 @@ export class ThreadService {
   /**
    * Marks a Thread done — a non-destructive, reversible visibility flag (FR-008/FR-009), refused
    * while any of its proposals are still unresolved (FR-010, research.md R3's shared guard with
-   * `ConversationService.close()`).
+   * `ConversationService.close()`). Also refused while the Thread's own turn is actively
+   * streaming (`status === 'working'`) — same guard `ConversationService.close()` applies before
+   * its own lifecycle transition, reused verbatim here since marking a Thread done while a turn is
+   * in flight would race the turn's own event-driven status writes.
    */
   markDone(threadId: string): { threadId: string; doneAt: string } {
     const thread = this.getThreadOrThrow(threadId);
+    if (thread.status === 'working') {
+      throw new ConversationBusyError('Cannot mark a thread done while it is working');
+    }
     const pendingEditIds = getPendingStagedEditIds(this.storage, threadId);
     if (pendingEditIds.length > 0) {
       throw new PendingEditsBlockDoneError(

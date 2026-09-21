@@ -498,13 +498,36 @@ export class ConversationService {
       this.primaryService.closeClears(conversationId);
     }
 
+    this.foldOrEvictSession(conversation, willFold, parent);
+
+    return {
+      conversationId,
+      status: 'closed',
+      summaryFoldedIntoParent: willFold,
+      parentConversationId: conversation.parentId,
+    };
+  }
+
+  /**
+   * `close()`'s fold-vs-evict decision, extracted verbatim: when no fold into `parent` is going to
+   * happen (`willFold` false, or `parent` null), the just-closed conversation's cached Pi session
+   * is evicted right away; otherwise the fold summary is generated and delivered fire-and-forget,
+   * with its own eviction happening later once `foldSummaryIntoParent` itself is done with that
+   * session (see that method's doc comment). `willFold`/`parent` are passed in rather than
+   * recomputed here since `close()` itself still needs both for its own publish/return above.
+   */
+  private foldOrEvictSession(
+    conversation: ConversationRow,
+    willFold: boolean,
+    parent: ConversationRow | null,
+  ): void {
     if (!(willFold && parent)) {
       // Nothing further will ever call `getOrCreateSession` for this now-closed
       // conversation (no fold summary is pending), so its cached Pi session can be evicted right
       // away instead of sitting in `PiService.sessions` for the rest of the process's lifetime.
       // When a fold *is* pending, `foldSummaryIntoParent` below evicts it once that flow — the
       // only remaining reader of this conversation's own session — has finished with it.
-      this.piService.evictSession(conversationId);
+      this.piService.evictSession(conversation.id);
     }
 
     if (willFold && parent) {
@@ -529,13 +552,6 @@ export class ConversationService {
         );
       });
     }
-
-    return {
-      conversationId,
-      status: 'closed',
-      summaryFoldedIntoParent: willFold,
-      parentConversationId: conversation.parentId,
-    };
   }
 
   /**

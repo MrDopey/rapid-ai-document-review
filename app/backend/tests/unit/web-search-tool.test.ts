@@ -94,7 +94,7 @@ describe('web_search tool (unit)', () => {
     expect(text.toLowerCase()).not.toContain('failed');
   });
 
-  it('returns an explanatory error result for an unreachable backend, bounded by WEB_TOOL_TIMEOUT_MS (contract #3)', async () => {
+  it('rejects with an explanatory message for an unreachable backend, bounded by WEB_TOOL_TIMEOUT_MS (contract #3)', async () => {
     // Bind to get a free ephemeral port, then close immediately: the most deterministic way to
     // guarantee "nothing is listening here" without racing another process for a fixed port.
     const stub = await startJsonStub(() => {});
@@ -103,10 +103,12 @@ describe('web_search tool (unit)', () => {
     server = undefined;
 
     const tool = createWebSearchTool({ searxngUrl: unreachableUrl });
-    const outcome = (await tool.execute('test-tool-call-1', { query: 'anything' })) as ToolResult;
-    const text = outcome.content[0]?.text ?? '';
 
-    expect(text.toLowerCase()).toMatch(/fail|error|could not|unreachable|timed? ?out/);
+    // A genuine network failure now rejects (so the Pi SDK's isError/failureReason path fires)
+    // rather than resolving with a graceful textResult — see web-search.ts's catch block.
+    await expect(tool.execute('test-tool-call-1', { query: 'anything' })).rejects.toThrow(
+      /fail|error|could not|unreachable|timed? ?out/i,
+    );
   });
 
   it('returns an explanatory result without ever calling the backend for a blank/whitespace-only query (contract #4)', async () => {

@@ -37,6 +37,16 @@ export interface AcquireResult {
 export class ConcurrencyLimiter {
   private readonly running = new Map<string, Set<string>>(); // documentId -> running conversationIds
   private readonly queues = new Map<string, QueueEntry[]>(); // documentId -> FIFO queue
+  /** Second, independent serialization layer (011-linear-thread-mode): sibling Threads can share
+   *  one underlying Pi session `.jsonl` file (`piSessionPath`), but the `running`/`queues` maps
+   *  above only ever dedupe/queue by `conversationId` — two *different* conversationIds admitted
+   *  under `max_concurrent_agents` would otherwise be free to run concurrent turns that both
+   *  append to that same physical file. Keyed by the session file path itself (not documentId),
+   *  since that's the actual shared resource; unrelated per-conversation files never contend here
+   *  at all. See `withSessionKeyLock` below — this map holds each key's *latest* promise, so a
+   *  new call chains onto whatever the previous holder was doing rather than replacing the queue/
+   *  admission logic above. */
+  private readonly sessionLocks = new Map<string, Promise<void>>();
 
   private readonly storage: StorageAdapter;
   private readonly eventService: EventService;
@@ -68,13 +78,21 @@ export class ConcurrencyLimiter {
     turnId: string,
     contextRevision: number,
     run: () => Promise<void>,
+    /** `conversation.piSessionPath` (011-linear-thread-mode) — when given, `run` is additionally
+     *  serialized against any other call currently holding this same key's lock (see
+     *  `withSessionKeyLock`), on top of the ordinary per-`documentId` admission/queueing below.
+     *  Omitted by nothing today (every real caller passes it), but optional since it's a second,
+     *  independent concern from admission — a caller with no notion of a shared session file is
+     *  still free to use this method exactly as before. */
+    sessionKey?: string,
   ): AcquireResult {
     const limit = this.storage.getSettings().maxConcurrentAgents;
     const runningSet = this.runningSetFor(documentId);
+    const guardedRun = sessionKey ? () => this.withSessionKeyLock(sessionKey, run) : run;
 
     if (runningSet.size < limit && !runningSet.has(conversationId)) {
       runningSet.add(conversationId);
-      const immediateRun = run();
+      const immediateRun = guardedRun();
       immediateRun.catch(() => {
         // Swallowed here so an unawaited immediateRun never surfaces as an unhandled rejection;
         // the caller may still await/catch this exact promise for the immediate-failure case.
@@ -88,11 +106,32 @@ export class ConcurrencyLimiter {
       conversationId,
       turnId,
       contextRevision,
-      run,
+      run: guardedRun,
       lastEmittedPosition: queuePosition,
     });
     this.publishQueued(documentId, conversationId, queuePosition, runningSet.size, limit);
     return { queued: true, queuePosition };
+  }
+
+  /**
+   * Chains `run` onto whatever promise `sessionKey` was last given here, so two calls sharing the
+   * same underlying Pi session file (sibling Threads, 011-linear-thread-mode) never actually
+   * execute concurrently even when both were admitted above under `max_concurrent_agents` as
+   * distinct conversations. A previous holder rejecting does not poison the chain for the next
+   * waiter — `.catch(() => {})` on the stored promise only ever affects *when* the next call is
+   * allowed to start, never whether it runs. This is deliberately independent of the
+   * `running`/`queues` admission bookkeeping above: it neither counts toward, nor is visible in,
+   * `runningCount`/`queuePosition` — it only ever delays *execution* of an already-admitted or
+   * already-dequeued `run`.
+   */
+  private withSessionKeyLock(sessionKey: string, run: () => Promise<void>): Promise<void> {
+    const previous = this.sessionLocks.get(sessionKey) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(run);
+    this.sessionLocks.set(
+      sessionKey,
+      next.catch(() => {}),
+    );
+    return next;
   }
 
   /** Frees `conversationId`'s running slot and starts the next queued turn, if any. */
