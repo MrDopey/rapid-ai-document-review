@@ -1479,37 +1479,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
   min-width: 0;
 }
 
-/* Draggable, keyboard-operable resize handle between the major layout regions
-   (Preview|Canvas). `--horizontal` is a vertical dividing line dragged left/right; `--vertical`
-   (still used by ConversationView.vue's own transcript|edits split) is a horizontal dividing line
-   dragged up/down. */
-.resize-handle {
-  position: relative;
-  touch-action: none;
-  background: transparent;
-}
-.resize-handle--horizontal {
-  cursor: col-resize;
-}
-.resize-handle--horizontal::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: var(--border-color, #ccc);
-}
-.resize-handle--horizontal:hover::after,
-.resize-handle--horizontal:focus-visible::after {
-  background: var(--accent-color, #2563eb);
-  width: 4px;
-}
-.resize-handle:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: -2px;
-}
+/* Draggable, keyboard-operable resize handle between the major layout regions (Preview|Canvas):
+   `.resize-handle`/`.resize-handle--horizontal` (a vertical dividing line dragged left/right) now
+   live in style.css, shared with DocumentCanvas.vue's Editor|sidebar split and
+   ConversationView.vue's `--vertical` transcript|edits split. */
 
 /* History renders in normal grid flow, in its own reserved column (see `panesStyle`) —
    never as an overlay, so it never covers or blocks pointer events for anything else on the page. */

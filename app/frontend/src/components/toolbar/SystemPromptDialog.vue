@@ -54,6 +54,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Background/color/border-radius/box-shadow live in style.css's shared `.dialog-box` class, and
+   the sticky title/Close header lives in style.css's shared `.dialog-header` class (both applied
+   via the template classes above); only this dialog's own width/max-width/max-height/padding/
+   overflow stay here. */
 .system-prompt-dialog {
   padding: 1rem;
   width: 40rem;
@@ -61,33 +65,10 @@ onMounted(async () => {
   max-height: 85vh;
   overflow: auto;
 }
-.dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin: -1rem -1rem 0.75rem;
-  padding: 0.5rem 1rem;
-  background: var(--panel-bg, #f7f7f8);
-  border-bottom: 2px solid var(--border-color, #ddd);
-  border-radius: 8px 8px 0 0;
-  /* Sticky within this dialog's own scrolling root (`.system-prompt-dialog` above has
-     `overflow: auto`) so the title and Close button stay reachable while scrolling a long system
-     prompt — same technique as style.css's shared `.diff-header` (DiffViewer.vue/
-     RevisionDiffViewer.vue): `top` matches this element's own negative margin so it stays flush
-     with the dialog's edge instead of jumping down to the padding edge once it starts sticking. */
-  position: sticky;
-  top: -1rem;
-  z-index: 1;
-}
-.dialog-header h2 {
-  margin: 0;
-  font-size: 1rem;
-}
 .system-prompt-note {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: var(--muted-text, #666);
+  color: var(--neutral-muted-color, #4b5563);
 }
 .system-prompt-text {
   margin: 0;
@@ -102,11 +83,11 @@ onMounted(async () => {
 }
 .system-prompt-error {
   font-size: 0.85rem;
-  color: var(--error-text, #b00020);
+  color: var(--danger-color, #b91c1c);
 }
 .system-prompt-loading {
   font-size: 0.85rem;
-  color: var(--muted-text, #666);
+  color: var(--neutral-muted-color, #4b5563);
 }
 
 @media (max-width: 520px) {

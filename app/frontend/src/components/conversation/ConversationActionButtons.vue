@@ -44,7 +44,7 @@ defineProps<{ actions: ActionDescriptor[] }>();
 .action-button:hover:not(:disabled) {
   background: var(--accent-color, #2563eb);
   border-color: var(--accent-color, #2563eb);
-  color: #fff;
+  color: var(--on-accent-color);
 }
 .action-button:focus-visible {
   outline: 2px solid var(--accent-color, #2563eb);
@@ -62,7 +62,7 @@ defineProps<{ actions: ActionDescriptor[] }>();
 .action-button.danger:hover:not(:disabled) {
   background: var(--danger-color, #b91c1c);
   border-color: var(--danger-color, #b91c1c);
-  color: #fff;
+  color: var(--on-accent-color);
 }
 /* Visual parity restoration for the one non-native-disabled toggle action ("Focus") — same cues
    `ConversationThreadBox.vue`'s pre-existing `.focus-button.is-focused`/`.focus-button.focus-

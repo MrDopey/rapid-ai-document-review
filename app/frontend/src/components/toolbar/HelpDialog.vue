@@ -75,37 +75,15 @@ useFocusTrap(rootEl, () => true, { onEscape: () => emit('close') });
 
 <style scoped>
 /* Background/color/border-radius/box-shadow now live in style.css's shared `.dialog-box` class
-   (applied via the template class above); only this dialog's own width/max-width/max-height/
-   padding/overflow stay here. */
+   (applied via the template class above), and the sticky title/Close header now lives in
+   style.css's shared `.dialog-header` (applied via the template class above); only this dialog's
+   own width/max-width/max-height/padding/overflow stay here. */
 .help-dialog {
   padding: 1rem;
   width: 32rem;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-}
-.dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin: -1rem -1rem 0.75rem;
-  padding: 0.5rem 1rem;
-  background: var(--panel-bg, #f7f7f8);
-  border-bottom: 2px solid var(--border-color, #ddd);
-  border-radius: 8px 8px 0 0;
-  /* Sticky within this dialog's own scrolling root (`.help-dialog` above has `overflow: auto`) so
-     the title and Close button stay reachable while scrolling long help content — same technique
-     as style.css's shared `.diff-header` (DiffViewer.vue/RevisionDiffViewer.vue): `top` matches
-     this element's own negative margin so it stays flush with the dialog's edge instead of
-     jumping down to the padding edge once it starts sticking. */
-  position: sticky;
-  top: -1rem;
-  z-index: 1;
-}
-.dialog-header h2 {
-  margin: 0;
-  font-size: 1rem;
 }
 .help-body {
   display: flex;

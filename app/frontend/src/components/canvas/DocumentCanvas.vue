@@ -16,6 +16,7 @@ import {
   persistEditorSplit,
 } from '../../composables/panePersistence.js';
 import { clamp, useResizeHandle } from '../../composables/useResizeHandle.js';
+import { scheduleFrame, cancelScheduledFrame } from '../../composables/scheduleFrame.js';
 
 // 005-canvas-conversation-threads/US4 (T023's handoff, fulfilled here): `filter` is lifted state
 // owned by `App.vue` (shared with `HudPanel.vue`'s "Active only"/"All" toggle) rather than local —
@@ -105,14 +106,6 @@ let resizeObserver: ResizeObserver | null = null;
 // often.
 const pendingBoxHeights = new Map<string, number>();
 let boxHeightsFlushHandle: number | null = null;
-const scheduleFrame: (cb: () => void) => number =
-  typeof requestAnimationFrame === 'function'
-    ? requestAnimationFrame
-    : (cb) => setTimeout(cb, 0) as unknown as number;
-const cancelScheduledFrame: (handle: number) => void =
-  typeof cancelAnimationFrame === 'function'
-    ? cancelAnimationFrame
-    : (handle) => clearTimeout(handle);
 
 function flushBoxHeights(): void {
   boxHeightsFlushHandle = null;
@@ -304,7 +297,10 @@ function cachedAnchorYOf(
   const root = resolveAnchorRoot(conversation, byId);
   const cached = anchorYCache.get(conversation.id);
   if (cached && cached.root === root && cached.editor === editor) return cached.y;
-  const y = computeAnchorY(root.seedSelection, editor);
+  // Pass this conversation's last-known Y (if any) as `computeAnchorY`'s fallback: if the anchor
+  // is now orphaned (its offset no longer exists in a shrunk document) or the editor can't
+  // resolve it, this keeps the box near its last-known position instead of teleporting to Y=0.
+  const y = computeAnchorY(root.seedSelection, editor, cached?.y);
   anchorYCache.set(conversation.id, { root, editor, y });
   return y;
 }
@@ -587,40 +583,13 @@ defineExpose({
   padding: 0 12px;
 }
 /* Editor|Conversation-sidebar resize handle: same look/feel/cursor convention as App.vue's own
-   Preview|Canvas `.resize-handle`/`.resize-handle--horizontal` (duplicated here since `<style
-   scoped>` doesn't cross component boundaries) — a vertical dividing line dragged left/right.
+   Preview|Canvas split — `.resize-handle`/`.resize-handle--horizontal` (a vertical dividing line
+   dragged left/right) now live in style.css, shared across both hosts.
    `.editor-thread-handle` adds this component's own layout specifics: a fixed 6px flex-basis
    (`EDITOR_THREAD_HANDLE_SPACE_PX` in the script) and `align-self: stretch` so it spans the full
    height of whichever sibling pane (`.editor-pane`/`.thread-columns`) is currently tallest, rather
    than collapsing to zero height (its own default flex-start alignment) since it has no content of
    its own. */
-.resize-handle {
-  position: relative;
-  touch-action: none;
-  background: transparent;
-}
-.resize-handle--horizontal {
-  cursor: col-resize;
-}
-.resize-handle--horizontal::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: var(--border-color, #ccc);
-}
-.resize-handle--horizontal:hover::after,
-.resize-handle--horizontal:focus-visible::after {
-  background: var(--accent-color, #2563eb);
-  width: 4px;
-}
-.resize-handle:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: -2px;
-}
 .editor-thread-handle {
   flex: 0 0 6px; /* mirrors EDITOR_THREAD_HANDLE_SPACE_PX in the script */
   align-self: stretch;

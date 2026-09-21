@@ -49,6 +49,12 @@
   --danger-bg: #fee2e2;
   --success-bg: #d1fae5;
   --accent-color: #2563eb;
+  /* Text color for content sitting on a filled accent/danger button (e.g.
+     `ConversationActionButtons.vue`'s `.action-button:hover`/`.action-button.danger:hover`,
+     ConversationView.vue's `.close-dialog-actions button.danger:hover`) — every other color in
+     those same rules already references a token; this was the one hardcoded `#fff` left. Light
+     value only: both color schemes want plain white text on a filled accent/danger fill here. */
+  --on-accent-color: #fff;
   --status-active-color: #1d4ed8;
   /* Light-bg counterpart to `--status-active-color`, for a pill badge that pairs the "active/blue"
      text color with its own light background rather than sitting on a panel surface (see
@@ -544,4 +550,81 @@ body {
   overflow: auto;
   margin: 0;
   min-width: 0;
+}
+
+/* Shared draggable, keyboard-operable resize handle between two panes — used by App.vue's
+   Preview|Canvas split and DocumentCanvas.vue's Editor|Conversation-sidebar split (both via
+   `--horizontal`, a vertical dividing line dragged left/right), and by ConversationView.vue's
+   transcript|edits split (via `--vertical`, a horizontal dividing line dragged up/down). Each
+   host applies only whichever modifier class(es) it actually uses alongside this base class. */
+.resize-handle {
+  position: relative;
+  touch-action: none;
+  background: transparent;
+}
+.resize-handle--horizontal {
+  cursor: col-resize;
+}
+.resize-handle--horizontal::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border-color, #ccc);
+}
+.resize-handle--horizontal:hover::after,
+.resize-handle--horizontal:focus-visible::after {
+  background: var(--accent-color, #2563eb);
+  width: 4px;
+}
+.resize-handle--vertical {
+  cursor: row-resize;
+}
+.resize-handle--vertical::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--border-color, #ccc);
+}
+.resize-handle--vertical:hover::after,
+.resize-handle--vertical:focus-visible::after {
+  background: var(--accent-color, #2563eb);
+  height: 4px;
+}
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent-color, #2563eb);
+  outline-offset: -2px;
+}
+
+/* Shared sticky dialog header (title + Close button) — used by HelpDialog.vue,
+   KeyboardShortcutsDialog.vue, and SystemPromptDialog.vue. Sticky within each dialog's own
+   scrolling root (each dialog's own root has `overflow: auto`) so the title and Close button stay
+   reachable while scrolling long content — same technique as `.diff-header` above: `top` matches
+   this element's own negative margin so it stays flush with the dialog's edge instead of jumping
+   down to the padding edge once it starts sticking. Each host keeps only its own width/max-width/
+   max-height/padding/overflow in its own `<style scoped>` block. */
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -1rem -1rem 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--panel-bg, #f7f7f8);
+  border-bottom: 2px solid var(--border-color, #ddd);
+  border-radius: 8px 8px 0 0;
+  position: sticky;
+  top: -1rem;
+  z-index: 1;
+}
+.dialog-header h2 {
+  margin: 0;
+  font-size: 1rem;
 }

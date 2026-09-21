@@ -6,6 +6,7 @@ import { useAgentErrorBanner } from '../../composables/agentErrorBanner.js';
 import { useConversationRename } from '../../composables/conversationRename.js';
 import { ApiError } from '../../transport/http-client.js';
 import type { ActionDescriptor } from '../../composables/conversationActions.js';
+import { scheduleFrame, cancelScheduledFrame } from '../../composables/scheduleFrame.js';
 import ConversationActionButtons from '../conversation/ConversationActionButtons.vue';
 import MessageBubble from '../conversation/MessageBubble.vue';
 import ThreadComposer from './ThreadComposer.vue';
@@ -523,18 +524,6 @@ const branchGroupStyle = computed(() => ({
 function segmentKey(segment: Pick<ThreadSegment, 'startIndex' | 'endIndex'>): string {
   return `${segment.startIndex}-${segment.endIndex}`;
 }
-
-// jsdom (this component's own test environment — `ThreadCard.spec.ts`) has no
-// `requestAnimationFrame` at all, unlike a real browser — same fallback `DocumentCanvas.vue`'s own
-// `scheduleFrame`/`cancelScheduledFrame` already uses for the exact same reason.
-const scheduleFrame: (cb: () => void) => number =
-  typeof requestAnimationFrame === 'function'
-    ? requestAnimationFrame
-    : (cb) => setTimeout(cb, 0) as unknown as number;
-const cancelScheduledFrame: (handle: number) => void =
-  typeof cancelAnimationFrame === 'function'
-    ? cancelAnimationFrame
-    : (handle) => clearTimeout(handle);
 
 let alignFrame: number | null = null;
 function scheduleAlignSync(): void {
