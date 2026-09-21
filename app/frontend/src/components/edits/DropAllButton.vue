@@ -3,13 +3,16 @@ import { useEditsStore } from '../../stores/edits.js';
 import { useBusyAction } from '../../composables/useBusyAction.js';
 
 const props = defineProps<{ conversationId: string; disabled?: boolean }>();
+// `run` re-throws (see useBusyAction.ts's own doc comment) so this failure can be surfaced —
+// EditsList.vue renders it via the same `.error-banner` convention as its per-row accept/drop.
+const emit = defineEmits<{ error: [message: string] }>();
 const store = useEditsStore();
 const { busy, run } = useBusyAction(() => store.dropRemaining(props.conversationId));
 
 // Discarding every still-pending proposal in one click is destructive and has no undo, unlike
 // "Accept remaining" (which only applies proposed edits) — so this button, unlike
 // AcceptAllButton.vue, gates its action behind an explicit confirmation before it fires.
-function onClick(): void {
+async function onClick(): Promise<void> {
   if (
     !window.confirm(
       'Drop all remaining proposed edits in this conversation? This cannot be undone.',
@@ -17,7 +20,11 @@ function onClick(): void {
   ) {
     return;
   }
-  void run();
+  try {
+    await run();
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Failed to drop remaining edits.');
+  }
 }
 </script>
 

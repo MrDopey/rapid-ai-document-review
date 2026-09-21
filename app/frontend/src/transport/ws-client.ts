@@ -3,12 +3,14 @@ import {
   ApplicationEvent,
   SubscribedFrame,
   PongFrame,
+  ErrorFrame,
 } from '@rapid-ai-document-review/shared/contracts/events';
 
 export type ServerFrame =
   | { kind: 'subscribed'; frame: ReturnType<typeof SubscribedFrame.parse> }
   | { kind: 'event'; frame: ReturnType<typeof ApplicationEvent.parse> }
-  | { kind: 'pong' };
+  | { kind: 'pong' }
+  | { kind: 'error'; frame: ReturnType<typeof ErrorFrame.parse> };
 
 export type FrameHandler = (frame: ServerFrame) => void;
 
@@ -106,6 +108,19 @@ export class WsClient {
       const appEvent = ApplicationEvent.safeParse(parsed);
       if (appEvent.success) {
         this.dispatch({ kind: 'event', frame: appEvent.data });
+        return;
+      }
+      // Sent instead of `subscribed` when the just-sent `subscribe` frame named a document the
+      // backend can't find (e.g. a resubscribe racing a delete from another tab — see
+      // `ErrorFrame`'s own doc comment). Previously unhandled: this frame matched none of the
+      // schemas above, so it silently fell through with no log and no propagation, leaving the
+      // client believing it was still subscribed while nothing further ever arrived for it.
+      const errorFrame = ErrorFrame.safeParse(parsed);
+      if (errorFrame.success) {
+        console.error(
+          `WS subscribe failed: ${errorFrame.data.error.code} — ${errorFrame.data.error.message}`,
+        );
+        this.dispatch({ kind: 'error', frame: errorFrame.data });
       }
     });
 

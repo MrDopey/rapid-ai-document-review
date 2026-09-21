@@ -32,6 +32,10 @@ export interface DocumentState {
   // edit was in flight). The rejected edit is never retried with its now-stale offsets; `content`
   // is instead resynced from the server and this message is left for a UI surface to show the
   // user their edit wasn't saved and needs to be redone. Cleared via `clearConflictMessage`.
+  //
+  // Also doubles as the persistent notice for `patchContent`'s 404 branch (the document was
+  // permanently deleted — e.g. from another tab — while this one still had it open): same
+  // App.vue banner, just a different, non-redoable message, since there's nothing to resync there.
   conflictMessage: string | null;
 }
 
@@ -159,14 +163,22 @@ export const useDocumentStore = defineStore('document', {
     // dropping the edit — a manual edit that never left the browser is otherwise silently lost,
     // since the backend (the sole document authority) never saw it.
     //
-    // The one failure this does NOT retry is a 409 (DocumentOutOfSyncError): that means the
-    // backend rejected `changes` because `baseRevision` no longer matches — the document changed
-    // shape elsewhere (another tab, or a Primary-conversation agent edit) while these offsets were
-    // computed against this tab's local text. Unlike every other failure here, resubmitting the
-    // same offsets can never be correct once that's happened — Automerge's CRDT convergence
-    // guarantees don't make a stale numeric offset keep naming the same logical span — so instead
-    // of retrying, this resyncs `content`/`document` from the server and leaves `conflictMessage`
-    // set for the UI to tell the user their edit wasn't saved and needs to be redone.
+    // The two failures this does NOT retry are a 409 (DocumentOutOfSyncError) and a 404 (the
+    // document itself is gone):
+    //
+    // - 409 means the backend rejected `changes` because `baseRevision` no longer matches — the
+    //   document changed shape elsewhere (another tab, or a Primary-conversation agent edit) while
+    //   these offsets were computed against this tab's local text. Unlike every other failure
+    //   here, resubmitting the same offsets can never be correct once that's happened —
+    //   Automerge's CRDT convergence guarantees don't make a stale numeric offset keep naming the
+    //   same logical span — so instead of retrying, this resyncs `content`/`document` from the
+    //   server and leaves `conflictMessage` set for the UI to tell the user their edit wasn't
+    //   saved and needs to be redone.
+    // - 404 means the document was permanently deleted (e.g. from another tab/session) while this
+    //   tab still had it open. Retrying forever here would never succeed and would silently
+    //   discard every further edit this tab makes; there's also nothing to resync (the document no
+    //   longer exists), so this stops immediately and leaves the same persistent `conflictMessage`
+    //   notice, just with wording that doesn't invite a redo.
     async patchContent(
       baseRevision: number,
       changes: { from: number; to: number; insert: string }[],
@@ -183,6 +195,10 @@ export const useDocumentStore = defineStore('document', {
               await this.refreshActive();
               this.conflictMessage =
                 'This document changed elsewhere while you were editing. Your last edit was not saved — please redo it.';
+              return;
+            }
+            if (err instanceof ApiError && err.status === 404) {
+              this.conflictMessage = 'This document was deleted. Your changes cannot be saved.';
               return;
             }
             const wait = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]!;
@@ -240,6 +256,20 @@ export const useDocumentStore = defineStore('document', {
     },
 
     async handleServerFrame(frame: ServerFrame): Promise<void> {
+      // Sent instead of `subscribed` when the just-sent `subscribe` frame (this document's own —
+      // App.vue's `connectWs` always subscribes to whichever document this store considers
+      // active) named a document the backend can't find, e.g. `DOCUMENT_NOT_FOUND` on a
+      // resubscribe racing a delete from another tab. `ws-client.ts` already logs it; this is
+      // where it becomes a UI-visible state — same persistent `conflictMessage` banner (App.vue)
+      // `patchContent`'s own 404 branch above uses, since it's the same underlying situation (the
+      // active document no longer exists).
+      if (frame.kind === 'error') {
+        this.conflictMessage =
+          frame.frame.error.code === 'DOCUMENT_NOT_FOUND'
+            ? 'This document was deleted. Your changes cannot be saved.'
+            : frame.frame.error.message;
+        return;
+      }
       if (frame.kind === 'subscribed') {
         const { content, ...document } = frame.frame.snapshot.document;
         this.document = document;

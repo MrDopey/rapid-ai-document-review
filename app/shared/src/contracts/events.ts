@@ -327,7 +327,6 @@ export const ApplicationEvent = z.discriminatedUnion('type', [
   StagedEditReplacementExhaustedEvent,
 ]);
 export type ApplicationEvent = z.infer<typeof ApplicationEvent>;
-export type ApplicationEventType = ApplicationEvent['type'];
 
 // ---- Client -> server frames ----
 
@@ -360,3 +359,12 @@ export type SubscribedFrame = z.infer<typeof SubscribedFrame>;
 
 export const PongFrame = z.object({ type: z.literal('pong') });
 export type PongFrame = z.infer<typeof PongFrame>;
+
+// Sent instead of `SubscribedFrame` when a `subscribe` frame names a document the backend can't
+// find (`app/backend/src/api/ws/index.ts`'s `DOCUMENT_NOT_FOUND` — e.g. a resubscribe racing a
+// delete from another tab). No `type` field (unlike every other frame here) since this mirrors the
+// backend's HTTP `ErrorEnvelope` shape (`contracts/http.ts`) rather than the WS frame vocabulary.
+export const ErrorFrame = z.object({
+  error: z.object({ code: z.string(), message: z.string() }),
+});
+export type ErrorFrame = z.infer<typeof ErrorFrame>;

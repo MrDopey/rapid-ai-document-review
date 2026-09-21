@@ -66,6 +66,10 @@ watch(
 const sending = ref(false);
 const closing = ref(false);
 const closeError = ref<string | null>(null);
+// Previously the draft was cleared before `store.send`/`store.refreshAndSend` resolved with no
+// `catch` at all, so a failed send (dropped network, a 409 race, …) silently discarded whatever
+// the reviewer had just typed — same `.error-banner` convention as `closeError`/`branchError` etc.
+const sendError = ref<string | null>(null);
 const listRef = ref<HTMLDivElement | null>(null);
 
 // FR-034: the close dialog offers folding a compact summary into the parent, separately from
@@ -420,10 +424,16 @@ watch(awaitingResponse, scrollToBottomIfSticky);
 async function onSend(): Promise<void> {
   const text = draft.value.trim();
   if (!text || sending.value || conversation.value?.status === 'closed') return;
-  draft.value = '';
   sending.value = true;
+  sendError.value = null;
   try {
     await store.send(props.conversationId, text);
+    // Only cleared once the send actually succeeds — on failure the draft is restored below so
+    // the reviewer's message isn't silently lost.
+    draft.value = '';
+  } catch (err) {
+    draft.value = text;
+    sendError.value = err instanceof Error ? err.message : 'Failed to send message.';
   } finally {
     sending.value = false;
   }
@@ -433,10 +443,14 @@ async function onSend(): Promise<void> {
 async function onRefreshSend(): Promise<void> {
   const text = draft.value.trim();
   if (!text || sending.value || conversation.value?.status === 'closed') return;
-  draft.value = '';
   sending.value = true;
+  sendError.value = null;
   try {
     await store.refreshAndSend(props.conversationId, text);
+    draft.value = '';
+  } catch (err) {
+    draft.value = text;
+    sendError.value = err instanceof Error ? err.message : 'Failed to send message.';
   } finally {
     sending.value = false;
   }
@@ -635,6 +649,9 @@ const actions = computed<ActionDescriptor[]>(() => {
     </div>
     <div v-if="primaryError" class="error-banner" role="alert">
       {{ primaryError }}
+    </div>
+    <div v-if="sendError" class="error-banner" role="alert">
+      {{ sendError }}
     </div>
 
     <div v-if="foldedSummary" class="folded-summary-banner" role="status">
@@ -1029,36 +1046,9 @@ const actions = computed<ActionDescriptor[]>(() => {
 }
 /* `.dismiss-notice-button` shared shape now lives in style.css (shared with PrimaryPanel.vue's
    Primary-notice dismiss button). */
-/* New: draggable, keyboard-operable resize handle between the transcript and proposed-edits list
-   — same look/behaviour as App.vue's `.resize-handle--vertical` (a separate, identically-named
-   rule here since each `<style scoped>` block is its own component). */
-.resize-handle {
-  position: relative;
-  touch-action: none;
-  background: transparent;
-}
-.resize-handle--vertical {
-  cursor: row-resize;
-}
-.resize-handle--vertical::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 2px;
-  transform: translateY(-50%);
-  background: var(--border-color, #ccc);
-}
-.resize-handle--vertical:hover::after,
-.resize-handle--vertical:focus-visible::after {
-  background: var(--accent-color, #2563eb);
-  height: 4px;
-}
-.resize-handle:focus-visible {
-  outline: 2px solid var(--accent-color, #2563eb);
-  outline-offset: -2px;
-}
+/* Draggable, keyboard-operable resize handle between the transcript and proposed-edits list:
+   `.resize-handle`/`.resize-handle--vertical` (a horizontal dividing line dragged up/down) now
+   live in style.css, shared with App.vue's/DocumentCanvas.vue's `--horizontal` splits. */
 /* Relying on the browser's native (color-scheme-driven) button-face background for text-color
    contrast math is fragile — dark mode's native button face isn't reliably dark enough for
    light/bright accent text. Both composer buttons get an explicit background from the token system
@@ -1141,7 +1131,7 @@ const actions = computed<ActionDescriptor[]>(() => {
 .close-dialog-actions button.danger:hover:not(:disabled) {
   background: var(--danger-color, #b91c1c);
   border-color: var(--danger-color, #b91c1c);
-  color: #fff;
+  color: var(--on-accent-color);
 }
 /* Make/Clear Primary's busy-switch confirmation dialog (see `usePrimaryAction`) — same shape as
    `ConversationThreadBox.vue`'s own copy of this dialog (and the removed `HudPanel.vue` original

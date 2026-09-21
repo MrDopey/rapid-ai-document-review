@@ -15,6 +15,10 @@ const props = defineProps<{ threadId: string; disabled?: boolean }>();
 
 const store = useThreadStore();
 const sending = ref(false);
+// Surfaced the same way as every other action failure in this app (`.error-banner`, style.css) —
+// previously the draft was cleared before `store.send` resolved with no `catch` at all, so a failed
+// send (dropped network, a 409 race, …) silently discarded whatever the reviewer had just typed.
+const sendError = ref<string | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 // Backed by `store.draftByThread` (not a local `ref`) so "Quote from here" (`ThreadCard.vue`'s
@@ -29,10 +33,16 @@ const draft = computed({
 async function onSend(): Promise<void> {
   const text = draft.value.trim();
   if (!text || sending.value || props.disabled) return;
-  draft.value = '';
   sending.value = true;
+  sendError.value = null;
   try {
     await store.send(props.threadId, text);
+    // Only cleared once the send actually succeeds — on failure the draft (still holding `text`)
+    // is left exactly as the reviewer typed it, matching the restore behaviour below.
+    draft.value = '';
+  } catch (err) {
+    draft.value = text;
+    sendError.value = err instanceof Error ? err.message : 'Failed to send message.';
   } finally {
     sending.value = false;
   }
@@ -53,6 +63,9 @@ defineExpose({ focus: () => textareaRef.value?.focus() });
 </script>
 
 <template>
+  <div v-if="sendError" class="error-banner" role="alert">
+    {{ sendError }}
+  </div>
   <form class="thread-composer" @submit.prevent="onSend">
     <label class="visually-hidden" :for="`thread-composer-${threadId}`">Continue this thread</label>
     <textarea

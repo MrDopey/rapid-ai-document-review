@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
-import type { DocumentType } from '@rapid-ai-document-review/shared/contracts/http';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import type {
+  DocumentType,
+  DocumentSummaryDto,
+} from '@rapid-ai-document-review/shared/contracts/http';
 import { useDocumentStore } from '../../stores/document.js';
 import { useFocusTrap } from '../../a11y/focus-manager.js';
 
@@ -57,6 +60,37 @@ function selectDocument(documentId: string): void {
   close();
   if (documentId === store.activeDocumentId) return;
   emit('switch', documentId);
+}
+
+// Ids of every document whose (trimmed) title collides with at least one other document's —
+// blank titles are handled separately below (`needsDisambiguator`), not folded into this set,
+// since a single blank-titled document is still ambiguous ("Untitled" tells the reviewer nothing)
+// even with no other blank one to collide with.
+const duplicateTitleIds = computed<Set<string>>(() => {
+  const idsByTitle = new Map<string, string[]>();
+  for (const doc of store.documents) {
+    const title = doc.title.trim();
+    if (!title) continue;
+    const ids = idsByTitle.get(title) ?? [];
+    ids.push(doc.id);
+    idsByTitle.set(title, ids);
+  }
+  const duplicates = new Set<string>();
+  for (const ids of idsByTitle.values()) {
+    if (ids.length > 1) for (const id of ids) duplicates.add(id);
+  }
+  return duplicates;
+});
+
+/** A blank or duplicated title renders identically to every other row sharing it — nothing in the
+ *  switcher lets the reviewer tell them apart before switching. `disambiguatorFor` below supplies
+ *  a short, stable suffix (this document's own id, not its content) for exactly these rows. */
+function needsDisambiguator(doc: DocumentSummaryDto): boolean {
+  return !doc.title.trim() || duplicateTitleIds.value.has(doc.id);
+}
+
+function disambiguatorFor(doc: DocumentSummaryDto): string {
+  return `#${doc.id.slice(0, 8)}`;
 }
 
 /** The simplest UI consistent with this app's existing conventions (no rich modal/dialog
@@ -124,6 +158,11 @@ function onDelete(documentId: string, event: Event): void {
           @click="selectDocument(doc.id)"
         >
           <span class="document-switcher-title">{{ doc.title || 'Untitled' }}</span>
+          <!-- Blank/duplicate-title disambiguator: a short, muted id suffix so two "Untitled" (or
+               otherwise identically-named) rows aren't indistinguishable before switching. -->
+          <span v-if="needsDisambiguator(doc)" class="document-switcher-disambiguator">
+            {{ disambiguatorFor(doc) }}
+          </span>
           <!-- 011-linear-thread-mode (contracts/thread-mode.md's "Frontend routing/view contract"):
                a document-type indicator so the reviewer can tell, before switching, which view
                (Preview/Canvas/History grid vs. ThreadModeView) they'll land in. Canvas is the
@@ -274,6 +313,15 @@ function onDelete(documentId: string, event: Event): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Blank/duplicate-title disambiguator (a short id suffix) — muted secondary text, not a badge,
+   since it's not signalling a document property (unlike `.document-type-badge` below) but just
+   telling two otherwise-identical rows apart. */
+.document-switcher-disambiguator {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--neutral-muted-color, #4b5563);
+  margin-left: 0.35rem;
 }
 /* 011-linear-thread-mode: a small, unobtrusive badge — same shape as `ThreadCard.vue`'s own
    `.thread-root-badge` — flagging a threaded-conversation document in the switcher list. */

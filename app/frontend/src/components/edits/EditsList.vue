@@ -11,6 +11,10 @@ const store = useEditsStore();
 
 const previewingEditId = ref<string | null>(null);
 const { busyId: busyEditId, run: runBusy } = useBusyId<string>();
+// Accept/drop failures used to be swallowed by `runBusy`'s try/finally (only resetting `busyId`,
+// per its own doc comment) with nothing shown to the reviewer — same inline-banner convention as
+// `ConversationView.vue`'s `closeError`/`branchError`/etc (`.error-banner`, style.css).
+const actionError = ref<string | null>(null);
 
 // Oldest-first (top) to newest-last (bottom), by actual proposal creation time. The store's
 // underlying array is newest-first (matches GET /conversations/:id/edits' `created_at DESC`,
@@ -35,14 +39,28 @@ function supersededChainLabel(supersedesId: string | null): string | null {
 }
 
 async function onAccept(editId: string): Promise<void> {
-  await runBusy(editId, () => store.apply(editId, props.conversationId));
+  actionError.value = null;
+  try {
+    await runBusy(editId, () => store.apply(editId, props.conversationId));
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : 'Failed to accept edit.';
+  }
 }
 
 async function onDrop(editId: string): Promise<void> {
   // Dropping is destructive with no undo, unlike Accept, so this per-row drop is gated behind an
   // explicit confirmation before it fires (same as DropAllButton.vue).
   if (!window.confirm('Drop this proposed edit? This cannot be undone.')) return;
-  await runBusy(editId, () => store.drop(editId, props.conversationId));
+  actionError.value = null;
+  try {
+    await runBusy(editId, () => store.drop(editId, props.conversationId));
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : 'Failed to drop edit.';
+  }
+}
+
+function onBulkActionError(message: string): void {
+  actionError.value = message;
 }
 
 function openPreview(editId: string): void {
@@ -62,9 +80,13 @@ function closePreview(): void {
       <button type="button" @click="store.dismissExhausted(conversationId)">Dismiss</button>
     </div>
 
+    <div v-if="actionError" class="error-banner" role="alert">
+      {{ actionError }}
+    </div>
+
     <div v-if="pendingCount > 1" class="bulk-actions">
-      <AcceptAllButton :conversation-id="conversationId" />
-      <DropAllButton :conversation-id="conversationId" />
+      <AcceptAllButton :conversation-id="conversationId" @error="onBulkActionError" />
+      <DropAllButton :conversation-id="conversationId" @error="onBulkActionError" />
     </div>
 
     <p v-if="edits.length === 0" class="empty">No proposed edits yet.</p>
