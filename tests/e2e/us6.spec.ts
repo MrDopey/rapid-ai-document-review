@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us5.spec.ts for the same convention. `FakeAgentSession` never decides on its own to call
@@ -51,8 +52,11 @@ const MARKER_BLOCK = [
 
 const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -61,22 +65,27 @@ async function getDocumentState(page: Page): Promise<{ currentRevision: number; 
 }
 
 /** Rewrites `oldStr` (which must appear exactly once) to `newStr` via the same manual-edit HTTP
- *  path US1 uses (PATCH /api/document), and waits for the resulting revision to land — this is how
- *  every conflict in this spec is forced: a real anchor mismatch against the live document, never a
- *  scripted one. Mirrors us5.spec.ts's Primary-conflict step. */
-async function mutateDocument(page: Page, oldStr: string, newStr: string): Promise<void> {
-  const before = await getDocumentState(page);
+ *  path US1 uses (PATCH /api/documents/:documentId), and waits for the resulting revision to land
+ *  — this is how every conflict in this spec is forced: a real anchor mismatch against the live
+ *  document, never a scripted one. Mirrors us5.spec.ts's Primary-conflict step. */
+async function mutateDocument(
+  page: Page,
+  documentId: string,
+  oldStr: string,
+  newStr: string,
+): Promise<void> {
+  const before = await getDocumentState(page, documentId);
   const occurrences = before.content.split(oldStr).length - 1;
   expect(occurrences).toBe(1);
   const mutated = before.content.replace(oldStr, newStr);
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from: 0, to: before.content.length, insert: mutated }],
     },
   });
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -86,29 +95,33 @@ async function mutateDocument(page: Page, oldStr: string, newStr: string): Promi
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  *  isolation (paste screen appears) or after us1-us5 in the same `npm run test:e2e` process
  *  (document already exists) — mirrors us3.spec.ts/us5.spec.ts's `ensureFixtureDocument` (incl.
- *  its stale-`.toolbar h1`-selector fix — see us3.spec.ts). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ *  its stale-`.toolbar h1`-selector fix — see us3.spec.ts). Also fix: daf1db6 (multi-document
+ *  support) renested the singleton GET/PATCH /api/document under /api/documents/:documentId — this
+ *  now resolves and returns that id (mirroring the frontend document store's own `isActive`
+ *  convention) so callers can thread it through every other document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US6 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.clean)) return; // a previous US6 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.clean)) return documentId; // a previous US6 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
     },
   });
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -116,6 +129,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 async function waitIdle(page: Page): Promise<void> {
@@ -162,8 +176,9 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     // legitimately longer compound test than any single other US spec exercises in one go.
     test.setTimeout(90_000);
 
+    let documentId = '';
     await test.step('fixture document exists with known marker content', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     let branchName = '';
@@ -190,6 +205,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       // Advance the document elsewhere — a concurrent manual edit unrelated to this proposal's anchor.
       await mutateDocument(
         page,
+        documentId,
         MARKERS.cleanElsewhere,
         `${MARKERS.cleanElsewhere} CHANGED CONCURRENTLY`,
       );
@@ -218,7 +234,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         'anchors the not_found conflict scenario',
         'no longer matches the mutated scenario',
       );
-      await mutateDocument(page, MARKERS.notfound, mutatedNotfound);
+      await mutateDocument(page, documentId, MARKERS.notfound, mutatedNotfound);
 
       await originalRow.getByRole('button', { name: 'Accept' }).click();
       await expect(originalRow.locator('.status-badge')).toHaveText('superseded', {
@@ -264,8 +280,8 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await waitIdle(page);
 
       // Duplicate the anchored text elsewhere so it is no longer unique (ambiguous, not not_found).
-      const before = await getDocumentState(page);
-      await page.request.patch('/api/document', {
+      const before = await getDocumentState(page, documentId);
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: before.currentRevision,
           changes: [
@@ -278,7 +294,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         },
       });
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, {
+        .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
           timeout: 10_000,
           intervals: [300],
         })
@@ -332,7 +348,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         'drift twice before a replacement lands',
         'has drifted once (rev A)',
       );
-      await mutateDocument(page, MARKERS.chained, revA);
+      await mutateDocument(page, documentId, MARKERS.chained, revA);
       await edit1Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit1Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
@@ -351,7 +367,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
 
       // The replacement itself goes stale before the user gets to act on it.
       const revB = revA.replace('has drifted once (rev A)', 'has drifted twice (rev B)');
-      await mutateDocument(page, revA, revB);
+      await mutateDocument(page, documentId, revA, revB);
       await edit2Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit2Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
@@ -388,7 +404,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
         'drift three times to exhaust the budget',
         'has drifted (rev A)',
       );
-      await mutateDocument(page, MARKERS.exhaust, revA);
+      await mutateDocument(page, documentId, MARKERS.exhaust, revA);
       await edit1Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit1Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
@@ -403,7 +419,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       await waitIdle(page);
 
       const revB = revA.replace('has drifted (rev A)', 'has drifted again (rev B)');
-      await mutateDocument(page, revA, revB);
+      await mutateDocument(page, documentId, revA, revB);
       await edit2Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit2Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
       await waitIdle(page);
@@ -419,15 +435,15 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
 
       // Default max_replacement_attempts is 2 — this third conflict in the chain exhausts it.
       const revC = revB.replace('has drifted again (rev B)', 'has drifted a third time (rev C)');
-      await mutateDocument(page, revB, revC);
-      const contentBeforeExhaustedApply = (await getDocumentState(page)).content;
+      await mutateDocument(page, documentId, revB, revC);
+      const contentBeforeExhaustedApply = (await getDocumentState(page, documentId)).content;
       await edit3Row.getByRole('button', { name: 'Accept' }).click();
       await expect(edit3Row.locator('.status-badge')).toHaveText('superseded', { timeout: 10_000 });
 
       await expect(page.locator('.exhausted-banner')).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('.exhausted-banner')).toContainText(/could not produce an edit/i);
       // The document is unchanged by the exhausted apply attempt itself.
-      expect((await getDocumentState(page)).content).toBe(contentBeforeExhaustedApply);
+      expect((await getDocumentState(page, documentId)).content).toBe(contentBeforeExhaustedApply);
       await waitIdle(page);
 
       // The conversation stays usable — dismissing the banner and continuing to chat works.
@@ -442,18 +458,18 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     // 79c2d07: dropping a proposed edit now gates behind window.confirm — Playwright auto-dismisses
     // unhandled native dialogs, so accept it here (this test's only Drop click, further below).
     page.on('dialog', (dialog) => void dialog.accept());
-    await ensureFixtureDocument(page);
+    const documentId = await ensureFixtureDocument(page);
 
-    const beforeMarker = await getDocumentState(page);
+    const beforeMarker = await getDocumentState(page, documentId);
     const from = beforeMarker.content.length;
-    await page.request.patch('/api/document', {
+    await page.request.patch(`/api/documents/${documentId}`, {
       data: {
         baseRevision: beforeMarker.currentRevision,
         changes: [{ from, to: from, insert: `\n\n${MARKERS.restore}\n` }],
       },
     });
     await expect
-      .poll(async () => (await getDocumentState(page)).currentRevision, {
+      .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
         timeout: 10_000,
         intervals: [300],
       })
@@ -477,10 +493,10 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
     // `branchName` is now already de-duplicated (a26fbec — e.g. "US6 Body (2)" since this file's
     // first test already created a "US6 Body" branch from the same enclosing heading), so this
     // filter matches exactly this test's own fresh branch. `.at(-1)` is kept defensively (`GET
-    // /api/conversations` orders by `createdAt` ascending, per http-api.md) in case a name ever
-    // collides again for some other reason.
+    // /api/documents/:documentId/conversations` orders by `createdAt` ascending, per http-api.md)
+    // in case a name ever collides again for some other reason.
     const conversationsBefore = (await page.request
-      .get('/api/conversations')
+      .get(`/api/documents/${documentId}/conversations`)
       .then((r) => r.json())) as {
       conversations: { id: string; name: string }[];
     };
@@ -489,7 +505,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
       .at(-1);
     expect(conversation).toBeTruthy();
     const editsBefore = (await page.request
-      .get(`/api/conversations/${conversation!.id}/edits`)
+      .get(`/api/documents/${documentId}/conversations/${conversation!.id}/edits`)
       .then((r) => r.json())) as {
       stagedEdits: { id: string; status: string; summary: string }[];
     };
@@ -524,7 +540,7 @@ test.describe('US6 — Resolve conflicts when applying an out-of-date proposal',
 
     // The dry-run never altered the proposal: still pending, unchanged, in the API.
     const editsAfter = (await page.request
-      .get(`/api/conversations/${conversation!.id}/edits`)
+      .get(`/api/documents/${documentId}/conversations/${conversation!.id}/edits`)
       .then((r) => r.json())) as {
       stagedEdits: { id: string; status: string; summary: string }[];
     };

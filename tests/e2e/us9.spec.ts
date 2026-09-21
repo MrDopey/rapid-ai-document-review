@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { focusExclusively } from './test-utils.js';
+import { closeAllFocusedPanels, focusExclusively, getActiveDocumentId } from './test-utils.js';
 
 // Spec: specs/006-archivable-main-conversation (User Story 2, quickstart.md Scenario 2) —
 // "A branch survives its parent Main's archival". Mirrors us7.spec.ts's setup/assertion
@@ -15,8 +15,11 @@ const MARKERS = {
 
 const MARKER_BLOCK = ['', '', '## US9 Target', '', MARKERS.target, ''].join('\n');
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -33,17 +36,21 @@ type ConversationSummary = {
   isPrimary: boolean;
 };
 
-async function getConversations(request: APIRequestContext): Promise<ConversationSummary[]> {
-  const response = await request.get('/api/conversations');
+async function getConversations(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<ConversationSummary[]> {
+  const response = await request.get(`/api/documents/${documentId}/conversations`);
   const body = (await response.json()) as { conversations: ConversationSummary[] };
   return body.conversations;
 }
 
 async function findConversation(
   request: APIRequestContext,
+  documentId: string,
   name: string,
 ): Promise<ConversationSummary> {
-  const conversation = (await getConversations(request)).find((c) => c.name === name);
+  const conversation = (await getConversations(request, documentId)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
 }
@@ -51,22 +58,26 @@ async function findConversation(
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1-us8 in the same `npm run test:e2e` process
  * (document already exists) — mirrors us7.spec.ts's `ensureFixtureDocument` (incl. its
- * stale-`.toolbar h1`-selector fix — see us3.spec.ts). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ * stale-`.toolbar h1`-selector fix — see us3.spec.ts). Also fix: daf1db6 (multi-document support)
+ * renested the singleton GET/PATCH /api/document under /api/documents/:documentId — this now
+ * resolves and returns that id (mirroring the frontend document store's own `isActive`
+ * convention) so callers can thread it through every other document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US9 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.target)) return; // a previous US9 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.target)) return documentId; // a previous US9 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
@@ -74,7 +85,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -82,6 +93,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 async function waitIdle(page: Page): Promise<void> {
@@ -128,20 +140,21 @@ test.describe("US9 — Branches survive their parent Main's archival", () => {
     page,
   }) => {
     const branchName = 'US9 Target';
+    let documentId = '';
 
     await test.step('fixture document exists with known marker content', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     await test.step('branch off Main', async () => {
       await branchFromMarker(page, 'US9-MARKER', branchName);
     });
 
-    const branch = await findConversation(page.request, branchName);
+    const branch = await findConversation(page.request, documentId, branchName);
     // Captured before archiving, while exactly one "Main"-named conversation exists — archiving
     // creates a second one (the fresh replacement, also named "Main"), so every lookup below must
     // resolve this specific (soon-to-be-archived) conversation by id, never by name again.
-    const mainBeforeArchive = await findConversation(page.request, 'Main');
+    const mainBeforeArchive = await findConversation(page.request, documentId, 'Main');
 
     await test.step('the branch\'s box on the canvas shows its "Branched from Main" lineage link before archival', async () => {
       const box = page.locator(`.conversation-thread-box[data-conversation-id="${branch.id}"]`);
@@ -165,7 +178,7 @@ test.describe("US9 — Branches survive their parent Main's archival", () => {
     });
 
     await test.step('the now-archived Main shows the existing closed-conversation visual treatment (no dedicated "Archived Main" badge until Phase 5/US3)', async () => {
-      const conversations = await getConversations(page.request);
+      const conversations = await getConversations(page.request, documentId);
       const archivedMain = conversations.find((c) => c.id === mainBeforeArchive.id)!;
       expect(archivedMain.status).toBe('closed');
       const mainBox = page.locator(
@@ -230,18 +243,18 @@ const ROUND_MARKER_BLOCK = [
  *  separate from it (rather than folded into the same marker block) so this describe block's own
  *  fixture needs stay independent of the branch-survival test's above, and idempotent across reruns
  *  in the same shared document (mirrors `ensureFixtureDocument`'s own re-run guard). */
-async function ensureRoundMarkers(page: Page): Promise<void> {
-  const before = await getDocumentState(page);
+async function ensureRoundMarkers(page: Page, documentId: string): Promise<void> {
+  const before = await getDocumentState(page, documentId);
   if (before.content.includes(ROUND_MARKERS.roundOne)) return;
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: ROUND_MARKER_BLOCK }],
     },
   });
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -254,17 +267,19 @@ type ConversationWithCurrent = ConversationSummary & { isCurrentMain: boolean };
 
 async function getConversationsWithCurrent(
   request: APIRequestContext,
+  documentId: string,
 ): Promise<ConversationWithCurrent[]> {
-  const response = await request.get('/api/conversations');
+  const response = await request.get(`/api/documents/${documentId}/conversations`);
   const body = (await response.json()) as { conversations: ConversationWithCurrent[] };
   return body.conversations;
 }
 
 async function findWhere(
   request: APIRequestContext,
+  documentId: string,
   predicate: (c: ConversationWithCurrent) => boolean,
 ): Promise<ConversationWithCurrent> {
-  const conversation = (await getConversationsWithCurrent(request)).find(predicate);
+  const conversation = (await getConversationsWithCurrent(request, documentId)).find(predicate);
   if (!conversation) throw new Error('Conversation not found matching predicate');
   return conversation;
 }
@@ -274,8 +289,11 @@ type RevisionSummary = {
   conversationId: string | null;
   conversationName: string | null;
 };
-async function getRevisions(request: APIRequestContext): Promise<RevisionSummary[]> {
-  const response = await request.get('/api/revisions');
+async function getRevisions(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<RevisionSummary[]> {
+  const response = await request.get(`/api/documents/${documentId}/revisions`);
   const body = (await response.json()) as { revisions: RevisionSummary[] };
   return body.revisions;
 }
@@ -320,12 +338,16 @@ async function archiveOpenConversation(page: Page): Promise<void> {
  *  deliberately) — here it's incidental, not what this test is about, so wait it out first. */
 async function waitConversationIdle(
   request: APIRequestContext,
+  documentId: string,
   conversationId: string,
 ): Promise<void> {
   await expect
-    .poll(async () => (await findWhere(request, (c) => c.id === conversationId)).status, {
-      timeout: 15_000,
-    })
+    .poll(
+      async () => (await findWhere(request, documentId, (c) => c.id === conversationId)).status,
+      {
+        timeout: 15_000,
+      },
+    )
     .not.toBe('working');
 }
 
@@ -333,13 +355,20 @@ async function waitConversationIdle(
  *  that row's own Make Primary button directly (006-toolbar-reorg: per-row, not a single global
  *  button targeting whichever conversation is currently selected/focused). Waits out any in-flight
  *  seed turn first (see `waitConversationIdle` above) so no busy dialog is expected here. */
-async function ensurePrimary(page: Page, conversationId: string): Promise<void> {
-  const current = await findWhere(page.request, (c) => c.id === conversationId);
+async function ensurePrimary(
+  page: Page,
+  documentId: string,
+  conversationId: string,
+): Promise<void> {
+  const current = await findWhere(page.request, documentId, (c) => c.id === conversationId);
   if (current.isPrimary) return;
-  await waitConversationIdle(page.request, conversationId);
+  await waitConversationIdle(page.request, documentId, conversationId);
   await primaryButtonFor(page, conversationId).click();
   await expect
-    .poll(async () => (await findWhere(page.request, (c) => c.id === conversationId)).isPrimary)
+    .poll(
+      async () =>
+        (await findWhere(page.request, documentId, (c) => c.id === conversationId)).isPrimary,
+    )
     .toBe(true);
 }
 
@@ -347,22 +376,31 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
   test('archiving Main twice produces three individually-distinguishable Mains, and each auto-applied edit stays attributed to the specific (archived) Main that produced it', async ({
     page,
   }) => {
+    let documentId = '';
     await test.step("fixture document exists (may already, from the branch-survival test above), with this test's own round-specific marker content appended", async () => {
-      await ensureFixtureDocument(page);
-      await ensureRoundMarkers(page);
+      documentId = await ensureFixtureDocument(page);
+      await ensureRoundMarkers(page, documentId);
     });
 
     let mainId1 = '';
     let revisionOne = 0;
 
     await test.step("Round 1: designate the current Main Primary if it isn't already, then a proposed edit auto-applies immediately", async () => {
-      const main = await findWhere(page.request, (c) => c.kind === 'main' && c.isCurrentMain);
+      const main = await findWhere(
+        page.request,
+        documentId,
+        (c) => c.kind === 'main' && c.isCurrentMain,
+      );
       mainId1 = main.id;
 
+      // Fix: `ensurePrimary` clicks the canvas box's own `[data-action="primary"]` button, which
+      // sits behind `.conversation-detail-overlay` while any conversation's detail view is open —
+      // designate Primary first, while nothing is focused yet and the canvas is unoccluded, then
+      // open Main's detail view afterward for `sendToOpenMain`'s composer.
+      await ensurePrimary(page, documentId, mainId1);
       await focusExclusively(page, rowFor(page, mainId1), 'Main');
-      await ensurePrimary(page, mainId1);
 
-      const before = await getDocumentState(page);
+      const before = await getDocumentState(page, documentId);
       await sendToOpenMain(
         page,
         proposeEdit('US9 round 1 auto-apply', [
@@ -371,12 +409,14 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
       );
       await waitIdle(page);
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000 })
+        .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.currentRevision);
-      revisionOne = (await getDocumentState(page)).currentRevision;
+      revisionOne = (await getDocumentState(page, documentId)).currentRevision;
 
       // Attributed to Main (still current at this point) before any archiving happens.
-      const revisions = await getRevisions(page.request);
+      const revisions = await getRevisions(page.request, documentId);
       expect(revisions.find((r) => r.revision === revisionOne)?.conversationId).toBe(mainId1);
     });
 
@@ -389,15 +429,24 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
     let revisionTwo = 0;
 
     await test.step('Round 2: the replacement Main is NOT Primary (FR-007 — no auto-transfer), so it must be explicitly re-designated Primary before a second edit can auto-apply', async () => {
-      const main2 = await findWhere(page.request, (c) => c.kind === 'main' && c.isCurrentMain);
+      const main2 = await findWhere(
+        page.request,
+        documentId,
+        (c) => c.kind === 'main' && c.isCurrentMain,
+      );
       mainId2 = main2.id;
       expect(mainId2).not.toBe(mainId1);
       expect(main2.isPrimary).toBe(false);
 
+      // See Round 1's fix note above: designate Primary before opening any detail view — and
+      // first close whatever's still open (the just-archived mainId1's own panel, left open by
+      // `archiveOpenConversation`, which only dismisses the confirmation alertdialog, not the
+      // detail view itself) so it doesn't occlude mainId2's canvas button either.
+      await closeAllFocusedPanels(page);
+      await ensurePrimary(page, documentId, mainId2);
       await focusExclusively(page, rowFor(page, mainId2), 'Main');
-      await ensurePrimary(page, mainId2);
 
-      const before = await getDocumentState(page);
+      const before = await getDocumentState(page, documentId);
       await sendToOpenMain(
         page,
         proposeEdit('US9 round 2 auto-apply', [
@@ -406,11 +455,13 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
       );
       await waitIdle(page);
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, { timeout: 10_000 })
+        .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.currentRevision);
-      revisionTwo = (await getDocumentState(page)).currentRevision;
+      revisionTwo = (await getDocumentState(page, documentId)).currentRevision;
 
-      const revisions = await getRevisions(page.request);
+      const revisions = await getRevisions(page.request, documentId);
       expect(revisions.find((r) => r.revision === revisionTwo)?.conversationId).toBe(mainId2);
     });
 
@@ -420,7 +471,7 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
 
     let mainId3 = '';
     await test.step('Three distinct Main conversations now exist: two archived, one current (SC-004 setup)', async () => {
-      const mains = (await getConversationsWithCurrent(page.request)).filter(
+      const mains = (await getConversationsWithCurrent(page.request, documentId)).filter(
         (c) => c.kind === 'main',
       );
       const main3 = mains.find((c) => c.id !== mainId1 && c.id !== mainId2 && c.isCurrentMain);
@@ -460,7 +511,7 @@ test.describe('US9 — Archived Main: attribution and distinguishability across 
       // `conversationId`s are actually verifiable — both are named "Main" (T029's badge doesn't
       // exist yet, and even once it does, the *name* stays "Main" for all three), so a UI-only
       // check of the rendered text couldn't tell them apart by itself.
-      const revisions = await getRevisions(page.request);
+      const revisions = await getRevisions(page.request, documentId);
       const revOne = revisions.find((r) => r.revision === revisionOne);
       const revTwo = revisions.find((r) => r.revision === revisionTwo);
       expect(revOne?.conversationId).toBe(mainId1);

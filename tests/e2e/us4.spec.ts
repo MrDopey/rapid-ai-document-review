@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's READ_DOCUMENT_DIRECTIVE — a user
 // message beginning with this prefix causes FakeAgentSession to actually invoke the real
@@ -20,8 +21,11 @@ const MARKER_BLOCK = ['', '', '## US4 Body', '', MARKERS.original, ''].join('\n'
 
 const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -32,22 +36,26 @@ async function getDocumentState(page: Page): Promise<{ currentRevision: number; 
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1/us2/us3 in the same `npm run test:e2e` process
  * (document already exists) — mirrors us3.spec.ts's `ensureFixtureDocument` (incl. its
- * stale-`.toolbar h1`-selector fix — see that file). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ * stale-`.toolbar h1`-selector fix — see that file). Also fix: daf1db6 (multi-document support)
+ * renested the singleton GET/PATCH /api/document under /api/documents/:documentId — this now
+ * resolves and returns that id (mirroring the frontend document store's own `isActive` convention)
+ * so callers can thread it through every other document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US4 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.original)) return; // a previous US4 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.original)) return documentId; // a previous US4 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
@@ -59,7 +67,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   // could capture an older revision number whose snapshot predates this edit entirely (FR-017),
   // which would make the "old vs. refreshed context" assertions later in this spec meaningless.
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -67,6 +75,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 async function waitIdle(page: Page): Promise<void> {
@@ -81,9 +90,10 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
   }) => {
     let branchName = '';
     let branchRevision = 0;
+    let documentId = '';
 
     await test.step('fixture document exists with known marker content', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     await test.step('branch a conversation from a keyboard-selected passage (FR-011, FR-043a)', async () => {
@@ -123,10 +133,10 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
     });
 
     await test.step("record the branch's context revision (v17-equivalent — the value itself is irrelevant, only its relationship to later revisions is)", async () => {
-      const { currentRevision } = await getDocumentState(page);
+      const { currentRevision } = await getDocumentState(page, documentId);
       branchRevision = currentRevision;
 
-      const conversations = await page.request.get('/api/conversations');
+      const conversations = await page.request.get(`/api/documents/${documentId}/conversations`);
       const { conversations: list } = (await conversations.json()) as {
         conversations: { name: string; contextRevision: number; isStale: boolean }[];
       };
@@ -136,9 +146,9 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
     });
 
     await test.step('advance the document past the branch (v17 -> v20-equivalent): Main-side manual edit creates a new revision', async () => {
-      const { currentRevision, content } = await getDocumentState(page);
+      const { currentRevision, content } = await getDocumentState(page, documentId);
       const from = content.length;
-      await page.request.patch('/api/document', {
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: currentRevision,
           changes: [{ from, to: from, insert: `\n\n${MARKERS.advanced}` }],
@@ -148,7 +158,7 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       // The manual-edit debounce (RADR_BE_E2E_SEED_REVISION_DEBOUNCE_MS, playwright.config.ts) must fire
       // before document.currentRevision actually advances (FR-004).
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, {
+        .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
           timeout: 10_000,
           intervals: [300],
         })
@@ -159,7 +169,7 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       const row = page.locator('.conversation-row', { hasText: branchName });
       await expect(row.locator('.stale-badge')).toBeVisible({ timeout: 10_000 });
 
-      const conversations = await page.request.get('/api/conversations');
+      const conversations = await page.request.get(`/api/documents/${documentId}/conversations`);
       const { conversations: list } = (await conversations.json()) as {
         conversations: { name: string; contextRevision: number; isStale: boolean }[];
       };
@@ -191,7 +201,7 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
     let advancedRevision = 0;
 
     await test.step('Refresh + Send (Ctrl+Enter) -> the HUD shows the new revision and the answer reflects the newer document (FR-018, FR-043a)', async () => {
-      advancedRevision = (await getDocumentState(page)).currentRevision;
+      advancedRevision = (await getDocumentState(page, documentId)).currentRevision;
       expect(advancedRevision).toBeGreaterThan(branchRevision);
 
       const composer = page.getByLabel(`Message ${branchName}`);
@@ -214,7 +224,7 @@ test.describe('US4 — keep a conversation in sync with a changing document', ()
       const row = page.locator('.conversation-row', { hasText: branchName });
       await expect(row.locator('.stale-badge')).toHaveCount(0);
 
-      const conversations = await page.request.get('/api/conversations');
+      const conversations = await page.request.get(`/api/documents/${documentId}/conversations`);
       const { conversations: list } = (await conversations.json()) as {
         conversations: { name: string; contextRevision: number; isStale: boolean }[];
       };

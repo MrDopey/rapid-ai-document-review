@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { getActiveDocumentId } from './test-utils.js';
 
 const XSS_PAYLOAD = '<script>window.__xss_fired = true;</script>';
 const MERMAID_BLOCK =
@@ -87,8 +88,13 @@ test.describe('US1 — create and edit a document with tracked history', () => {
     });
 
     await test.step('an edit made while PATCH is failing is retried, not lost', async () => {
+      // daf1db6 (multi-document support) renested the manual-edit PATCH under
+      // /api/documents/:documentId — resolve the (sole, just-created) document's id the same way
+      // the frontend's own document store does (isActive, falling back to the first one).
+      const documentId = await getActiveDocumentId(page.request);
+
       let failuresLeft = 3;
-      await page.route('**/api/document', async (route) => {
+      await page.route(`**/api/documents/${documentId}`, async (route) => {
         if (route.request().method() !== 'PATCH') return route.continue();
         if (failuresLeft > 0) {
           failuresLeft -= 1;
@@ -104,7 +110,7 @@ test.describe('US1 — create and edit a document with tracked history', () => {
       await expect
         .poll(
           async () => {
-            const res = await page.request.get('/api/document');
+            const res = await page.request.get(`/api/documents/${documentId}`);
             const body = await res.json();
             return body.content as string;
           },
@@ -112,7 +118,7 @@ test.describe('US1 — create and edit a document with tracked history', () => {
         )
         .toContain('RETRY-MARKER');
 
-      await page.unroute('**/api/document');
+      await page.unroute(`**/api/documents/${documentId}`);
     });
 
     await test.step('debounce creates a manual revision after inactivity', async () => {

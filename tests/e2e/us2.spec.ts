@@ -59,8 +59,10 @@ test.describe('US2 — ask the main conversation about the document', () => {
 
       expect(Date.now() - sc001Start).toBeLessThan(15_000);
 
-      // thinkingVisible defaults to false: no reasoning block should have been rendered.
-      await expect(assistantBubble.locator('details.reasoning')).toHaveCount(0);
+      // f6a2f48 (always-on agent activity logging): the reasoning block is now always in the DOM
+      // once a message has reasoning content — only its `open` attribute is gated on
+      // `thinkingVisible`. Defaults to false, so it exists but stays collapsed/closed.
+      await expect(assistantBubble.locator('details.reasoning')).not.toHaveAttribute('open');
 
       // Wait for the turn to fully settle before the next step sends another message — Pi
       // sessions (real or fake) reject an overlapping prompt() without steer/followUp, same as
@@ -97,7 +99,9 @@ test.describe('US2 — ask the main conversation about the document', () => {
           timeout: 15_000,
         },
       );
-      await expect(assistantBubble.locator('details.reasoning')).toHaveCount(0);
+      // Same as above: the block itself is always in the DOM once reasoning content exists —
+      // disabling "Show reasoning" only clears the `open` attribute, not the element.
+      await expect(assistantBubble.locator('details.reasoning')).not.toHaveAttribute('open');
     });
   });
 });

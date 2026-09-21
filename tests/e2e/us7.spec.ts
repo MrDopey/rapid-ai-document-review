@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { focusExclusively } from './test-utils.js';
+import { focusExclusively, getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us5.spec.ts for the same convention. US7's fold-summary flow needs no directive of its own:
@@ -32,8 +32,11 @@ const MARKER_BLOCK = [
   '',
 ].join('\n');
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -50,26 +53,31 @@ type ConversationSummary = {
   isPrimary: boolean;
 };
 
-async function getConversations(request: APIRequestContext): Promise<ConversationSummary[]> {
-  const response = await request.get('/api/conversations');
+async function getConversations(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<ConversationSummary[]> {
+  const response = await request.get(`/api/documents/${documentId}/conversations`);
   const body = (await response.json()) as { conversations: ConversationSummary[] };
   return body.conversations;
 }
 
 async function findConversation(
   request: APIRequestContext,
+  documentId: string,
   name: string,
 ): Promise<ConversationSummary> {
-  const conversation = (await getConversations(request)).find((c) => c.name === name);
+  const conversation = (await getConversations(request, documentId)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
 }
 
 async function getConversationDetail(
   request: APIRequestContext,
+  documentId: string,
   id: string,
 ): Promise<{ conversation: ConversationSummary & { readOnly?: boolean }; messages: unknown[] }> {
-  const response = await request.get(`/api/conversations/${id}`);
+  const response = await request.get(`/api/documents/${documentId}/conversations/${id}`);
   return (await response.json()) as {
     conversation: ConversationSummary & { readOnly?: boolean };
     messages: unknown[];
@@ -79,22 +87,26 @@ async function getConversationDetail(
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1-us6 in the same `npm run test:e2e` process
  * (document already exists) — mirrors us3.spec.ts/us5.spec.ts's `ensureFixtureDocument` (incl.
- * its stale-`.toolbar h1`-selector fix — see us3.spec.ts). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ * its stale-`.toolbar h1`-selector fix — see us3.spec.ts). Also fix: daf1db6 (multi-document
+ * support) renested the singleton GET/PATCH /api/document under /api/documents/:documentId — this
+ * now resolves and returns that id (mirroring the frontend document store's own `isActive`
+ * convention) so callers can thread it through every other document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US7 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.foldTarget)) return; // a previous US7 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.foldTarget)) return documentId; // a previous US7 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
@@ -102,7 +114,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -110,6 +122,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 async function waitIdle(page: Page): Promise<void> {
@@ -163,9 +176,10 @@ test.describe('US7 — Review closed conversations', () => {
     page,
   }) => {
     let branchName = '';
+    let documentId = '';
 
     await test.step('fixture document exists with known marker content', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     await test.step('branch a conversation to close with a fold summary (FR-011)', async () => {
@@ -258,7 +272,8 @@ test.describe('US7 — Review closed conversations', () => {
     await test.step('3. requesting a review produces an independent conversation without altering the closed one (FR-036)', async () => {
       const before = await getConversationDetail(
         page.request,
-        (await findConversation(page.request, branchName)).id,
+        documentId,
+        (await findConversation(page.request, documentId, branchName)).id,
       );
       const messageCountBefore = before.messages.length;
 
@@ -269,7 +284,7 @@ test.describe('US7 — Review closed conversations', () => {
         timeout: 10_000,
       });
 
-      const reviewConversation = await findConversation(page.request, reviewName);
+      const reviewConversation = await findConversation(page.request, documentId, reviewName);
       expect(reviewConversation.kind).toBe('review');
 
       // The review conversation is independently usable: it can be sent a message like any other.
@@ -287,8 +302,8 @@ test.describe('US7 — Review closed conversations', () => {
       await waitIdle(page);
 
       // The reviewed (closed) conversation is byte-identical: same message count, still closed.
-      const closedId = (await findConversation(page.request, branchName)).id;
-      const after = await getConversationDetail(page.request, closedId);
+      const closedId = (await findConversation(page.request, documentId, branchName)).id;
+      const after = await getConversationDetail(page.request, documentId, closedId);
       expect(after.messages.length).toBe(messageCountBefore);
       expect(after.conversation.status).toBe('closed');
     });
@@ -297,24 +312,27 @@ test.describe('US7 — Review closed conversations', () => {
   test('4. closing a parent conversation leaves its still-open child fully usable (FR-035a)', async ({
     page,
   }) => {
-    await ensureFixtureDocument(page);
+    const documentId = await ensureFixtureDocument(page);
 
     await test.step('branch a parent conversation, then branch a child from it', async () => {
       await branchFromMarker(page, 'US7-MARKER-PARENT', 'US7 Parent Target');
     });
 
-    const parent = await findConversation(page.request, 'US7 Parent Target');
+    const parent = await findConversation(page.request, documentId, 'US7 Parent Target');
 
-    const branchResponse = await page.request.post('/api/conversations', {
+    const branchResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
       data: { parentConversationId: parent.id, name: 'US7 Open Child' },
     });
     expect(branchResponse.ok()).toBe(true);
     const child = (await branchResponse.json()) as ConversationSummary;
     expect(child.parentId).toBe(parent.id);
     await expect
-      .poll(async () => (await findConversation(page.request, 'US7 Open Child')).status, {
-        timeout: 10_000,
-      })
+      .poll(
+        async () => (await findConversation(page.request, documentId, 'US7 Open Child')).status,
+        {
+          timeout: 10_000,
+        },
+      )
       .not.toBe('working');
 
     await test.step('close the parent (no fold needed for this scenario)', async () => {
@@ -333,7 +351,7 @@ test.describe('US7 — Review closed conversations', () => {
     });
 
     await test.step('the child remains open, unaffected, and fully usable: send, branch (FR-035a)', async () => {
-      const childAfter = await findConversation(page.request, 'US7 Open Child');
+      const childAfter = await findConversation(page.request, documentId, 'US7 Open Child');
       expect(childAfter.status).not.toBe('closed');
       expect(childAfter.parentId).toBe(parent.id); // historical branch link retained
 
@@ -349,9 +367,12 @@ test.describe('US7 — Review closed conversations', () => {
 
       // Still able to branch further (FR-013/FR-035a: only the closed parent itself is
       // unbranchable, the still-open child is not restricted by its parent's closure).
-      const grandchildResponse = await page.request.post('/api/conversations', {
-        data: { parentConversationId: child.id, name: 'US7 Grandchild' },
-      });
+      const grandchildResponse = await page.request.post(
+        `/api/documents/${documentId}/conversations`,
+        {
+          data: { parentConversationId: child.id, name: 'US7 Grandchild' },
+        },
+      );
       expect(grandchildResponse.ok()).toBe(true);
       const grandchild = (await grandchildResponse.json()) as ConversationSummary;
       expect(grandchild.parentId).toBe(child.id);

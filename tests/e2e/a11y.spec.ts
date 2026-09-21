@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { focusExclusively } from './test-utils.js';
+import { focusExclusively, getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directives (see us3/us5.spec.ts for the
 // same convention) — deterministic, credential-free ways to drive a proposed edit or a failed turn
@@ -30,18 +30,22 @@ interface ConversationSummary {
   status: string;
 }
 
-async function getConversations(page: Page): Promise<ConversationSummary[]> {
-  const res = await page.request.get('/api/conversations');
+async function getConversations(page: Page, documentId: string): Promise<ConversationSummary[]> {
+  const res = await page.request.get(`/api/documents/${documentId}/conversations`);
   const body = (await res.json()) as { conversations: ConversationSummary[] };
   return body.conversations;
 }
 
-async function waitIdleApi(page: Page, conversationId: string): Promise<void> {
+async function waitIdleApi(page: Page, documentId: string, conversationId: string): Promise<void> {
   await expect
-    .poll(async () => (await getConversations(page)).find((c) => c.id === conversationId)?.status, {
-      timeout: 15_000,
-      intervals: [200],
-    })
+    .poll(
+      async () =>
+        (await getConversations(page, documentId)).find((c) => c.id === conversationId)?.status,
+      {
+        timeout: 15_000,
+        intervals: [200],
+      },
+    )
     .not.toBe('working');
 }
 
@@ -354,12 +358,16 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         // extensions are registered — everything from here on (edit, branch, propose, preview,
         // accept) still exercises the real UI keyboard-only.
         await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
-        const docRes = await page.request.get('/api/document');
+        // daf1db6 (multi-document support) renested the singleton GET/PATCH /api/document under
+        // /api/documents/:documentId — resolve the (sole) document's id first, mirroring the
+        // frontend document store's own `isActive` convention.
+        const documentId = await getActiveDocumentId(page.request);
+        const docRes = await page.request.get(`/api/documents/${documentId}`);
         const docBody = (await docRes.json()) as {
           document: { currentRevision: number };
           content: string;
         };
-        await page.request.patch('/api/document', {
+        await page.request.patch(`/api/documents/${documentId}`, {
           data: {
             baseRevision: docBody.document.currentRevision,
             changes: [
@@ -466,57 +474,70 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     await page.goto('/');
     await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
 
-    const main = (await getConversations(page)).find((c) => c.kind === 'main');
+    // daf1db6 (multi-document support) renested the singleton GET/PATCH /api/document and the
+    // bare /api/conversations under /api/documents/:documentId/... — resolve the (sole) document's
+    // id first, mirroring the frontend document store's own `isActive` convention.
+    const documentId = await getActiveDocumentId(page.request);
+    const main = (await getConversations(page, documentId)).find((c) => c.kind === 'main');
     if (!main)
       throw new Error(
         'expected a Main conversation to already exist (previous test creates the document)',
       );
 
     await test.step('agent_started + message_completed (polite)', async () => {
-      const res = await page.request.post(`/api/conversations/${main.id}/send`, {
-        data: { message: 'Hello from the a11y live-region test.' },
-      });
+      const res = await page.request.post(
+        `/api/documents/${documentId}/conversations/${main.id}/send`,
+        {
+          data: { message: 'Hello from the a11y live-region test.' },
+        },
+      );
       expect(res.ok()).toBe(true);
       await expectAnnounced(page, 'polite', 'the agent started responding');
       await expectAnnounced(page, 'polite', 'response completed');
-      await waitIdleApi(page, main.id);
+      await waitIdleApi(page, documentId, main.id);
     });
 
     await test.step('staged_edit_created (polite)', async () => {
-      const res = await page.request.post(`/api/conversations/${main.id}/send`, {
-        data: {
-          message: proposeEdit('A11y live-region proposal', [
-            { old_string: MARKERS.appended, new_string: `${MARKERS.appended}-2` },
-          ]),
+      const res = await page.request.post(
+        `/api/documents/${documentId}/conversations/${main.id}/send`,
+        {
+          data: {
+            message: proposeEdit('A11y live-region proposal', [
+              { old_string: MARKERS.appended, new_string: `${MARKERS.appended}-2` },
+            ]),
+          },
         },
-      });
+      );
       expect(res.ok()).toBe(true);
       await expectAnnounced(page, 'polite', 'new proposed edit');
-      await waitIdleApi(page, main.id);
+      await waitIdleApi(page, documentId, main.id);
     });
 
     await test.step('agent_error (assertive)', async () => {
-      const res = await page.request.post(`/api/conversations/${main.id}/send`, {
-        data: { message: ERROR_DIRECTIVE },
-      });
+      const res = await page.request.post(
+        `/api/documents/${documentId}/conversations/${main.id}/send`,
+        {
+          data: { message: ERROR_DIRECTIVE },
+        },
+      );
       expect(res.ok()).toBe(true);
       await expectAnnounced(page, 'assertive', 'agent error');
     });
 
     await test.step('conversation_stale (polite)', async () => {
-      const branchRes = await page.request.post('/api/conversations', {
+      const branchRes = await page.request.post(`/api/documents/${documentId}/conversations`, {
         data: { parentConversationId: main.id, name: 'A11y Stale Branch' },
       });
       expect(branchRes.ok()).toBe(true);
       const branch = (await branchRes.json()) as { id: string };
 
-      const docRes = await page.request.get('/api/document');
+      const docRes = await page.request.get(`/api/documents/${documentId}`);
       const docBody = (await docRes.json()) as {
         document: { currentRevision: number };
         content: string;
       };
       const from = docBody.content.length;
-      await page.request.patch('/api/document', {
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: docBody.document.currentRevision,
           changes: [{ from, to: from, insert: '\n\nA11Y-STALE-ADVANCE' }],
@@ -525,7 +546,9 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
 
       await expect
         .poll(
-          async () => (await getConversations(page)).find((c) => c.id === branch.id) !== undefined,
+          async () =>
+            (await getConversations(page, documentId)).find((c) => c.id === branch.id) !==
+            undefined,
           { timeout: 5_000 },
         )
         .toBe(true);
@@ -538,6 +561,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
   }) => {
     await page.goto('/');
     await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
+    const documentId = await getActiveDocumentId(page.request);
 
     async function runAuditAndAssert(viewName: string, scheme: 'light' | 'dark'): Promise<void> {
       const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);
@@ -558,12 +582,12 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       // one against a brand-new anchor so this step reliably exercises the tabbed (reconcilable)
       // layout rather than the conflict-banner one.
       const anchor = 'A11Y-AUDIT-DIFF-ANCHOR';
-      const docRes = await page.request.get('/api/document');
+      const docRes = await page.request.get(`/api/documents/${documentId}`);
       const docBody = (await docRes.json()) as {
         document: { currentRevision: number };
         content: string;
       };
-      await page.request.patch('/api/document', {
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: docBody.document.currentRevision,
           changes: [
@@ -572,17 +596,20 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
         },
       });
 
-      const main = (await getConversations(page)).find((c) => c.kind === 'main');
+      const main = (await getConversations(page, documentId)).find((c) => c.kind === 'main');
       if (!main) throw new Error('expected a Main conversation to already exist');
-      const res = await page.request.post(`/api/conversations/${main.id}/send`, {
-        data: {
-          message: proposeEdit('A11y audit fixture proposal', [
-            { old_string: anchor, new_string: `${anchor}-REVISED` },
-          ]),
+      const res = await page.request.post(
+        `/api/documents/${documentId}/conversations/${main.id}/send`,
+        {
+          data: {
+            message: proposeEdit('A11y audit fixture proposal', [
+              { old_string: anchor, new_string: `${anchor}-REVISED` },
+            ]),
+          },
         },
-      });
+      );
       expect(res.ok()).toBe(true);
-      await waitIdleApi(page, main.id);
+      await waitIdleApi(page, documentId, main.id);
 
       // 005-canvas-conversation-threads: `EditsList.vue` (and its `.edit-row`s) only renders
       // inside `ConversationView.vue`, which — since the canvas restructure replaced the old
@@ -677,6 +704,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       await page.getByRole('button', { name: 'Start reviewing' }).click();
     }
     await expect(page.locator('.preview-pane')).toBeVisible({ timeout: 10_000 });
+    const documentId = await getActiveDocumentId(page.request);
 
     await test.step('manual WCAG audit of the canvas surface (roles/names + contrast)', async () => {
       const { roleViolations, contrastViolations } = await page.evaluate(runManualA11yAudit);
@@ -688,7 +716,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       const canvas = page.locator('.document-canvas');
       // The canvas has no content taller than the viewport by default — pad it so there is
       // somewhere for keyboard panning to actually move to.
-      const docRes = await page.request.get('/api/document');
+      const docRes = await page.request.get(`/api/documents/${documentId}`);
       const docBody = (await docRes.json()) as {
         document: { currentRevision: number };
         content: string;
@@ -696,7 +724,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
       const filler = Array(60)
         .fill('A11Y-CANVAS-PAN-FILLER line of text to force real scroll height.')
         .join('\n\n');
-      await page.request.patch('/api/document', {
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: docBody.document.currentRevision,
           changes: [
@@ -718,7 +746,7 @@ test.describe('a11y — WCAG 2.2 AA (FR-043a/b/c/d)', () => {
     });
 
     await test.step('keyboard HUD navigation reaches a conversation without a pointer', async () => {
-      const main = (await getConversations(page)).find((c) => c.kind === 'main');
+      const main = (await getConversations(page, documentId)).find((c) => c.kind === 'main');
       if (!main) throw new Error('expected a Main conversation to already exist');
       const titleButton = page.locator(
         `.hud-panel .conversation-row[data-conversation-id="${main.id}"] .conversation-title`,

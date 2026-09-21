@@ -111,8 +111,12 @@ function describeProposal(
   return null;
 }
 
+// Fix: daf1db6 (multi-document support) renested every other document-scoped route under
+// /api/documents/:documentId/... but missed this one — the old singleton /api/document/export
+// path 404s now, silently breaking the Download link. Mirrors store.exportRevision's own use of
+// store.activeDocumentId (document.ts) for the same endpoint family.
 function exportUrl(revision: number): string {
-  return `/api/document/export?revision=${revision}&download=1`;
+  return `/api/documents/${store.activeDocumentId}/export?revision=${revision}&download=1`;
 }
 
 async function onCopy(revision: number): Promise<void> {

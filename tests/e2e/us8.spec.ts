@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { getActiveDocumentId } from './test-utils.js';
 
 // Spec: specs/005-canvas-conversation-threads (User Story 1, FR-001-FR-004, SC-001),
 // quickstart.md Scenario 1. Mirrors us7.spec.ts's API-first setup/assertion conventions.
@@ -46,8 +47,11 @@ const MARKER_BLOCK = [
   '',
 ].join('\n');
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -63,17 +67,21 @@ type ConversationSummary = {
   branchDepth: number;
 };
 
-async function getConversations(request: APIRequestContext): Promise<ConversationSummary[]> {
-  const response = await request.get('/api/conversations');
+async function getConversations(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<ConversationSummary[]> {
+  const response = await request.get(`/api/documents/${documentId}/conversations`);
   const body = (await response.json()) as { conversations: ConversationSummary[] };
   return body.conversations;
 }
 
 async function findConversation(
   request: APIRequestContext,
+  documentId: string,
   name: string,
 ): Promise<ConversationSummary> {
-  const conversation = (await getConversations(request)).find((c) => c.name === name);
+  const conversation = (await getConversations(request, documentId)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
 }
@@ -82,31 +90,39 @@ type MessageSummary = { id: string; role: 'user' | 'assistant'; text: string };
 
 async function getConversationMessages(
   request: APIRequestContext,
+  documentId: string,
   conversationId: string,
 ): Promise<MessageSummary[]> {
-  const response = await request.get(`/api/conversations/${conversationId}`);
+  const response = await request.get(
+    `/api/documents/${documentId}/conversations/${conversationId}`,
+  );
   const body = (await response.json()) as { messages: MessageSummary[] };
   return body.messages;
 }
 
 /** Mirrors us7.spec.ts's ensureFixtureDocument — works whether this spec runs in isolation (paste
  *  screen appears) or after earlier usN specs in the same `npm run test:e2e` process (document
- *  already exists). Also mirrors its stale-`.toolbar h1`-selector fix (see us3.spec.ts). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ *  already exists). Also mirrors its stale-`.toolbar h1`-selector fix (see us3.spec.ts), and its
+ *  fix for daf1db6 (multi-document support) renesting the singleton GET/PATCH /api/document under
+ *  /api/documents/:documentId: this now resolves and returns that id (mirroring the frontend
+ *  document store's own `isActive` convention) so callers can thread it through every other
+ *  document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US8 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.first)) return; // a previous US8 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.first)) return documentId; // a previous US8 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
@@ -114,7 +130,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -122,6 +138,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 /** Selects the line containing `markerText` via keyboard-only navigation (mirrors
@@ -152,8 +169,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
   test('document floats on a canvas and highlight-anchored conversations colocate at their anchor height, in document order (FR-001-FR-004, SC-001)', async ({
     page,
   }) => {
+    let documentId = '';
     await test.step('fixture document exists with two markers at different heights', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     await test.step('the document renders inside a pannable canvas with no competing inner scrollbar', async () => {
@@ -166,7 +184,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('Main renders in column 0, anchored to the top of the document', async () => {
-      const main = await findConversation(page.request, 'Main');
+      const main = await findConversation(page.request, documentId, 'Main');
       await expect(
         page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`),
       ).toBeVisible();
@@ -176,15 +194,17 @@ test.describe('US8 — Spatial canvas colocation', () => {
     let firstBoxTop = 0;
 
     await test.step('highlighting a passage and starting a conversation colocates its box at approximately the highlight height, above the Main box is preserved and it lands in column 0', async () => {
-      const before = await getConversations(page.request);
+      const before = await getConversations(page.request, documentId);
 
       await branchFromMarker(page, 'US8-MARKER-FIRST');
 
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
 
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const branch = after.find((c) => !before.some((b) => b.id === c.id));
       expect(branch).toBeTruthy();
       expect(branch!.branchDepth).toBe(1); // a direct branch of Main
@@ -203,7 +223,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(Math.abs(lineBox!.y - threadBox!.y)).toBeLessThan(250);
       firstBoxTop = threadBox!.y;
 
-      const main = await findConversation(page.request, 'Main');
+      const main = await findConversation(page.request, documentId, 'Main');
       const mainBoxBox = await page
         .locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`)
         .boundingBox();
@@ -212,15 +232,17 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('a second, lower highlight produces a box further down than the first, preserving document order (SC-001)', async () => {
-      const before = await getConversations(page.request);
+      const before = await getConversations(page.request, documentId);
 
       await branchFromMarker(page, 'US8-MARKER-SECOND');
 
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
 
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const secondBranch = after.find((c) => !before.some((b) => b.id === c.id));
       expect(secondBranch).toBeTruthy();
 
@@ -237,18 +259,21 @@ test.describe('US8 — Spatial canvas colocation', () => {
   test('branches render one column further out per depth, siblings stack without overlapping, and messages stay isolated (US2, FR-006/FR-007)', async ({
     page,
   }) => {
+    let documentId = '';
     await test.step('fixture document exists', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     let parentId = '';
     await test.step('a highlight-anchored branch of Main is a direct branch (branchDepth 1, column 0)', async () => {
-      const before = await getConversations(page.request);
+      const before = await getConversations(page.request, documentId);
       await branchFromMarker(page, 'US8-MARKER-FIRST');
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const branch = after.find((c) => !before.some((b) => b.id === c.id));
       expect(branch).toBeTruthy();
       expect(branch!.branchDepth).toBe(1);
@@ -269,12 +294,20 @@ test.describe('US8 — Spatial canvas colocation', () => {
       const parentBoundingBox = await parentBox.boundingBox();
       expect(parentBoundingBox).toBeTruthy();
 
-      const before = await getConversations(page.request);
+      const before = await getConversations(page.request, documentId);
       await parentBox.getByRole('button', { name: 'Branch this conversation' }).click();
+      // `onBranchCreated` (App.vue) auto-focuses every new branch, including ones created via
+      // this sidebar button — left open deliberately (not closed): closing an untouched, empty
+      // branch's panel is also the trigger for `discardIfEmpty` (composables/focusPanelState.ts),
+      // which would delete this brand-new zero-message branch outright before this step even
+      // finishes reading its own box. `boundingBox()` below measures the canvas box's real layout
+      // position fine regardless of whether the overlay currently occludes it visually.
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const child = after.find((c) => !before.some((b) => b.id === c.id));
       expect(child).toBeTruthy();
       expect(child!.branchDepth).toBe(2);
@@ -296,15 +329,24 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('branching the same parent again produces a sibling that stacks below the first, in the same column, without overlapping (FR-007)', async () => {
-      const parentBox = page.locator(
-        `.conversation-thread-box[data-conversation-id="${parentId}"]`,
-      );
-      const before = await getConversations(page.request);
-      await parentBox.getByRole('button', { name: 'Branch this conversation' }).click();
+      // The previous step's branch is still open (deliberately never closed — see its own note),
+      // occluding the canvas's own "Branch this conversation" buttons behind
+      // `.conversation-detail-overlay`. Create this sibling directly via the same API the button
+      // itself calls (mirrors this file's own "HUD ordering" test's established convention for
+      // building canvas fixtures without a occluded/flaky UI click) — this step is about the
+      // resulting *layout* (siblings stacking, not overlapping), not the click mechanic itself,
+      // which the previous step already exercised via real UI.
+      const before = await getConversations(page.request, documentId);
+      const branchResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
+        data: { parentConversationId: parentId },
+      });
+      expect(branchResponse.ok()).toBeTruthy();
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const sibling = after.find((c) => !before.some((b) => b.id === c.id));
       expect(sibling).toBeTruthy();
       expect(sibling!.branchDepth).toBe(2);
@@ -323,15 +365,19 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('branching a branch itself lands two columns out from the document (branchDepth 3, column 2)', async () => {
-      const childBox = page.locator(
-        `.conversation-thread-box[data-conversation-id="${firstChildId}"]`,
-      );
-      const before = await getConversations(page.request);
-      await childBox.getByRole('button', { name: 'Branch this conversation' }).click();
+      // Same fix as the previous step: created directly via the API rather than clicking the
+      // (still-occluded) canvas button.
+      const before = await getConversations(page.request, documentId);
+      const branchResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
+        data: { parentConversationId: firstChildId },
+      });
+      expect(branchResponse.ok()).toBeTruthy();
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const grandchild = after.find((c) => !before.some((b) => b.id === c.id));
       expect(grandchild).toBeTruthy();
       expect(grandchild!.branchDepth).toBe(3);
@@ -347,11 +393,17 @@ test.describe('US8 — Spatial canvas colocation', () => {
     });
 
     await test.step('messages sent into the parent and its branch stay isolated to their own conversation', async () => {
-      async function sendMessageVia(conversationId: string, text: string): Promise<void> {
-        const box = page.locator(
-          `.conversation-thread-box[data-conversation-id="${conversationId}"]`,
-        );
-        await box.getByRole('button', { name: 'Focus' }).click();
+      async function sendMessageVia(
+        conversationId: string,
+        text: string,
+        openFirst: boolean,
+      ): Promise<void> {
+        if (openFirst) {
+          const box = page.locator(
+            `.conversation-thread-box[data-conversation-id="${conversationId}"]`,
+          );
+          await box.getByRole('button', { name: 'Focus' }).click();
+        }
         // US4/T031: the per-box detail overlay was consolidated into a single, app-level dialog
         // (`.conversation-detail-dialog` in App.vue) so opening one conversation doesn't block
         // clicking a different HUD row — see App.vue's `selectedConversationId`.
@@ -366,8 +418,16 @@ test.describe('US8 — Spatial canvas colocation', () => {
 
       const parentOnlyText = 'US8-ISOLATION-PARENT-ONLY message';
       const childOnlyText = 'US8-ISOLATION-CHILD-ONLY message';
-      await sendMessageVia(parentId, parentOnlyText);
-      await sendMessageVia(firstChildId, childOnlyText);
+      // `firstChildId`'s own detail panel is still open from the earlier "branching that
+      // conversation" step (deliberately left open there — see its own note on `discardIfEmpty`).
+      // Send into it directly (`openFirst: false`) rather than clicking its box's Focus button,
+      // which would otherwise *toggle it closed* instead of opening it — and, being still empty
+      // at that instant (no message sent yet), that close would discard it outright. Sending
+      // first, then closing via the dialog's own button (now safe — it has a message), leaves
+      // exactly zero panels open before `parentId`'s own open/send/close cycle, keeping the bare
+      // `.conversation-detail-dialog` locator inside `sendMessageVia` unambiguous throughout.
+      await sendMessageVia(firstChildId, childOnlyText, false);
+      await sendMessageVia(parentId, parentOnlyText, true);
 
       // `.message-bubble[data-role="user"]` (not just `.message-bubble`) — the assistant's
       // deterministic `FakeAgentSession` reply echoes the sent text back inside its own message
@@ -401,8 +461,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
   test('per-message expand/collapse and a conversation-level bulk toggle (US3, FR-008/FR-009)', async ({
     page,
   }) => {
+    let documentId = '';
     await test.step('fixture document exists', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     // Long enough (well over MessageBubble.vue's 160px clamp) that both this user message and the
@@ -415,7 +476,7 @@ test.describe('US8 — Spatial canvas colocation', () => {
 
     let mainId = '';
     await test.step('locate Main and send two long messages into it', async () => {
-      const main = await findConversation(page.request, 'Main');
+      const main = await findConversation(page.request, documentId, 'Main');
       mainId = main.id;
       const box = page.locator(`.conversation-thread-box[data-conversation-id="${mainId}"]`);
       await box.getByRole('button', { name: 'Focus' }).click();
@@ -486,8 +547,9 @@ test.describe('US8 — Spatial canvas colocation', () => {
   test('HUD ordering, click-to-scroll, and staying visible while panning (US4, FR-010)', async ({
     page,
   }) => {
+    let documentId = '';
     await test.step('fixture document exists', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     let mainId = '';
@@ -505,16 +567,16 @@ test.describe('US8 — Spatial canvas colocation', () => {
       // the fixture conversations directly via the same API `branchFromMarker` ultimately calls
       // avoids that scale-dependent flakiness while still exercising genuine UI interaction for
       // the actual behavior under test below.
-      const main = await findConversation(page.request, 'Main');
+      const main = await findConversation(page.request, documentId, 'Main');
       mainId = main.id;
 
-      const { content } = await getDocumentState(page);
+      const { content } = await getDocumentState(page, documentId);
       const firstOffset = content.indexOf(MARKERS.first);
       const secondOffset = content.indexOf(MARKERS.second);
       expect(firstOffset).toBeGreaterThanOrEqual(0);
       expect(secondOffset).toBeGreaterThanOrEqual(0);
 
-      const firstResponse = await page.request.post('/api/conversations', {
+      const firstResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
         data: {
           parentConversationId: mainId,
           selection: { from: firstOffset, to: firstOffset + MARKERS.first.length },
@@ -523,13 +585,13 @@ test.describe('US8 — Spatial canvas colocation', () => {
       expect(firstResponse.ok()).toBeTruthy();
       firstHighlightId = ((await firstResponse.json()) as { id: string }).id;
 
-      const branchResponse = await page.request.post('/api/conversations', {
+      const branchResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
         data: { parentConversationId: firstHighlightId },
       });
       expect(branchResponse.ok()).toBeTruthy();
       branchOfFirstId = ((await branchResponse.json()) as { id: string }).id;
 
-      const secondResponse = await page.request.post('/api/conversations', {
+      const secondResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
         data: {
           parentConversationId: mainId,
           selection: { from: secondOffset, to: secondOffset + MARKERS.second.length },
@@ -623,11 +685,12 @@ test.describe('US8 — Spatial canvas colocation', () => {
   test("branching a conversation creates an empty placeholder with no auto-sent seed message, showing the parent's last two messages as read-only context (canvas-conversation-threads, NEW behavior)", async ({
     page,
   }) => {
+    let documentId = '';
     await test.step('fixture document exists', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
-    const main = await findConversation(page.request, 'Main');
+    const main = await findConversation(page.request, documentId, 'Main');
     const parentLastUserText = 'US8-CONTINUITY-PARENT-USER: what do you make of this document?';
 
     await test.step('send a real message into Main so it has genuine history to borrow from', async () => {
@@ -646,20 +709,26 @@ test.describe('US8 — Spatial canvas colocation', () => {
       await dialog.getByRole('button', { name: 'Close full view' }).click();
     });
 
-    const parentMessagesBeforeBranch = await getConversationMessages(page.request, main.id);
+    const parentMessagesBeforeBranch = await getConversationMessages(
+      page.request,
+      documentId,
+      main.id,
+    );
     const parentLastAssistantText = parentMessagesBeforeBranch.at(-1)!.text;
     expect(parentMessagesBeforeBranch.at(-1)!.role).toBe('assistant');
 
     let branchId = '';
     await test.step('"Branch this conversation" creates a new box with zero of its own messages, immediately', async () => {
-      const before = await getConversations(page.request);
+      const before = await getConversations(page.request, documentId);
       const mainBox = page.locator(`.conversation-thread-box[data-conversation-id="${main.id}"]`);
       await mainBox.getByRole('button', { name: 'Branch this conversation' }).click();
 
       await expect
-        .poll(async () => (await getConversations(page.request)).length, { timeout: 10_000 })
+        .poll(async () => (await getConversations(page.request, documentId)).length, {
+          timeout: 10_000,
+        })
         .toBeGreaterThan(before.length);
-      const after = await getConversations(page.request);
+      const after = await getConversations(page.request, documentId);
       const branch = after.find((c) => !before.some((b) => b.id === c.id));
       expect(branch).toBeTruthy();
       branchId = branch!.id;
@@ -670,14 +739,14 @@ test.describe('US8 — Spatial canvas colocation', () => {
       await expect(branchBox).toBeVisible({ timeout: 10_000 });
       // No message ever belongs to the branch's own history — checked immediately (not after a
       // poll/wait) since the point is that nothing was ever queued to send one in the first place.
-      expect(await getConversationMessages(page.request, branchId)).toEqual([]);
+      expect(await getConversationMessages(page.request, documentId, branchId)).toEqual([]);
       expect(branchBox.locator('.thread-messages .message-bubble')).toHaveCount(0);
 
       // Confirm it stays that way — no seed message ever arrives, even after a settle window a
       // real fire-and-forget seed turn would have long completed within (this suite's other tests
       // show a branch's seed turn settling well within 10s).
       await page.waitForTimeout(500);
-      expect(await getConversationMessages(page.request, branchId)).toEqual([]);
+      expect(await getConversationMessages(page.request, documentId, branchId)).toEqual([]);
     });
 
     await test.step("the new placeholder box shows the parent's last user and last assistant message as read-only context", async () => {

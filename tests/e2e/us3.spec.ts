@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's PROPOSE_EDIT_DIRECTIVE — a user/system
 // message beginning with this prefix, followed by a JSON { summary, operations } payload, causes
@@ -60,7 +61,10 @@ const BRANCH_SHORTCUT = 'Alt+Shift+C';
  * (document already exists — the marker block is appended via the same PATCH /api/document path
  * US1's manual-edit flow already uses, so nothing here bypasses the application's real write path).
  * Fix: was asserting the stale `.toolbar h1` selector (removed by 006-toolbar-reorg); now uses
- * `.preview-pane` visibility as the "document loaded" signal, per us1.spec.ts/history-diff.spec.ts. */
+ * `.preview-pane` visibility as the "document loaded" signal, per us1.spec.ts/history-diff.spec.ts.
+ * Also fix: daf1db6 (multi-document support) renested the singleton GET/PATCH /api/document under
+ * /api/documents/:documentId — resolve the (sole) document's id first, mirroring the frontend
+ * document store's own convention (isActive, falling back to the first one). */
 async function ensureFixtureDocument(page: Page): Promise<void> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
@@ -71,7 +75,8 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
     return;
   }
 
-  const existing = await page.request.get('/api/document');
+  const documentId = await getActiveDocumentId(page.request);
+  const existing = await page.request.get(`/api/documents/${documentId}`);
   const body = (await existing.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -79,7 +84,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   if (body.content.includes(MARKERS.intro)) return; // a previous US3 run already appended it
 
   const from = body.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: body.document.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],

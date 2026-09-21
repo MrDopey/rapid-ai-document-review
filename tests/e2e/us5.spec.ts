@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { closeAllFocusedPanels, focusExclusively } from './test-utils.js';
+import { closeAllFocusedPanels, focusExclusively, getActiveDocumentId } from './test-utils.js';
 
 // Mirrors app/backend/src/pi/fake-agent-session.ts's directive protocol — see us3.spec.ts/
 // us4.spec.ts for the same convention. PROPOSE_EDIT_DIRECTIVE drives the real propose_document_edit
@@ -40,8 +40,11 @@ const MARKER_BLOCK = [
 
 const BRANCH_SHORTCUT = 'Alt+Shift+C';
 
-async function getDocumentState(page: Page): Promise<{ currentRevision: number; content: string }> {
-  const response = await page.request.get('/api/document');
+async function getDocumentState(
+  page: Page,
+  documentId: string,
+): Promise<{ currentRevision: number; content: string }> {
+  const response = await page.request.get(`/api/documents/${documentId}`);
   const body = (await response.json()) as {
     document: { currentRevision: number };
     content: string;
@@ -51,17 +54,21 @@ async function getDocumentState(page: Page): Promise<{ currentRevision: number; 
 
 type ConversationSummary = { id: string; name: string; status: string; isPrimary: boolean };
 
-async function getConversations(request: APIRequestContext): Promise<ConversationSummary[]> {
-  const response = await request.get('/api/conversations');
+async function getConversations(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<ConversationSummary[]> {
+  const response = await request.get(`/api/documents/${documentId}/conversations`);
   const body = (await response.json()) as { conversations: ConversationSummary[] };
   return body.conversations;
 }
 
 async function findConversation(
   request: APIRequestContext,
+  documentId: string,
   name: string,
 ): Promise<ConversationSummary> {
-  const conversation = (await getConversations(request)).find((c) => c.name === name);
+  const conversation = (await getConversations(request, documentId)).find((c) => c.name === name);
   if (!conversation) throw new Error(`Conversation not found: ${name}`);
   return conversation;
 }
@@ -69,22 +76,26 @@ async function findConversation(
 /** Ensures a document exists containing MARKER_BLOCK, regardless of whether this spec runs in
  * isolation (paste screen appears) or after us1-us4 in the same `npm run test:e2e` process
  * (document already exists) — mirrors us3.spec.ts/us4.spec.ts's `ensureFixtureDocument` (incl.
- * its stale-`.toolbar h1`-selector fix — see us3.spec.ts). */
-async function ensureFixtureDocument(page: Page): Promise<void> {
+ * its stale-`.toolbar h1`-selector fix — see us3.spec.ts). Also fix: daf1db6 (multi-document
+ * support) renested the singleton GET/PATCH /api/document under /api/documents/:documentId — this
+ * now resolves and returns that id (mirroring the frontend document store's own `isActive`
+ * convention) so callers can thread it through every other document/conversation call below. */
+async function ensureFixtureDocument(page: Page): Promise<string> {
   await page.goto('/');
   const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
   if (await pasteHeading.isVisible().catch(() => false)) {
     await page.getByLabel('Document content').fill(`# US5 Fixture Document${MARKER_BLOCK}\n`);
     await page.getByRole('button', { name: 'Start reviewing' }).click();
     await expect(page.locator('.preview-pane')).toBeVisible();
-    return;
+    return getActiveDocumentId(page.request);
   }
 
-  const before = await getDocumentState(page);
-  if (before.content.includes(MARKERS.primary)) return; // a previous US5 run already appended it
+  const documentId = await getActiveDocumentId(page.request);
+  const before = await getDocumentState(page, documentId);
+  if (before.content.includes(MARKERS.primary)) return documentId; // a previous US5 run already appended it
 
   const from = before.content.length;
-  await page.request.patch('/api/document', {
+  await page.request.patch(`/api/documents/${documentId}`, {
     data: {
       baseRevision: before.currentRevision,
       changes: [{ from, to: from, insert: MARKER_BLOCK }],
@@ -92,7 +103,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
   });
 
   await expect
-    .poll(async () => (await getDocumentState(page)).currentRevision, {
+    .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
       timeout: 10_000,
       intervals: [300],
     })
@@ -100,6 +111,7 @@ async function ensureFixtureDocument(page: Page): Promise<void> {
 
   await page.reload();
   await expect(page.locator('.preview-pane')).toBeVisible();
+  return documentId;
 }
 
 async function waitIdle(page: Page): Promise<void> {
@@ -119,10 +131,16 @@ function hudStatusBadge(page: Page, name: string) {
  *  more. The button moved to `ConversationThreadBox.vue`'s own action row, rendered through the
  *  shared `ConversationActionButtons.vue` — hence the generic `[data-action="primary"]` attribute
  *  selector rather than the bespoke `.primary-button`/`.make-primary-button`/`.clear-primary-button`
- *  classes this used to target.) */
+ *  classes this used to target.
+ *  Fix: a plain `.conversation-thread-box`-wide `hasText` match is ambiguous once any branch of
+ *  `name` exists on the canvas — `ConversationThreadBox.vue` unconditionally renders a
+ *  "↳ Branched from {parent}" lineage line, so a branch of "Main" also contains the substring
+ *  "Main" anywhere in its own box. Scope the match to the box's own `.thread-title` (exactly
+ *  `conversation.name`, never the lineage line) instead. */
 function primaryButton(page: Page, name: string) {
   return page
-    .locator('.conversation-thread-box', { hasText: name })
+    .locator('.conversation-thread-box')
+    .filter({ has: page.locator('.thread-title', { hasText: name }) })
     .locator('[data-action="primary"]');
 }
 
@@ -135,13 +153,14 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
     // below).
     page.on('dialog', (dialog) => void dialog.accept());
     let branchName = '';
+    let documentId = '';
 
     await test.step('fixture document exists with known marker content', async () => {
-      await ensureFixtureDocument(page);
+      documentId = await ensureFixtureDocument(page);
     });
 
     await test.step('1. Main is Primary by default, and exactly one conversation is Primary (FR-027)', async () => {
-      const conversations = await getConversations(page.request);
+      const conversations = await getConversations(page.request, documentId);
       const main = conversations.find((c) => c.name === 'Main');
       expect(main?.isPrimary).toBe(true);
       expect(conversations.filter((c) => c.isPrimary)).toHaveLength(1);
@@ -216,12 +235,15 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       await expect(hudStatusBadge(page, 'Main')).toHaveAttribute('data-status', 'working');
 
       // Make/Clear Primary now lives on the sidebar box's own action row (006-toolbar-reorg
-      // second refactor) — act directly on the branch's own box; still select the HUD row first
-      // (as before) so its detail panel is open, which the "switch now" step below relies on for
-      // the `.is-primary` assertion's targeting to read naturally alongside the rest of this
-      // test's row-focus conventions.
-      const branchRow = page.locator('.hud-panel li', { hasText: branchName });
-      await branchRow.locator('.conversation-row').click();
+      // second refactor) — act directly on the branch's own box. Fix: US4/T031 later consolidated
+      // every per-box detail view into a single page-level `.conversation-detail-overlay` dialog
+      // that covers the whole canvas while open — Main's own overlay is still open from
+      // `focusExclusively` above, and opening the branch's own overlay on top of it (this step used
+      // to do exactly that, to have "its detail panel... open") would only swap *which* overlay
+      // blocks the canvas, not remove the block. Close every open panel first instead, so the
+      // canvas (and this button on it) is reachable, exactly as a real user would need to dismiss
+      // whatever detail view is open before clicking a different box's own action button.
+      await closeAllFocusedPanels(page);
       await primaryButton(page, branchName).click();
 
       const dialog = page.getByRole('alertdialog', { name: 'Primary conversation is busy' });
@@ -233,7 +255,7 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       // "Cancel" leaves the designation unchanged.
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(dialog).toHaveCount(0);
-      const afterCancel = await findConversation(page.request, branchName);
+      const afterCancel = await findConversation(page.request, documentId, branchName);
       expect(afterCancel.isPrimary).toBe(false);
     });
 
@@ -258,9 +280,9 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
         'aria-label',
         new RegExp(branchName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       );
-      const afterSwitch = await findConversation(page.request, branchName);
+      const afterSwitch = await findConversation(page.request, documentId, branchName);
       expect(afterSwitch.isPrimary).toBe(true);
-      const main = await findConversation(page.request, 'Main');
+      const main = await findConversation(page.request, documentId, 'Main');
       expect(main.isPrimary).toBe(false);
 
       // Main's long-running turn was not interrupted by the switch — it settles back to idle and
@@ -321,17 +343,17 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       );
       expect(mutatedConflictMarker).not.toBe(MARKERS.conflict);
 
-      const before = await getDocumentState(page);
+      const before = await getDocumentState(page, documentId);
       const mutated = before.content.replace(MARKERS.conflict, mutatedConflictMarker);
       expect(mutated).not.toBe(before.content);
-      await page.request.patch('/api/document', {
+      await page.request.patch(`/api/documents/${documentId}`, {
         data: {
           baseRevision: before.currentRevision,
           changes: [{ from: 0, to: before.content.length, insert: mutated }],
         },
       });
       await expect
-        .poll(async () => (await getDocumentState(page)).currentRevision, {
+        .poll(async () => (await getDocumentState(page, documentId)).currentRevision, {
           timeout: 10_000,
           intervals: [300],
         })
@@ -389,32 +411,43 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
   test('7. a deferred "switch when idle" is silently cancelled if the target errors first (FR-029a)', async ({
     page,
   }) => {
-    await ensureFixtureDocument(page);
+    const documentId = await ensureFixtureDocument(page);
 
-    const primaryBefore = (await getConversations(page.request)).find((c) => c.isPrimary);
+    const primaryBefore = (await getConversations(page.request, documentId)).find(
+      (c) => c.isPrimary,
+    );
     expect(primaryBefore).toBeTruthy();
     const primaryId = primaryBefore!.id;
 
     // A fresh, idle branch to designate — and then to error out before the deferred switch fires.
-    const branchResponse = await page.request.post('/api/conversations', {
+    const branchResponse = await page.request.post(`/api/documents/${documentId}/conversations`, {
       data: { parentConversationId: primaryId, name: 'US5 Deferred Target' },
     });
     expect(branchResponse.ok()).toBe(true);
     const targetConversation = (await branchResponse.json()) as { id: string };
     await expect
-      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, {
-        timeout: 10_000,
-      })
+      .poll(
+        async () =>
+          (await findConversation(page.request, documentId, 'US5 Deferred Target')).status,
+        {
+          timeout: 10_000,
+        },
+      )
       .not.toBe('working');
 
     // Make the current Primary busy for long enough to run the rest of this step.
-    const sendResponse = await page.request.post(`/api/conversations/${primaryId}/send`, {
-      data: { message: 'x'.repeat(2000) },
-    });
+    const sendResponse = await page.request.post(
+      `/api/documents/${documentId}/conversations/${primaryId}/send`,
+      {
+        data: { message: 'x'.repeat(2000) },
+      },
+    );
     expect(sendResponse.ok()).toBe(true);
     await expect
       .poll(
-        async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status,
+        async () =>
+          (await getConversations(page.request, documentId)).find((c) => c.id === primaryId)
+            ?.status,
         {
           timeout: 5_000,
         },
@@ -423,7 +456,7 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     // First attempt with no `whenBusy` choice is rejected with PRIMARY_TARGET_BUSY.
     const busyResponse = await page.request.post(
-      `/api/conversations/${targetConversation.id}/primary`,
+      `/api/documents/${documentId}/conversations/${targetConversation.id}/primary`,
       { data: {} },
     );
     expect(busyResponse.status()).toBe(409);
@@ -432,7 +465,7 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     // "Switch when idle" schedules the deferred switch.
     const deferResponse = await page.request.post(
-      `/api/conversations/${targetConversation.id}/primary`,
+      `/api/documents/${documentId}/conversations/${targetConversation.id}/primary`,
       {
         data: { whenBusy: 'switch_when_idle' },
       },
@@ -443,37 +476,45 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
 
     // The target errors out before the busy Primary settles.
     const errorResponse = await page.request.post(
-      `/api/conversations/${targetConversation.id}/send`,
+      `/api/documents/${documentId}/conversations/${targetConversation.id}/send`,
       {
         data: { message: ERROR_DIRECTIVE },
       },
     );
     expect(errorResponse.ok()).toBe(true);
     await expect
-      .poll(async () => (await findConversation(page.request, 'US5 Deferred Target')).status, {
-        timeout: 10_000,
-      })
+      .poll(
+        async () =>
+          (await findConversation(page.request, documentId, 'US5 Deferred Target')).status,
+        {
+          timeout: 10_000,
+        },
+      )
       .toBe('errored');
 
     // Once the busy Primary settles, the deferred switch is cancelled without effect: Primary is
     // unchanged, and the errored target never became Primary.
     await expect
       .poll(
-        async () => (await getConversations(page.request)).find((c) => c.id === primaryId)?.status,
+        async () =>
+          (await getConversations(page.request, documentId)).find((c) => c.id === primaryId)
+            ?.status,
         {
           timeout: 15_000,
         },
       )
       .toBe('idle');
 
-    const finalTarget = await findConversation(page.request, 'US5 Deferred Target');
+    const finalTarget = await findConversation(page.request, documentId, 'US5 Deferred Target');
     expect(finalTarget.isPrimary).toBe(false);
-    const finalPrimary = (await getConversations(page.request)).find((c) => c.isPrimary);
+    const finalPrimary = (await getConversations(page.request, documentId)).find(
+      (c) => c.isPrimary,
+    );
     expect(finalPrimary?.id).toBe(primaryId);
 
     await test.step('8. designating the now-errored conversation Primary is rejected (FR-038a)', async () => {
       const response = await page.request.post(
-        `/api/conversations/${targetConversation.id}/primary`,
+        `/api/documents/${documentId}/conversations/${targetConversation.id}/primary`,
         { data: {} },
       );
       expect(response.status()).toBe(409);
@@ -481,7 +522,7 @@ test.describe('US5 — Designate a Primary conversation for automatic edits', ()
       expect(body.error.code).toBe('CONVERSATION_ERRORED');
 
       // Primary is still unaffected.
-      const primary = (await getConversations(page.request)).find((c) => c.isPrimary);
+      const primary = (await getConversations(page.request, documentId)).find((c) => c.isPrimary);
       expect(primary?.id).toBe(primaryId);
     });
   });

@@ -422,7 +422,7 @@ export class DocumentService {
         if (!onlyDebounceCheckpointsSinceBaseRevision) {
           throw new DocumentOutOfSyncError(
             `Document has changed since baseRevision ${baseRevision} (current revision is ` +
-              `${doc.currentRevision}); refetch the document via GET /api/document and retry your edit.`,
+              `${doc.currentRevision}); refetch the document via GET /api/documents/${doc.id} and retry your edit.`,
             doc.currentRevision,
           );
         }

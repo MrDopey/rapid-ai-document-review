@@ -1,4 +1,20 @@
-import { expect, type Page, type Locator } from '@playwright/test';
+import { expect, type Page, type Locator, type APIRequestContext } from '@playwright/test';
+
+/**
+ * daf1db6 ("feat: multi-document support") removed the old singleton `GET/PATCH /api/document`
+ * endpoint in favor of `/api/documents/:documentId` — every e2e spec that used to hit the old path
+ * needs a document id threaded through first. Mirrors the frontend document store's own
+ * convention for resolving "the active document" (`stores/document.ts`'s `load()`): whichever
+ * document is `isActive`, falling back to the first one if none is flagged active yet (e.g. right
+ * after a fresh backend start, before any document has ever been fetched/switched to).
+ */
+export async function getActiveDocumentId(request: APIRequestContext): Promise<string> {
+  const response = await request.get('/api/documents');
+  const body = (await response.json()) as { documents: { id: string; isActive: boolean }[] };
+  const active = body.documents.find((d) => d.isActive) ?? body.documents[0];
+  if (!active) throw new Error('No document exists yet');
+  return active.id;
+}
 
 /**
  * 005-canvas-conversation-threads (multi-focus overlay): closes every conversation detail panel
