@@ -156,6 +156,15 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
+/**
+ * Thrown by an adapter's cursor-based `list*` methods (e.g. `SqliteStorageAdapter.decodeCursor`)
+ * when a caller-supplied `cursor` string doesn't decode to the expected shape — a malformed or
+ * tampered-with value, not a legitimate "no more pages" signal. Route handlers that accept a
+ * `cursor` query param (revisions.ts, conversations.ts) catch this and map it to `400
+ * VALIDATION_FAILED`, the same as any other rejected request body/query.
+ */
+export class InvalidCursorError extends Error {}
+
 export interface RevisionListOptions {
   cursor?: string;
   limit: number;

@@ -31,6 +31,24 @@ export class DocumentNotFoundError extends Error {}
 export class LastDocumentError extends Error {}
 
 /**
+ * Guard for `deleteDocument`, mirroring `ConversationService.close()`'s own guard against acting
+ * on a conversation that's actively `working` (specs/006-archivable-main-conversation) — a
+ * document is never deleted out from under an in-flight agent turn. Mapped to the same
+ * 409/`CONVERSATION_BUSY` response `ConversationBusyError` gets in api/http/document.ts, since it
+ * is the identical underlying condition (a conversation currently `working`), just discovered
+ * from the document side rather than the conversation side.
+ */
+export class DocumentHasWorkingConversationError extends Error {}
+
+/**
+ * Thrown by `applyChanges` when a `DocumentChangeSpec`'s `{from, to}` offsets are inverted
+ * (`to < from`) or fall outside the current document length — `AutomergeStore.splice` has no
+ * clamping of its own and throws from inside Automerge if handed such an offset, which would
+ * otherwise surface as an uncaught 500. Mapped to 400 `VALIDATION_FAILED` in api/http/document.ts.
+ */
+export class InvalidChangeRangeError extends Error {}
+
+/**
  * Thrown by `applyChanges` when the client's `baseRevision` no longer matches
  * `currentRevision`: the `{from, to, insert}` character offsets in `changes` were computed by the
  * frontend against whatever text it held locally, and the document has since moved on (e.g. a
@@ -213,6 +231,14 @@ export class DocumentService {
     }
     if (this.storage.listDocuments().length === 1) {
       throw new LastDocumentError('Cannot delete the last remaining document');
+    }
+    const workingConversation = this.storage
+      .listAllConversations(documentId)
+      .find((conversation) => conversation.status === 'working');
+    if (workingConversation) {
+      throw new DocumentHasWorkingConversationError(
+        `Cannot delete document while conversation ${workingConversation.id} is working`,
+      );
     }
     this.storage.deleteDocument(documentId);
     this.automerge.delete(documentId);
@@ -430,8 +456,29 @@ export class DocumentService {
         // and apply `changes` to the live content as if `baseRevision` had matched.
       }
 
+      // Each offset must describe a real, non-inverted span of the document as it stands right
+      // now — `AutomergeStore.splice` has no clamping of its own and would otherwise throw from
+      // inside Automerge (an inverted `to < from`, or `from` past the end of the content),
+      // surfacing as an uncaught 500 instead of a normal validation rejection. A `to` past the end
+      // is clamped rather than rejected: a client computing `to` from its own (possibly
+      // slightly-stale, e.g. after a prior same-request splice shifted things) view of the
+      // document's length is a normal "delete to the end" intent, not a malformed request —
+      // Automerge's own splice tolerated this silently before this validation was added, so
+      // clamping preserves that same permissiveness while still catching genuinely invalid spans.
+      const currentLength = this.automerge.get(documentId).getContent().length;
+      for (const change of changes) {
+        if (change.to < change.from || change.from > currentLength) {
+          throw new InvalidChangeRangeError(
+            `Invalid change range [${change.from}, ${change.to}) for document of length ${currentLength}`,
+          );
+        }
+      }
+      const clamped = changes.map((change) =>
+        change.to > currentLength ? { ...change, to: currentLength } : change,
+      );
+
       // Descending offset order keeps earlier offsets valid as each splice is applied.
-      const ordered = [...changes].sort((a, b) => b.from - a.from);
+      const ordered = [...clamped].sort((a, b) => b.from - a.from);
 
       await this.primaryMutex.withLock(doc.id, () => {
         this.storage.transaction(() => {

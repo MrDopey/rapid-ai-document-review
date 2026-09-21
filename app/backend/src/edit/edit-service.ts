@@ -291,6 +291,7 @@ export class EditService {
       outcome: string;
       revision?: number;
       replacementRequested?: boolean;
+      reason?: string;
     }[];
     currentRevision: number;
   }> {
@@ -304,16 +305,37 @@ export class EditService {
       outcome: string;
       revision?: number;
       replacementRequested?: boolean;
+      reason?: string;
     }[] = [];
     for (const edit of pending) {
-      const { response } = await this.apply(edit.id);
-      if (response.outcome === 'applied') {
-        results.push({ stagedEditId: edit.id, outcome: 'applied', revision: response.revision });
-      } else {
+      try {
+        const { response } = await this.apply(edit.id);
+        if (response.outcome === 'applied') {
+          results.push({
+            stagedEditId: edit.id,
+            outcome: 'applied',
+            revision: response.revision,
+          });
+        } else {
+          results.push({
+            stagedEditId: edit.id,
+            outcome: response.outcome,
+            replacementRequested: response.replacementRequested,
+          });
+        }
+      } catch (err) {
+        // A single edit's `apply()` can lose a race against another request that already
+        // resolved it (e.g. `EditNotPendingError`) — that must not abort the rest of this batch,
+        // so it's recorded as skipped and the loop continues (contradicts the old behavior of
+        // propagating the first such error and halting).
+        logger.warn(
+          { conversationId, editId: edit.id, err },
+          'acceptRemaining: skipping an edit that could not be applied',
+        );
         results.push({
           stagedEditId: edit.id,
-          outcome: response.outcome,
-          replacementRequested: response.replacementRequested,
+          outcome: 'skipped',
+          reason: err instanceof Error ? err.message : String(err),
         });
       }
     }

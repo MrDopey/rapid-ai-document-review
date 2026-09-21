@@ -33,6 +33,7 @@ import { registerSettingsRoutes } from './api/http/settings.ts';
 import { registerSystemPromptRoutes } from './api/http/system-prompt.ts';
 import { registerStaticRoutes } from './api/http/static.ts';
 import { registerWsRoutes } from './api/ws/index.ts';
+import { sendError } from './api/http/errors.ts';
 
 export function buildApp() {
   mkdirSync(dirname(config.databasePath), { recursive: true });
@@ -204,6 +205,25 @@ export function buildApp() {
 
   const app = Fastify({ loggerInstance: logger });
 
+  // Last-resort normalizer: every route that knows how to interpret a specific typed error
+  // already catches it itself and maps it to the app's `ErrorEnvelope` shape (e.g. document.ts's
+  // PATCH/DELETE handlers) — this only runs for whatever slips past all of those, so the raw
+  // error is always logged here server-side even though its details never reach the client.
+  app.setErrorHandler((err: Error & { statusCode?: unknown }, request, reply) => {
+    logger.error({ err, method: request.method, url: request.url }, 'unhandled request error');
+
+    // A thrown error can still carry its own intended HTTP status (e.g.
+    // `DocumentOutOfSyncError.statusCode`, or a Fastify-internal body-parsing/validation error)
+    // even though no route-specific `instanceof` clause happened to catch it here — that's treated
+    // as a client-side (4xx) problem rather than flattened into a generic 500.
+    const knownStatus = typeof err.statusCode === 'number' ? err.statusCode : null;
+    if (knownStatus !== null && knownStatus >= 400 && knownStatus < 500) {
+      return sendError(reply, knownStatus, 'VALIDATION_FAILED', err.message);
+    }
+
+    return sendError(reply, 500, 'INTERNAL_ERROR', 'Internal server error');
+  });
+
   app.get('/healthz', async () => ({ status: 'ok' }));
 
   app.register(websocketPlugin);
@@ -233,6 +253,20 @@ export function buildApp() {
 }
 
 async function main() {
+  // Process-level safety nets, registered once for the real running server (not on every
+  // `buildApp()` call, so tests importing this module don't inherit them): an unhandled promise
+  // rejection is logged and swallowed rather than left to crash the process outright, while an
+  // uncaught synchronous exception has already left the process in a possibly-inconsistent state
+  // — it's logged with its full stack and the process exits non-zero, per Node's own documented
+  // best practice for `uncaughtException`.
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ err: reason }, 'unhandled promise rejection');
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error({ err }, 'uncaught exception — exiting');
+    process.exit(1);
+  });
+
   const { app } = buildApp();
   warnIfHostOverridden();
   try {

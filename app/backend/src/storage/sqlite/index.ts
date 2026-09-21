@@ -1,27 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from './migrations.ts';
-import type {
-  ConversationEventRow,
-  ConversationListOptions,
-  ConversationRow,
-  DocumentChangeRow,
-  DocumentRow,
-  DocumentSnapshotRow,
-  Page,
-  RevisionListOptions,
-  RevisionRow,
-  StagedEditRow,
-  StorageAdapter,
-  UserSettingsRow,
+import {
+  InvalidCursorError,
+  type ConversationEventRow,
+  type ConversationListOptions,
+  type ConversationRow,
+  type DocumentChangeRow,
+  type DocumentRow,
+  type DocumentSnapshotRow,
+  type Page,
+  type RevisionListOptions,
+  type RevisionRow,
+  type StagedEditRow,
+  type StorageAdapter,
+  type UserSettingsRow,
 } from '../storage-adapter.ts';
 
 function encodeCursor(payload: unknown): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 }
 
+/** Callers (`listRevisions`/`listConversations`) pass this straight through from an untrusted
+ *  request query param — a malformed or tampered value must surface as a rejected request
+ *  (`InvalidCursorError`, mapped to 400 by the route layer), not an uncaught `SyntaxError`. */
 function decodeCursor<T>(cursor: string): T {
-  return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as T;
+  try {
+    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as T;
+  } catch {
+    throw new InvalidCursorError(`Invalid pagination cursor: ${cursor}`);
+  }
 }
 
 function toBool(value: number | boolean | null | undefined): boolean {

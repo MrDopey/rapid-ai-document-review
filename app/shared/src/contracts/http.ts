@@ -64,6 +64,9 @@ export const ErrorCode = z.enum([
   'ROOT_THREAD_UNDELETABLE',
   'DOCUMENT_WRONG_TYPE',
   'EMPTY_DOCUMENT_EXPORT',
+  // Global error handler (server.ts's `setErrorHandler`): any uncaught/unmapped error, normalized
+  // into the standard envelope rather than leaking a raw stack trace to the client.
+  'INTERNAL_ERROR',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -528,9 +531,14 @@ export const AcceptRemainingResponse = z.object({
   results: z.array(
     z.object({
       stagedEditId: z.string(),
-      outcome: z.enum(['applied', 'conflict', 'conflict_exhausted']),
+      // `skipped`: this individual edit's `apply()` threw (e.g. `EditNotPendingError` from a race
+      // with another request that resolved it first) — the batch still reports every other edit's
+      // outcome instead of aborting on the first conflict (edit-service.ts's `acceptRemaining`).
+      outcome: z.enum(['applied', 'conflict', 'conflict_exhausted', 'skipped']),
       revision: z.number().int().optional(),
       replacementRequested: z.boolean().optional(),
+      // Present only for `skipped` — the caught error's message, for display/debugging.
+      reason: z.string().optional(),
     }),
   ),
   currentRevision: z.number().int(),

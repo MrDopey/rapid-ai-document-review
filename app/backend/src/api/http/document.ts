@@ -5,13 +5,23 @@ import {
   PatchDocumentRequest,
 } from '@rapid-ai-document-review/shared/contracts/http';
 import {
+  DocumentHasWorkingConversationError,
   DocumentNotFoundError,
   DocumentOutOfSyncError,
+  InvalidChangeRangeError,
   LastDocumentError,
   type DocumentService,
 } from '../../document/document-service.ts';
 import type { RevisionService } from '../../document/revision-service.ts';
 import { parseOrFail, sendError } from './errors.ts';
+
+/** Strips control characters (CR/LF and other C0 controls, which throw `ERR_INVALID_CHAR` if set
+ *  directly into a header value) and caps length, so an arbitrary document `title` can always be
+ *  safely embedded in a `Content-Disposition` filename. */
+function sanitizeFilename(title: string): string {
+  // eslint-disable-next-line no-control-regex -- deliberately stripping C0 control chars (incl. CR/LF).
+  return title.replace(/[\x00-\x1F\x7F]/g, '').slice(0, 200);
+}
 
 export function registerDocumentRoutes(
   app: FastifyInstance,
@@ -73,6 +83,9 @@ export function registerDocumentRoutes(
           currentRevision: err.currentRevision,
         });
       }
+      if (err instanceof InvalidChangeRangeError) {
+        return sendError(reply, 400, 'VALIDATION_FAILED', err.message);
+      }
       throw err;
     }
   });
@@ -88,6 +101,9 @@ export function registerDocumentRoutes(
       }
       if (err instanceof LastDocumentError) {
         return sendError(reply, 409, 'LAST_DOCUMENT', err.message);
+      }
+      if (err instanceof DocumentHasWorkingConversationError) {
+        return sendError(reply, 409, 'CONVERSATION_BUSY', err.message);
       }
       throw err;
     }
@@ -107,7 +123,10 @@ export function registerDocumentRoutes(
     }
     reply.header('Content-Type', 'text/markdown; charset=utf-8');
     if (data.download) {
-      reply.header('Content-Disposition', `attachment; filename="${doc.document.title}.md"`);
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="${sanitizeFilename(doc.document.title)}.md"`,
+      );
     }
     return reply.send(content);
   });

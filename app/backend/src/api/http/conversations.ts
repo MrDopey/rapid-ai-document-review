@@ -29,7 +29,8 @@ import {
   type PrimaryService,
 } from '../../conversation/primary-service.ts';
 import { DocumentNotFoundError } from '../../document/document-service.ts';
-import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import { InvalidCursorError, type StorageAdapter } from '../../storage/storage-adapter.ts';
+import { requireConversationInDocument } from './document-scope-guard.ts';
 import { DocumentWrongTypeError, requireDocumentType } from './document-type-guard.ts';
 import { parseOrFail, sendError } from './errors.ts';
 
@@ -96,6 +97,9 @@ function handleConversationError(
   if (err instanceof DocumentNotFoundError) {
     return { status: 404, code: 'DOCUMENT_NOT_FOUND' };
   }
+  if (err instanceof InvalidCursorError) {
+    return { status: 400, code: 'VALIDATION_FAILED' };
+  }
   return null;
 }
 
@@ -110,22 +114,6 @@ async function withConversationErrors(
     if (mapped)
       return sendError(reply, mapped.status, mapped.code, (err as Error).message, mapped.details);
     throw err;
-  }
-}
-
-/** Every `:id`-scoped route below identifies its conversation purely by `conversationId` (globally
- *  unique), so without this check a valid id from a different document than the URL's
- *  `:documentId` would resolve as if it belonged there — surfacing another document's data (and,
- *  via the frontend's per-document event-sequence tracking, corrupting its own state) rather than
- *  404ing like a genuinely unknown id does. */
-function requireConversationInDocument(
-  storage: StorageAdapter,
-  documentId: string,
-  conversationId: string,
-): void {
-  const conversation = storage.getConversation(conversationId);
-  if (!conversation || conversation.documentId !== documentId) {
-    throw new ConversationNotFoundError(`Conversation not found: ${conversationId}`);
   }
 }
 
@@ -148,7 +136,9 @@ export function registerConversationRoutes(
       }
       const data = parseOrFail(reply, PaginationQuery, request.query);
       if (!data) return;
-      return reply.send(conversationService.getAll(doc.id, data));
+      return withConversationErrors(reply, async () => {
+        return reply.send(conversationService.getAll(doc.id, data));
+      });
     },
   );
 
