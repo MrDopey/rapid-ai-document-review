@@ -223,12 +223,22 @@ describe('thread store — handleServerFrame: agent-turn status/error events', (
     expect(store.findThread('thread-1')?.status).toBe('idle');
   });
 
-  it('agent_error does not throw and leaves status alone (conversation_status_changed owns that)', () => {
+  it('agent_error leaves status alone (conversation_status_changed owns that) but announces the error assertively for screen readers', () => {
     const store = useThreadStore();
-    store.threads = [threadFixture({ id: 'thread-1', status: 'idle' })];
+    store.threads = [threadFixture({ id: 'thread-1', name: 'Thread One', status: 'idle' })];
 
-    expect(() => store.handleServerFrame(agentErrorFrame())).not.toThrow();
-    expect(store.findThread('thread-1')?.status).toBe('idle');
+    vi.useFakeTimers();
+    try {
+      store.handleServerFrame(agentErrorFrame());
+      vi.advanceTimersByTime(30);
+
+      expect(store.findThread('thread-1')?.status).toBe('idle');
+      expect(document.getElementById('a11y-live-region-assertive')?.textContent).toBe(
+        'Thread One: agent error — The agent hit an error.',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retry() calls httpClient.retryThread for the given thread id', async () => {

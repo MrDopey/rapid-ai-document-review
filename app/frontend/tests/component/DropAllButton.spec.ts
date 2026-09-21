@@ -47,6 +47,8 @@ describe('DropAllButton — confirmation gate', () => {
       'Drop all remaining proposed edits in this conversation? This cannot be undone.',
     );
     expect(httpClient.dropRemaining).toHaveBeenCalledWith('doc-1', 'conv-1');
+    expect(wrapper.get('button').text()).toBe('Drop remaining');
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
   });
 
   it('cancelling the dialog is a no-op', async () => {

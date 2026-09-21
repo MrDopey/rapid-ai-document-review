@@ -94,16 +94,9 @@ describe('EditorComponent — Branch (New) / Branch (Main) buttons', () => {
     expect(emitted![0]).toEqual([{ from: 0, to: 5 }, true]);
   });
 
-  it('clicking either button while disabled (no selection) emits nothing', async () => {
-    const wrapper = mount(EditorComponent, {
-      props: { modelValue: 'Hello world, this is a document.' },
-    });
-
-    await wrapper.findAll('button.branch-button')[0].trigger('click');
-    await wrapper.findAll('button.branch-button')[1].trigger('click');
-
-    expect(wrapper.emitted('branch-from-selection')).toBeUndefined();
-  });
+  // "Clicking while disabled emits nothing" for the no-selection case is covered once, below, by
+  // the focus-cap describe block's identical assertion (same native-`disabled` mechanism either
+  // way) — no need to duplicate it here too.
 });
 
 // Branch-cap parity fix (005-canvas-conversation-threads follow-up): the toolbar's two Branch

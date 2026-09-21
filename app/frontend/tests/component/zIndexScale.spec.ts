@@ -44,28 +44,15 @@ function readZTokens(): Record<string, number> {
 }
 
 /** Parses a computed `zIndex` string that's either a plain number (if some future environment
- *  *does* resolve custom properties) or jsdom's literal `"var(--token, fallback)"` text, and
- *  asserts it references `expectedToken` with a fallback matching `expectedValue` — while also
- *  ruling out the exact failure mode this guardrail exists for (`auto`/`""`/`"0"`). */
-function expectZIndexToken(raw: string, expectedToken: string, expectedValue: number): void {
-  expect(raw).not.toBe('auto');
-  expect(raw).not.toBe('');
-  expect(raw).not.toBe('0');
-  const varMatch = raw.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*(-?\d+)\s*)?\)$/);
-  if (varMatch) {
-    expect(varMatch[1]).toBe(expectedToken);
-    if (varMatch[2] !== undefined) expect(Number(varMatch[2])).toBe(expectedValue);
-  } else {
-    // A real environment that does resolve var() would land here with a plain numeric string.
-    expect(Number(raw)).toBe(expectedValue);
-  }
-}
-
-/** Parses a computed `zIndex` string (see `expectZIndexToken`'s own doc comment on jsdom's
- *  unresolved-`var()` quirk) and asserts its resolved value is strictly greater than every tier
- *  name in `tiersToBeat` — the invariant that actually matters for a "must render above X" overlay
- *  (must outrank --z-overlay-detail/--z-overlay-primary), without pinning the test to one specific
- *  token name/value the way `expectZIndexToken` does. */
+ *  *does* resolve custom properties) or jsdom's literal `"var(--token, fallback)"` text (see the
+ *  file's own top comment on jsdom's unresolved-`var()` quirk), and asserts its resolved value is
+ *  strictly greater than every tier name in `tiersToBeat` — the invariant that actually matters
+ *  for a "must render above X" overlay, without pinning the test to one specific token
+ *  name/numeric value the way an exact-match assertion would (brittle to a pure renumbering of the
+ *  scale in style.css that preserves every relative ordering). Also rules out the exact failure
+ *  mode this whole guardrail exists for: a missing z-index declaration resolving to `auto`/`""`/
+ *  `"0"`. Pass an empty `tiersToBeat` for the bottom tier of the scale, where there's nothing below
+ *  to assert "above" — the auto/empty/'0' checks alone still catch the regression. */
 function expectZIndexAbove(
   raw: string,
   tokens: Record<string, number>,
@@ -212,31 +199,40 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     setActivePinia(pinia);
   });
 
-  it("ReconnectingIndicator.vue's .reconnecting-indicator uses --z-indicator", () => {
+  it("ReconnectingIndicator.vue's .reconnecting-indicator renders above every overlay tier (must stay visible through any dialog)", () => {
     const wrapper = mount(ReconnectingIndicator, { props: { reconnecting: true } });
     const el = wrapper.find('.reconnecting-indicator');
     expect(el.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-indicator', 1000);
+    expectZIndexAbove(getComputedStyle(el.element).zIndex, readZTokens(), [
+      '--z-raised',
+      '--z-sticky',
+      '--z-overlay',
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+      '--z-overlay-blocking',
+    ]);
   });
 
-  it("EditorComponent.vue's sticky .editor-toolbar uses --z-sticky", () => {
+  it("EditorComponent.vue's sticky .editor-toolbar renders above raised elements that scroll beneath it", () => {
     const wrapper = mount(EditorComponent, { props: { modelValue: 'Hello world.' } });
     const el = wrapper.find('.editor-toolbar');
     expect(el.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-sticky', 2);
+    expectZIndexAbove(getComputedStyle(el.element).zIndex, readZTokens(), ['--z-raised']);
   });
 
-  it("ConversationDetailPanel.vue's .close-detail-button uses --z-raised", () => {
+  it("ConversationDetailPanel.vue's .close-detail-button carries a real (non-auto) elevated z-index", () => {
     const wrapper = mount(ConversationDetailPanel, {
       props: { conversationId: 'conv-1', active: true },
       global: { plugins: [pinia], stubs: { ConversationView: true } },
     });
     const el = wrapper.find('.close-detail-button');
     expect(el.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-raised', 1);
+    // Bottom tier of the scale — nothing below it to assert "above", so this only rules out the
+    // regression the whole file guards against (missing z-index resolving to auto/''/'0').
+    expectZIndexAbove(getComputedStyle(el.element).zIndex, readZTokens(), []);
   });
 
-  it("ConversationThreadBox.vue's sticky .thread-header uses --z-raised", () => {
+  it("ConversationThreadBox.vue's sticky .thread-header carries a real (non-auto) elevated z-index", () => {
     const store = useConversationsStore();
     store.conversations = [conversationFixture({ id: 'conv-1', name: 'Conv One' })];
     store.messagesByConversation['conv-1'] = [];
@@ -246,10 +242,10 @@ describe('z-index scale — cheaply-mounted real components reference the expect
     });
     const el = wrapper.find('.thread-header');
     expect(el.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(el.element).zIndex, '--z-raised', 1);
+    expectZIndexAbove(getComputedStyle(el.element).zIndex, readZTokens(), []);
   });
 
-  it("HistoryPanel.vue's .diff-overlay uses --z-overlay-blocking once the Diff modal is open", async () => {
+  it("HistoryPanel.vue's .diff-overlay outranks every non-blocking overlay tier once the Diff modal is open", async () => {
     const store = useDocumentStore();
     store.revisions = [
       makeRevision({ revision: 2, createdAt: '2026-01-02T00:00:00.000Z' }),
@@ -270,7 +266,11 @@ describe('z-index scale — cheaply-mounted real components reference the expect
 
     const overlay = wrapper.find('.diff-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay',
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+    ]);
   });
 });
 
@@ -292,7 +292,7 @@ describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay-bloc
     wrapper = null;
   });
 
-  it('resolves --z-overlay-blocking once a preview is open', async () => {
+  it('outranks every non-blocking overlay tier once a preview is open', async () => {
     vi.mocked(httpClient.listEdits).mockResolvedValue({
       stagedEdits: [
         {
@@ -339,7 +339,11 @@ describe('z-index scale — EditsList.vue .preview-overlay uses --z-overlay-bloc
 
     const overlay = wrapper.find('.preview-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-blocking', 70);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay',
+      '--z-overlay-detail',
+      '--z-overlay-primary',
+    ]);
   });
 });
 
@@ -361,7 +365,7 @@ describe('z-index scale — ConversationView.vue .close-dialog-overlay uses --z-
     vi.mocked(httpClient.listEdits).mockResolvedValue({ stagedEdits: [] });
   });
 
-  it('resolves --z-overlay-primary once the Archive/close confirmation is open', async () => {
+  it('outranks --z-overlay/--z-overlay-detail once the Archive/close confirmation is open', async () => {
     const store = useConversationsStore();
     const conversation = conversationFixture({ id: 'conv-1', kind: 'branch', status: 'idle' });
     store.conversations = [conversation];
@@ -382,7 +386,10 @@ describe('z-index scale — ConversationView.vue .close-dialog-overlay uses --z-
 
     const overlay = wrapper.find('.close-dialog-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-primary', 60);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay',
+      '--z-overlay-detail',
+    ]);
   });
 });
 
@@ -395,7 +402,7 @@ describe('z-index scale — ConversationThreadBox.vue .primary-busy-dialog-overl
     vi.mocked(httpClient.designatePrimary).mockReset();
   });
 
-  it('resolves --z-overlay-primary once the Primary-busy warning is open', async () => {
+  it('outranks --z-overlay/--z-overlay-detail once the Primary-busy warning is open', async () => {
     const store = useConversationsStore();
     store.loaded = true;
     store.conversations = [
@@ -424,7 +431,10 @@ describe('z-index scale — ConversationThreadBox.vue .primary-busy-dialog-overl
 
     const overlay = wrapper.find('.primary-busy-dialog-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-primary', 60);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), [
+      '--z-overlay',
+      '--z-overlay-detail',
+    ]);
   });
 });
 
@@ -559,7 +569,11 @@ describe('z-index scale — App.vue overlays', () => {
     ]);
   });
 
-  it('.conversation-detail-overlay uses --z-overlay-detail once a conversation is focused', async () => {
+  it('.conversation-detail-overlay outranks --z-overlay once a conversation is focused', async () => {
+    // No lighter-weight mount is possible here: `.conversation-detail-overlay` is rendered
+    // directly by App.vue's own template (see App.vue's `<div class="conversation-detail-overlay">`),
+    // gated on App.vue's own local `focusedConversationIds` state — it isn't extracted into a
+    // standalone child component, so exercising it means mounting App.vue itself.
     const wrapper = await mountApp();
     const conversationsStore = useConversationsStore();
     conversationsStore.conversations = [
@@ -572,6 +586,6 @@ describe('z-index scale — App.vue overlays', () => {
 
     const overlay = wrapper.find('.conversation-detail-overlay');
     expect(overlay.exists()).toBe(true);
-    expectZIndexToken(getComputedStyle(overlay.element).zIndex, '--z-overlay-detail', 55);
+    expectZIndexAbove(getComputedStyle(overlay.element).zIndex, readZTokens(), ['--z-overlay']);
   });
 });

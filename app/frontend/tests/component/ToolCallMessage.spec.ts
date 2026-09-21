@@ -202,23 +202,9 @@ describe("ToolCallMessage — tool calls clamp/expand like MessageBubble.vue's m
     expect(wrapper.emitted('update:expanded')).toBeUndefined();
   });
 
-  it('a bulk "Collapse all" (the parent flipping `expanded` to false) also re-collapses an individually-expanded tool call', async () => {
-    const wrapper = mount(ToolCallMessage, {
-      props: { message: carrierWithLongToolCall('tc-bulk'), expanded: true },
-      global: { plugins: [pinia] },
-    });
-    mockTallScrollHeight(wrapper.get('.tool-call-body').element);
-    await wrapper.vm.$nextTick();
-
-    await wrapper.get('.tool-call .expand-toggle-button').trigger('click');
-    expect(wrapper.get('.tool-call .expand-toggle-button').text()).toBe('Show less');
-
-    // FR-009's bulk toggle drives this exact prop change on every message in the conversation.
-    await wrapper.setProps({ expanded: false });
-
-    expect(wrapper.get('.tool-call .expand-toggle-button').text()).toBe('Show more');
-    expect((wrapper.get('.tool-call-body').element as HTMLElement).style.maxHeight).toBe('160px');
-  });
+  // The single-tool-call "Collapse all re-collapses an individually-expanded tool call" case is
+  // fully subsumed by the `it.each([1, 2, 3, 5])` parameterized test below (count === 1 is exactly
+  // that scenario), so it isn't duplicated here as its own test.
 
   it('a bulk "Expand all" (the parent flipping `expanded` to true) also expands a collapsed tool call', async () => {
     const wrapper = mount(ToolCallMessage, {

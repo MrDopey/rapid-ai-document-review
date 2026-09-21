@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   columnOf,
   computeConversationLayout,
+  orderConversationsByAnchor,
   resolveBaseAnchorY,
   type ConversationLayoutInput,
 } from '../../src/components/canvas/conversationLayout.js';
@@ -90,6 +91,75 @@ describe('resolveBaseAnchorY', () => {
       ['b', b],
     ]);
     expect(resolveBaseAnchorY(a, byId, null)).toBe(0);
+  });
+});
+
+// HudPanel.vue's HUD ordering (US4/T032) and App.vue's focus-panel stacking both delegate to this
+// function directly (see its own doc comment above) — exercised here as a plain unit, independent
+// of either caller's rendering.
+describe('orderConversationsByAnchor', () => {
+  it("orders conversations by their anchor root's document position ascending", () => {
+    const main = conv({ id: 'main' }); // no seedSelection anywhere in its chain -> key -1
+    const rootB = conv({ id: 'rootB', seedSelection: { from: 10, to: 20, text: 'y' } });
+    const rootA = conv({ id: 'rootA', seedSelection: { from: 50, to: 60, text: 'x' } });
+    const byId = new Map([
+      ['main', main],
+      ['rootB', rootB],
+      ['rootA', rootA],
+    ]);
+    const ordered = orderConversationsByAnchor([rootA, rootB, main], byId);
+    expect(ordered.map((c) => c.id)).toEqual(['main', 'rootB', 'rootA']);
+  });
+
+  it('keeps a branch grouped with its root, root leading its own group', () => {
+    const root = conv({ id: 'root', seedSelection: { from: 30, to: 40, text: 'z' } });
+    const branch = conv({ id: 'branch', parentId: 'root', branchDepth: 1, seedSelection: null });
+    const byId = new Map([
+      ['root', root],
+      ['branch', branch],
+    ]);
+    const ordered = orderConversationsByAnchor([branch, root], byId);
+    expect(ordered.map((c) => c.id)).toEqual(['root', 'branch']);
+  });
+
+  it('breaks a tie between two roots at the same anchor position by root id, without interleaving their groups (stable tiebreak)', () => {
+    // Both `main` and `zzz-root` resolve to key -1 (neither has a `seedSelection` anywhere in its
+    // own chain), so without the root-id tiebreak their branches could interleave arbitrarily.
+    const main = conv({ id: 'main' });
+    const mainBranch = conv({
+      id: 'main-branch',
+      parentId: 'main',
+      branchDepth: 1,
+      seedSelection: null,
+    });
+    const other = conv({ id: 'zzz-root' });
+    const otherBranch = conv({
+      id: 'zzz-branch',
+      parentId: 'zzz-root',
+      branchDepth: 1,
+      seedSelection: null,
+    });
+    const byId = new Map([
+      ['main', main],
+      ['main-branch', mainBranch],
+      ['zzz-root', other],
+      ['zzz-branch', otherBranch],
+    ]);
+    const ordered = orderConversationsByAnchor([otherBranch, other, mainBranch, main], byId);
+    expect(ordered.map((c) => c.id)).toEqual(['main', 'main-branch', 'zzz-root', 'zzz-branch']);
+  });
+
+  it("falls back to each conversation's original array position as a stable tiebreak within one root's own group", () => {
+    const root = conv({ id: 'root', seedSelection: { from: 30, to: 40, text: 'z' } });
+    const b1 = conv({ id: 'b1', parentId: 'root', branchDepth: 1, seedSelection: null });
+    const b2 = conv({ id: 'b2', parentId: 'root', branchDepth: 1, seedSelection: null });
+    const byId = new Map([
+      ['root', root],
+      ['b1', b1],
+      ['b2', b2],
+    ]);
+    const ordered = orderConversationsByAnchor([root, b2, b1], byId);
+    expect(ordered.map((c) => c.id)).toEqual(['root', 'b2', 'b1']);
   });
 });
 

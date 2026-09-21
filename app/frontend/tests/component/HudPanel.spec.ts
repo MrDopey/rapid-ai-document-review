@@ -11,10 +11,10 @@ import { useConversationsStore } from '../../src/stores/conversations.js';
 // 011-linear-thread-mode (HudPanel.vue's own top doc comment): this component no longer reads
 // `useConversationsStore()`/`orderConversationsByAnchor` itself — it is a pure, prop-driven shell
 // over an already-filtered-and-ordered `items: HudItem[]` list, so these tests build that list by
-// hand rather than seeding a store and letting the component derive it. Root-anchor
-// ordering itself (which conversation ends up where in that list) is covered by
-// `ConversationLayout.spec.ts` (the actual `orderConversationsByAnchor` unit under test) — this
-// file only needs to prove HudPanel renders `items` in the order given, plus its own
+// hand rather than seeding a store and letting the component derive it. Root-anchor ordering
+// itself (which conversation ends up where in that list) is covered directly by
+// `ConversationLayout.spec.ts`'s own `orderConversationsByAnchor` unit tests — this file only
+// needs to prove HudPanel renders `items` in the order given, plus its own
 // selection/focus/hotkey/badge-slot behavior.
 
 function hudItem(overrides: Partial<HudItem> & { id: string; name: string }): HudItem {
@@ -56,13 +56,25 @@ describe('HudPanel — renders `items` in the given order (prop-driven, no order
     expect(rowNames(wrapper)).toEqual(['Highlight B', 'Highlight A', 'Main']);
   });
 
-  it('indents a row by `depth * 0.3rem`, for tree/branch-depth-driven callers (canvas mode, Thread mode)', () => {
+  it('indents a deeper row further than a shallower one, for tree/branch-depth-driven callers (canvas mode, Thread mode)', () => {
     const wrapper = mountHud({
-      items: [hudItem({ id: 'a', name: 'A', depth: 0 }), hudItem({ id: 'b', name: 'B', depth: 2 })],
+      items: [
+        hudItem({ id: 'a', name: 'A', depth: 0 }),
+        hudItem({ id: 'b', name: 'B', depth: 1 }),
+        hudItem({ id: 'c', name: 'C', depth: 2 }),
+      ],
     });
     const lis = wrapper.findAll('li');
-    expect(lis[0]!.attributes('style')).toContain('padding-left: 0rem');
-    expect(lis[1]!.attributes('style')).toContain('padding-left: 0.6rem');
+    const paddingLeft = (style: string | undefined): number => {
+      const match = style?.match(/padding-left:\s*([\d.]+)rem/);
+      return match ? parseFloat(match[1]!) : NaN;
+    };
+    const [p0, p1, p2] = lis.map((li) => paddingLeft(li.attributes('style')));
+    // Relative ordering only — not pinned to whatever internal per-depth multiplier the
+    // component happens to use, so a purely cosmetic tweak to that multiplier can't break this.
+    expect(p0).toBe(0);
+    expect(p1).toBeGreaterThan(p0!);
+    expect(p2).toBeGreaterThan(p1!);
   });
 
   it('respects a `label`/`ariaLabel` prop for the heading and nav landmark (e.g. "Threads" for Thread mode)', () => {

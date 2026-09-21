@@ -421,19 +421,25 @@ describe('ThreadCard — branch connector alignment (bug fix)', () => {
 
     stubRect(trunkEl, { top: 100 } as DOMRect);
     // The forking run-card (ends at `m0`) sits far down the trunk (e.g. `m0` is a long message)…
-    stubRect(runCards[0]!.element, { bottom: 500 } as DOMRect);
+    const runCardBottom = 500;
+    stubRect(runCards[0]!.element, { bottom: runCardBottom } as DOMRect);
     // …while the branch column's own natural (un-nudged) stacking would put this group much higher.
-    stubRect(groupEl, { top: 250 } as DOMRect);
+    const groupNaturalTop = 250;
+    stubRect(groupEl, { top: groupNaturalTop } as DOMRect);
 
     // Re-triggers `syncBranchAlignment` the same way a real expand/collapse toggle would (the
     // `watch([branchSegments, expandedByMessage], ...)` in `ThreadCard.vue`).
     await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
 
-    // target (run-card bottom, relative to trunk top) = 500 - 100 = 400
-    // natural (group top, relative to trunk top) = 250 - 100 = 150
-    // required nudge = 400 - 150 = 250px
-    await waitFor(() => (groupEl as HTMLElement).style.marginTop === '250px');
-    expect((groupEl as HTMLElement).style.marginTop).toBe('250px');
+    // The actual invariant ("lands level with the trunk segment it forked from"), not the
+    // internal nudge formula's own arithmetic: the group's effective top (its natural,
+    // un-nudged top plus whatever margin got applied) must land exactly on the forking
+    // run-card's bottom edge — the two elements' own stubbed rects are both already
+    // relative to the same fixed trunk top, so no further offsetting is needed.
+    const effectiveGroupTop = (): number =>
+      groupNaturalTop + (parseFloat((groupEl as HTMLElement).style.marginTop || '0') || 0);
+    await waitFor(() => effectiveGroupTop() === runCardBottom);
+    expect(effectiveGroupTop()).toBe(runCardBottom);
   });
 
   // Regression test for the "jiggle" bug: a naive implementation reset `margin-top` to `0px` before

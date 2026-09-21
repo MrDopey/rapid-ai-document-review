@@ -154,6 +154,66 @@ async function mountApp(pinia: Pinia): Promise<VueWrapper> {
   return wrapper;
 }
 
+// Shared by the three "focus multiple conversation panels via a hotkey" suites below (auto-focus
+// on branch, Ctrl+Alt+1..9 digit toggle, cycle-focused-conversations hotkey) — previously
+// copy-pasted verbatim into each of the three, now consolidated here.
+
+/** The do-nothing `ResizeObserverStub` above never actually invokes its callback, which pins
+ *  every other suite in this file to `viewportFitCount === 1` (see `focusConfig.ts`'s
+ *  `useFocusCap`) — fine for suites that don't care about the focus cap, but each of the three
+ *  suites below needs real headroom (cap 3, the default) to exercise both "still room" and
+ *  "already full" — so `.panes`' `ResizeObserver` is given a wide measured width the moment it
+ *  starts observing, simulating a viewport with room for several focused panels side by side. */
+class WideResizeObserverStub {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(_target: Element): void {
+    this.callback(
+      [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+/** `ConversationDetailPanel` is deliberately left out of this stub set in every one of the three
+ *  suites below — each needs a real, focused-panel instance to observe/interact with, not a stub. */
+const FOCUS_PANEL_STUBS = {
+  DocumentCanvas: true,
+  PreviewComponent: true,
+  HudPanel: true,
+  HistoryPanel: true,
+  KeyboardShortcutsDialog: true,
+  HelpDialog: true,
+  EditsList: true,
+};
+
+function conversationFixture(
+  overrides: Partial<ConversationDto> & { id: string },
+): ConversationDto {
+  return {
+    name: overrides.id,
+    kind: 'branch',
+    parentId: null,
+    branchDepth: 1,
+    status: 'idle',
+    isPrimary: false,
+    contextRevision: 1,
+    isStale: false,
+    pendingEditCount: 0,
+    canEdit: true,
+    canBranch: true,
+    errorMessage: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    closedAt: null,
+    readOnly: false,
+    anchorOrphaned: false,
+    seedSelection: null,
+    forkedFromMessageId: null,
+    ...overrides,
+  };
+}
+
 describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
   let pinia: Pinia;
 
@@ -260,23 +320,8 @@ describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
 describe('App.vue — auto-focus on branch from the focus view', () => {
   let pinia: Pinia;
 
-  // The do-nothing `ResizeObserverStub` above never actually invokes its callback, which pins every
-  // other suite in this file to `viewportFitCount === 1` (see `focusConfig.ts`'s `useFocusCap`) —
-  // fine for suites that don't care about the focus cap, but this suite needs real headroom (cap 3,
-  // the default) to exercise both "still room" and "already full" — so `.panes`' `ResizeObserver`
-  // is given a wide measured width the moment it starts observing, simulating a viewport with room
-  // for several focused panels side by side.
-  class WideResizeObserverStub {
-    constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(_target: Element): void {
-      this.callback(
-        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve(): void {}
-    disconnect(): void {}
-  }
+  // `WideResizeObserverStub`/`FOCUS_PANEL_STUBS`/`conversationFixture` are shared module-level
+  // helpers above (identical setup needed by this suite and the two Focus-hotkey suites below it).
 
   beforeEach(() => {
     pinia = createPinia();
@@ -292,45 +337,6 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
     vi.clearAllMocks();
   });
 
-  // Everything except `ConversationDetailPanel` (and its own nested `EditsList`, irrelevant here)
-  // is stubbed, same convention as `MessageBubble.spec.ts`'s own
-  // "ConversationDetailPanel/ConversationView — Expand all/Branch parity" suite.
-  const FOCUS_VIEW_STUBS = {
-    DocumentCanvas: true,
-    PreviewComponent: true,
-    HudPanel: true,
-    HistoryPanel: true,
-    KeyboardShortcutsDialog: true,
-    HelpDialog: true,
-    EditsList: true,
-  };
-
-  function conversationFixture(
-    overrides: Partial<ConversationDto> & { id: string },
-  ): ConversationDto {
-    return {
-      name: overrides.id,
-      kind: 'branch',
-      parentId: null,
-      branchDepth: 1,
-      status: 'idle',
-      isPrimary: false,
-      contextRevision: 1,
-      isStale: false,
-      pendingEditCount: 0,
-      canEdit: true,
-      canBranch: true,
-      errorMessage: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      closedAt: null,
-      readOnly: false,
-      anchorOrphaned: false,
-      seedSelection: null,
-      forkedFromMessageId: null,
-      ...overrides,
-    };
-  }
-
   /** Mounts `App.vue` for real, seeds `conversationsStore.conversations` (after the initial
    *  `conversationsStore.load()` from `onMounted` has resolved to its mocked empty list — otherwise
    *  that load would clobber the seed), then focuses `focusedIds` in order via the same
@@ -340,7 +346,7 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
    *  load) is stubbed to a no-op, same as `MessageBubble.spec.ts`'s equivalent suite — this test
    *  only cares about focus-set/`lastInteractedId` state, not a real detail re-fetch. */
   async function mountFocusedApp(conversations: ConversationDto[], focusedIds: string[]) {
-    const wrapper = mount(App, { global: { plugins: [pinia], stubs: FOCUS_VIEW_STUBS } });
+    const wrapper = mount(App, { global: { plugins: [pinia], stubs: FOCUS_PANEL_STUBS } });
     await flushPromises();
 
     const conversationsStore = useConversationsStore();
@@ -600,6 +606,18 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
     return button;
   }
 
+  /** Splits `.panes`' rendered `grid-template-columns` into its individual tracks — a black-box
+   *  read of column count/order, without pinning the exact literal CSS string (fr-ratio precision,
+   *  the resize handle's own px width, etc.), which is what actually matters for the "does hiding
+   *  one pane collapse/leave-untouched the right track" invariants below. */
+  function panesGridTracks(wrapper: VueWrapper): string[] {
+    const style = wrapper.get('.panes').attributes('style') ?? '';
+    const match = style.match(/grid-template-columns:\s*([^;]+);/);
+    if (!match)
+      throw new Error(`Could not find a grid-template-columns declaration in: "${style}"`);
+    return match[1].trim().split(/\s+/);
+  }
+
   it('both panes are visible by default, each with a "Hide" toggle button', async () => {
     const wrapper = await mountAttachedApp(pinia);
     expect(wrapper.findComponent(PreviewComponent).isVisible()).toBe(true);
@@ -618,9 +636,14 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
     // auto-placement bug used to shift Canvas into Preview's own 0-width track).
     expect(wrapper.findComponent(DocumentCanvas).isVisible()).toBe(true);
     expect(wrapper.findComponent(DocumentCanvas).props('editorVisible')).toBe(true);
-    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(
-      /grid-template-columns:\s*0fr 0px [\d.]+fr/,
-    );
+    // Column-count/order invariant (not the exact fr-ratio literal): still exactly three tracks
+    // (preview | resize-handle | canvas), with Preview's own track and its handle gap collapsed
+    // to zero while Canvas still occupies real space.
+    const tracksHidden = panesGridTracks(wrapper);
+    expect(tracksHidden).toHaveLength(3);
+    expect(tracksHidden[0]).toBe('0fr');
+    expect(tracksHidden[1]).toBe('0px');
+    expect(parseFloat(tracksHidden[2]!)).toBeGreaterThan(0);
     expect(localStorage.getItem('raidr:previewVisible')).toBe('false');
 
     // The button relabels to "Show preview" and toggles back.
@@ -640,10 +663,13 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
     expect(wrapper.findComponent(DocumentCanvas).props('editorVisible')).toBe(false);
     expect(wrapper.findComponent(PreviewComponent).isVisible()).toBe(true);
     // The outer Preview|Canvas grid split is untouched by this toggle — DocumentCanvas's own grid
-    // column never collapses any more (only Preview's own track can).
-    expect(wrapper.get('.panes').attributes('style') ?? '').toMatch(
-      /grid-template-columns:\s*[\d.]+fr 6px [\d.]+fr/,
-    );
+    // column never collapses any more (only Preview's own track can): still three tracks, none
+    // of them collapsed to zero (column-count/order invariant, not the exact px/fr literals).
+    const tracksHidden = panesGridTracks(wrapper);
+    expect(tracksHidden).toHaveLength(3);
+    expect(parseFloat(tracksHidden[0]!)).toBeGreaterThan(0);
+    expect(tracksHidden[1]).not.toBe('0px');
+    expect(parseFloat(tracksHidden[2]!)).toBeGreaterThan(0);
     expect(localStorage.getItem('raidr:editorVisible')).toBe('false');
   });
 
@@ -824,64 +850,13 @@ describe('App.vue — conflictMessage banner', () => {
 // visibility (now Ctrl+Alt+P/E, covered above) — the freed digits now toggle focus for the Nth
 // conversation in HudPanel.vue's own display order (`orderConversationsByAnchor`, honoring its
 // Active-only/All filter), reusing the same `toggleFocus` add-if-room/remove-if-present toggle
-// every other Focus entry point already shares. Same `WideResizeObserverStub`/`FOCUS_VIEW_STUBS`-
+// every other Focus entry point already shares. Same `WideResizeObserverStub`/`FOCUS_PANEL_STUBS`-
 // style setup as the "auto-focus on branch" suite above (a real `ConversationDetailPanel` per
 // focused id, `HudPanel` stubbed out so the HUD's own filter can be driven directly via its stub's
 // `update:filter` emit) — this suite only cares about which conversations end up focused, not the
 // HUD's own rendered rows.
 describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
   let pinia: Pinia;
-
-  // Same "wide enough for the default cap (3) to apply in full" stub as the auto-focus-on-branch
-  // suite above — see that suite's own doc comment for why `ResizeObserverStub`'s do-nothing
-  // default isn't enough here.
-  class WideResizeObserverStub {
-    constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(): void {
-      this.callback(
-        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve(): void {}
-    disconnect(): void {}
-  }
-
-  const FOCUS_DIGIT_STUBS = {
-    DocumentCanvas: true,
-    PreviewComponent: true,
-    HudPanel: true,
-    HistoryPanel: true,
-    KeyboardShortcutsDialog: true,
-    HelpDialog: true,
-    EditsList: true,
-  };
-
-  function conversationFixture(
-    overrides: Partial<ConversationDto> & { id: string },
-  ): ConversationDto {
-    return {
-      name: overrides.id,
-      kind: 'branch',
-      parentId: null,
-      branchDepth: 1,
-      status: 'idle',
-      isPrimary: false,
-      contextRevision: 1,
-      isStale: false,
-      pendingEditCount: 0,
-      canEdit: true,
-      canBranch: true,
-      errorMessage: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      closedAt: null,
-      readOnly: false,
-      anchorOrphaned: false,
-      seedSelection: null,
-      forkedFromMessageId: null,
-      ...overrides,
-    };
-  }
 
   let currentWrapper: VueWrapper | null = null;
 
@@ -905,7 +880,7 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
    *  `conversationsStore.load()` from `onMounted` would otherwise clobber it).
    *
    *  Mounted with `attachTo: document.body` (same reason as the Preview/Editor visibility suite
-   *  above) — `ConversationDetailPanel` is deliberately left out of `FOCUS_DIGIT_STUBS` (a real
+   *  above) — `ConversationDetailPanel` is deliberately left out of `FOCUS_PANEL_STUBS` (a real
    *  instance renders per focused id, marking its root `aria-modal="true"`), and `isOverlayOpen()`
    *  (a11y/keymap-registry.ts), which the digit shortcut consults, queries the real `document` —
    *  jsdom only surfaces that element to `document.querySelector` once the wrapper's tree is
@@ -915,7 +890,7 @@ describe('App.vue — Ctrl+Alt+1..9 conversation-focus toggle', () => {
   async function mountWithConversations(conversations: ConversationDto[]): Promise<VueWrapper> {
     const wrapper = mount(App, {
       attachTo: document.body,
-      global: { plugins: [pinia], stubs: FOCUS_DIGIT_STUBS },
+      global: { plugins: [pinia], stubs: FOCUS_PANEL_STUBS },
     });
     currentWrapper = wrapper;
     await flushPromises();
@@ -1208,54 +1183,6 @@ describe('App.vue — History panel toggle moved to Ctrl+Alt+Shift+H', () => {
 describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt+ArrowLeft/Right)', () => {
   let pinia: Pinia;
 
-  class WideResizeObserverStub {
-    constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(): void {
-      this.callback(
-        [{ contentRect: { width: 2000 } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve(): void {}
-    disconnect(): void {}
-  }
-
-  const CYCLE_STUBS = {
-    DocumentCanvas: true,
-    PreviewComponent: true,
-    HudPanel: true,
-    HistoryPanel: true,
-    KeyboardShortcutsDialog: true,
-    HelpDialog: true,
-    EditsList: true,
-  };
-
-  function conversationFixture(
-    overrides: Partial<ConversationDto> & { id: string },
-  ): ConversationDto {
-    return {
-      name: overrides.id,
-      kind: 'branch',
-      parentId: null,
-      branchDepth: 1,
-      status: 'idle',
-      isPrimary: false,
-      contextRevision: 1,
-      isStale: false,
-      pendingEditCount: 0,
-      canEdit: true,
-      canBranch: true,
-      errorMessage: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      closedAt: null,
-      readOnly: false,
-      anchorOrphaned: false,
-      seedSelection: null,
-      forkedFromMessageId: null,
-      ...overrides,
-    };
-  }
-
   let currentWrapper: VueWrapper | null = null;
 
   beforeEach(() => {
@@ -1284,7 +1211,7 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
   ): Promise<VueWrapper> {
     const wrapper = mount(App, {
       attachTo: document.body,
-      global: { plugins: [pinia], stubs: CYCLE_STUBS },
+      global: { plugins: [pinia], stubs: FOCUS_PANEL_STUBS },
     });
     currentWrapper = wrapper;
     await flushPromises();
@@ -1351,14 +1278,11 @@ describe('App.vue — cycle-focused-conversations hotkey (Ctrl+Alt+H/L, Ctrl+Alt
   // event never arrives. This test locks in that the in-app dispatch for `KeyL` is correct (so any
   // *future* regression here is still caught), and the tests below cover the new Ctrl+Alt+N alternate
   // this fix adds as a guaranteed-reachable fallback.
-  it("regression: KeyL is defined once, with no registry collision, and its handler is symmetric with KeyH's", () => {
-    const keyLBindings = HOTKEY_BINDINGS.filter((b) => b.code === 'KeyL');
-    expect(keyLBindings).toHaveLength(1);
-    expect(keyLBindings[0]).toMatchObject({
-      id: 'cycle-conversation-next',
-      modifiers: { ctrl: true, alt: true, shift: false },
-      composerExempt: true,
-    });
+  it('regression: no registry-wide hotkey collision (e.g. a stray duplicate binding on KeyL)', () => {
+    // The specific shape/behavior of the `KeyL` binding itself is already proven by the
+    // behavioral test above (it actually cycles focus) — asserting its config object's shape
+    // directly here would just white-box-duplicate that. This only checks the thing the
+    // behavioral test can't: that nothing else in the registry collides with it.
     expect(findConflicts(HOTKEY_BINDINGS)).toEqual([]);
   });
 

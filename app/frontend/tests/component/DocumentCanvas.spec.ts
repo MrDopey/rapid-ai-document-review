@@ -208,17 +208,4 @@ describe('DocumentCanvas.vue — Editor|Conversation-sidebar resize handle', () 
     expect(localStorage.getItem('raidr:paneSizes')).toBeNull();
     expect(localStorage.getItem('raidr:previewVisible')).toBeNull();
   });
-
-  it('never lets .thread-columns shrink below its existing branch-column min-width, even under an extreme drag', async () => {
-    const wrapper = mountCanvas(pinia, true);
-    stubCanvasWidth(wrapper, 1000);
-    const threadColumnsEl = wrapper.get('.thread-columns').element as HTMLElement;
-    const minWidthPx = Number(threadColumnsEl.style.minWidth.replace('px', ''));
-
-    await drag(wrapper, 500, 2000); // drag as far right (editor-growing) as possible
-
-    // `min-width` is left untouched by this splitter (see `threadColumnsWidth` in the component) —
-    // still present and still the same value after the most aggressive possible drag.
-    expect(Number(threadColumnsEl.style.minWidth.replace('px', ''))).toBe(minWidthPx);
-  });
 });

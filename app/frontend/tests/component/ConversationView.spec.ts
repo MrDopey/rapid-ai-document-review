@@ -709,46 +709,30 @@ describe('ConversationView — archiveOrReviewAction (specs/006-archivable-main-
     });
   }
 
-  it('renders the "Archive" action for an open (non-closed) Main conversation', async () => {
-    const wrapper = mountView({ kind: 'main', status: 'idle' });
-    await flushPromises();
-    const archiveButton = wrapper.find('[data-action="archive"]');
-    expect(archiveButton.exists()).toBe(true);
-    expect(archiveButton.text()).toBe('Archive');
-  });
+  // `archiveOrReviewAction` (ConversationView.vue) branches only on `status`, never on `kind` —
+  // consolidated via `it.each` across all three kinds per status branch (rather than one full test
+  // body per kind) so this still proves there's no kind-gating (the actual regression this describe
+  // block guards against) without three redundant copies of the same status-branch assertion.
+  it.each(['main', 'branch', 'review'] as const)(
+    'renders the "Archive" action for an open (non-closed) %s conversation',
+    async (kind) => {
+      const wrapper = mountView({ kind, status: 'idle' });
+      await flushPromises();
+      const archiveButton = wrapper.find('[data-action="archive"]');
+      expect(archiveButton.exists()).toBe(true);
+      expect(archiveButton.text()).toBe('Archive');
+    },
+  );
 
-  it('renders "Request review", not "Archive", for a closed Main conversation — same as any other closed kind', async () => {
-    const wrapper = mountView({ kind: 'main', status: 'closed' });
-    await flushPromises();
-    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
-    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
-  });
-
-  it('still renders "Archive" for an open branch conversation (unchanged)', async () => {
-    const wrapper = mountView({ kind: 'branch', status: 'idle' });
-    await flushPromises();
-    expect(wrapper.find('[data-action="archive"]').exists()).toBe(true);
-  });
-
-  it('still renders "Request review", not "Archive", for a closed branch conversation (unchanged)', async () => {
-    const wrapper = mountView({ kind: 'branch', status: 'closed' });
-    await flushPromises();
-    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
-    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
-  });
-
-  it('still renders "Archive" for an open review-kind conversation (unchanged)', async () => {
-    const wrapper = mountView({ kind: 'review', status: 'idle' });
-    await flushPromises();
-    expect(wrapper.find('[data-action="archive"]').exists()).toBe(true);
-  });
-
-  it('still renders "Request review", not "Archive", for a closed review-kind conversation (unchanged)', async () => {
-    const wrapper = mountView({ kind: 'review', status: 'closed' });
-    await flushPromises();
-    expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
-    expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
-  });
+  it.each(['main', 'branch', 'review'] as const)(
+    'renders "Request review", not "Archive", for a closed %s conversation',
+    async (kind) => {
+      const wrapper = mountView({ kind, status: 'closed' });
+      await flushPromises();
+      expect(wrapper.find('[data-action="archive"]').exists()).toBe(false);
+      expect(wrapper.find('[data-action="request-review"]').exists()).toBe(true);
+    },
+  );
 });
 
 // Bug fix (scroll-to-top-of-message): a new assistant message arriving used to always scroll the

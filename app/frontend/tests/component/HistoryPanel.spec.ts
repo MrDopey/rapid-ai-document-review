@@ -225,7 +225,7 @@ describe('HistoryPanel — reloads on document switch (US2/T031)', () => {
     store.activeDocumentId = 'doc-a';
     store.revisions = [makeRevision({ revision: 7, origin: 'creation' })];
 
-    const wrapper = mount(HistoryPanel, {
+    mount(HistoryPanel, {
       global: { plugins: [pinia], stubs: { RevisionDiffViewer: true } },
     });
     await flushPromises();
@@ -239,7 +239,6 @@ describe('HistoryPanel — reloads on document switch (US2/T031)', () => {
     await flushPromises();
 
     expect(httpClient.listRevisions).toHaveBeenCalledWith('doc-b', { cursor: undefined });
-    expect(wrapper.vm).toBeTruthy();
     expect(store.revisions.map((r) => r.revision)).toEqual([1]);
   });
 

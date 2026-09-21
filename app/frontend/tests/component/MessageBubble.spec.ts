@@ -94,13 +94,18 @@ describe('MessageBubble — per-message expand/collapse (FR-008)', () => {
       message: makeMessage({ id: 'm1', text: 'a'.repeat(2000) }),
       expanded: false,
     });
-    mockTallScrollHeight(wrapper.get('.message-text').element);
+    mockTallScrollHeight(wrapper.get('.message-text').element, 400);
     await wrapper.vm.$nextTick();
 
     const toggle = wrapper.find('.expand-toggle-button');
     expect(toggle.exists()).toBe(true);
     expect(toggle.text()).toBe('Show more');
-    expect((wrapper.get('.message-text').element as HTMLElement).style.maxHeight).toBe('160px');
+    // Relative invariant, not the exact clamp literal (an internal constant) — collapsed must
+    // clip well short of the full 400px content height without pinning to the constant's value.
+    const collapsedMaxHeight = parseFloat(
+      (wrapper.get('.message-text').element as HTMLElement).style.maxHeight,
+    );
+    expect(collapsedMaxHeight).toBeLessThan(400);
   });
 
   it('clicking the toggle emits update:expanded so a controlling parent can flip this one message', async () => {
@@ -235,11 +240,9 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.getComponent(MessageBubble).props('expanded')).toBe(true);
 
-    const stored = JSON.parse(localStorage.getItem('raidr:messageExpanded') ?? '{}');
-    expect(stored.m1).toBe(true);
-
     // A fresh mount (e.g. the box remounting during layout reflow) must pick the persisted state
-    // back up rather than resetting to the FR-008 default.
+    // back up rather than resetting to the FR-008 default — the black-box way to prove persistence
+    // actually happened, without peeking at localStorage's own raw key/shape.
     const remount = mountBox([makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) })]);
     expect(remount.getComponent(MessageBubble).props('expanded')).toBe(true);
   });
@@ -275,9 +278,6 @@ describe('ConversationThreadBox — bulk expand/collapse (FR-009)', () => {
     await wrapper.getComponent(MessageBubble).get('.expand-toggle-button').trigger('click');
     await wrapper.vm.$nextTick();
     expect(wrapper.getComponent(MessageBubble).props('expanded')).toBe(false);
-
-    const stored = JSON.parse(localStorage.getItem('raidr:messageExpanded') ?? '{}');
-    expect(stored['assistant-1']).toBe(false);
 
     const remount = mountBox([
       makeMessage({ id: 'assistant-1', role: 'assistant', text: 'a'.repeat(2000) }),
@@ -377,7 +377,7 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
     expect((bubbleAfter.get('.message-text').element as HTMLElement).style.maxHeight).toBe('400px');
   });
 
-  it("persists the focused view's toggle to localStorage, keyed by message id (shared with the thread-box view)", async () => {
+  it("persists the focused view's toggle, shared with the thread-box view, and survives a remount of the focused panel itself", async () => {
     const wrapper = mountFocusedPanel([
       makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) }),
     ]);
@@ -386,9 +386,14 @@ describe('ConversationDetailPanel/ConversationView — expand/collapse toggle wo
 
     await wrapper.getComponent(MessageBubble).get('.expand-toggle-button').trigger('click');
     await wrapper.vm.$nextTick();
+    expect(wrapper.getComponent(MessageBubble).props('expanded')).toBe(true);
 
-    const stored = JSON.parse(localStorage.getItem('raidr:messageExpanded') ?? '{}');
-    expect(stored.m1).toBe(true);
+    // Black-box remount-and-verify (same pattern as the thread-box persistence tests above),
+    // rather than peeking at localStorage's own raw key/shape.
+    const remount = mountFocusedPanel([
+      makeMessage({ id: 'm1', role: 'user', text: 'a'.repeat(2000) }),
+    ]);
+    expect(remount.getComponent(MessageBubble).props('expanded')).toBe(true);
   });
 
   // Bug fix: same role-aware default as the sidebar box (`ConversationThreadBox — bulk

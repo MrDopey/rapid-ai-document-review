@@ -133,27 +133,15 @@ describe('RevisionDiffViewer', () => {
   });
 
   // Spec: specs/007-diff-viewer-modes (FR-011..FR-014) — DiffText.vue migration + side-by-side parity.
+  //
+  // The marker-glyph/visually-hidden-label rendering itself (DiffText.vue's own contract) is
+  // covered directly by DiffText.spec.ts, and its side="left"/"right" column filtering by both
+  // DiffText.spec.ts and DiffViewer.spec.ts's own "selecting Side by side" test — re-testing either
+  // through this second host component would just duplicate that coverage verbatim, so the tests
+  // below stick to what's actually specific to RevisionDiffViewer: its own revision-selection/
+  // view-mode tab UI (defaulting to "unified", switching, and resetting per revision pair).
 
-  it('renders the marker glyph and visually-hidden label via DiffText.vue (FR-011)', async () => {
-    const previousText = 'Line one\nLine two\nLine three\n';
-    const currentText = 'Line one\nLine two updated\nLine three\nLine four\n';
-    vi.spyOn(store, 'exportRevision').mockImplementation(async (revision?: number) =>
-      revision === 1 ? previousText : currentText,
-    );
-
-    const wrapper = mountViewer(pinia, 2, 1);
-    await flushPromises();
-    await flushPromises();
-
-    const del = wrapper.find('del.removed');
-    const ins = wrapper.find('ins.added');
-    expect(del.find('.marker').text()).toBe('−');
-    expect(del.find('.visually-hidden').text()).toBe('removed:');
-    expect(ins.find('.marker').text()).toBe('+');
-    expect(ins.find('.visually-hidden').text()).toBe('added:');
-  });
-
-  it('defaults to "unified" and offers a "Side by side" view rendering the same filtered columns as DiffViewer.vue (FR-012, FR-013)', async () => {
+  it('defaults to "unified" and offers a "Side by side" view, switching the visible panel (FR-012, FR-013)', async () => {
     const previousText = 'Line one\nLine two\nLine three\n';
     const currentText = 'Line one\nLine two updated\nLine three\nLine four\n';
     vi.spyOn(store, 'exportRevision').mockImplementation(async (revision?: number) =>
@@ -173,13 +161,13 @@ describe('RevisionDiffViewer', () => {
 
     await sideBySideTab.trigger('click');
 
+    // Which side filters out which change type is DiffText.vue's own contract (DiffText.spec.ts)
+    // and already exercised end-to-end via DiffViewer.vue (DiffViewer.spec.ts's "selecting Side by
+    // side" test) — this only needs to prove RevisionDiffViewer's own tab wiring actually flips the
+    // visible panel.
     expect(wrapper.find('#revision-diff-panel-side-by-side').attributes('hidden')).toBeUndefined();
-    const left = wrapper.find('.diff-column-left');
-    const right = wrapper.find('.diff-column-right');
-    expect(left.find('.removed').exists()).toBe(true);
-    expect(left.find('.added').exists()).toBe(false);
-    expect(right.find('.added').exists()).toBe(true);
-    expect(right.find('.removed').exists()).toBe(false);
+    expect(wrapper.find('.diff-column-left').exists()).toBe(true);
+    expect(wrapper.find('.diff-column-right').exists()).toBe(true);
   });
 
   it('resets the view to "unified" on a new revision comparison', async () => {
@@ -205,44 +193,11 @@ describe('RevisionDiffViewer', () => {
     ).toBeDefined();
   });
 
-  it('Unified view collapses a long unchanged run by default, expands it on click, and "Focus on changes" toggles it off', async () => {
-    const filler = (label: string, count: number) =>
-      Array.from({ length: count }, (_, i) => `${label} line ${i + 1}.`).join('\n');
-    const before = filler('Before', 10);
-    const after = filler('After', 10);
-    vi.spyOn(store, 'exportRevision').mockImplementation(async (revision?: number) =>
-      revision === 1
-        ? `${before}\nOriginal change line.\n${after}\n`
-        : `${before}\nChanged change line.\n${after}\n`,
-    );
-
-    const wrapper = mountViewer(pinia, 2, 1);
-    await flushPromises();
-    await flushPromises();
-
-    const unifiedPanel = wrapper.find('#revision-diff-panel-unified');
-    const markers = unifiedPanel.findAll('.collapsed-marker');
-    expect(markers).toHaveLength(2);
-    expect(unifiedPanel.text()).toContain('Changed change line.');
-    expect(unifiedPanel.text()).not.toContain('Before line 1.');
-    expect(unifiedPanel.text()).not.toContain('After line 10.');
-
-    await markers[0].trigger('click');
-    expect(unifiedPanel.findAll('.collapsed-marker')).toHaveLength(1);
-    expect(unifiedPanel.text()).toContain('Before line 1.');
-
-    const focusToggle = wrapper.find('.focus-toggle input[type="checkbox"]');
-    await focusToggle.setValue(false);
-    expect(unifiedPanel.find('.collapsed-marker').exists()).toBe(false);
-    expect(unifiedPanel.text()).toContain('Before line 1.');
-    expect(unifiedPanel.text()).toContain('After line 10.');
-
-    // Toggling focus back on returns to the default collapsed state — it must not remember the
-    // group we manually expanded earlier.
-    await focusToggle.setValue(true);
-    expect(unifiedPanel.findAll('.collapsed-marker')).toHaveLength(2);
-    expect(unifiedPanel.text()).not.toContain('Before line 1.');
-  });
+  // The unchanged-run collapse/expand/"Focus on changes" mechanism itself is
+  // collapseUnchanged.ts's own logic (tests/unit/collapseUnchanged.spec.ts) and is already
+  // exercised end-to-end via DiffViewer.vue by DiffViewer.spec.ts's "Full-document collapses a
+  // long unchanged run..." test — re-running the identical scenario through this second host
+  // component would only duplicate that coverage, so it's intentionally not repeated here.
 
   it('performs no additional store.exportRevision call when switching view modes (FR-014)', async () => {
     const exportSpy = vi
