@@ -44,9 +44,12 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    originalSnapshot.value = documentStore.content;
     resetExpanded();
     preview.value = await httpClient.previewEdit(documentStore.activeDocumentId!, props.editId);
+    // Re-read the live document *after* the await resolves (rather than snapshotting it before
+    // the request went out) so a concurrent edit landing during the request doesn't desync this
+    // client-side base text from whatever the server actually diffed `fullPreview` against.
+    originalSnapshot.value = documentStore.content;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load preview.';
   } finally {
@@ -67,7 +70,8 @@ const intentWordDiffs = computed(() =>
 
 const fullDocHasNoDiff = computed(
   () =>
-    fullDocDiff.value.length === 1 && !fullDocDiff.value[0].added && !fullDocDiff.value[0].removed,
+    fullDocDiff.value.length === 0 ||
+    fullDocDiff.value.every((part) => !part.added && !part.removed),
 );
 </script>
 

@@ -12,14 +12,19 @@ export interface AnchorPositionSource {
  * Document-space Y (data-model.md's `ConversationLayout.anchorY`) for a conversation's anchor:
  * `0` (top of document) when `seedSelection` is `null` (Main, or any conversation created without
  * a selection); otherwise the pixel Y of the selection's start, resolved via CodeMirror through
- * `editor`. Falls back to `0` if the editor isn't mounted yet or can't resolve the position (e.g.
- * an orphaned anchor whose offset no longer exists in a shorter document) rather than throwing —
- * losing exact vertical placement in that rare case is preferable to breaking the whole canvas.
+ * `editor`. Falls back to `fallback` (defaulting to `0`) if the editor isn't mounted yet or can't
+ * resolve the position (e.g. an orphaned anchor whose offset no longer exists in a shorter
+ * document) rather than throwing — losing exact vertical placement in that rare case is preferable
+ * to breaking the whole canvas. Callers that have a last-known-good position for this same anchor
+ * (e.g. `DocumentCanvas.vue`'s per-conversation cache) should pass it as `fallback` so an orphaned
+ * anchor stays near where it last rendered instead of teleporting to the top of the canvas.
  */
 export function computeAnchorY(
   seedSelection: ConversationSeedSelectionDto | null,
   editor: AnchorPositionSource | null,
+  fallback = 0,
 ): number {
-  if (!seedSelection || !editor) return 0;
-  return editor.anchorTop(seedSelection.from) ?? 0;
+  if (!seedSelection) return 0;
+  if (!editor) return fallback;
+  return editor.anchorTop(seedSelection.from) ?? fallback;
 }

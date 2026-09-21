@@ -157,6 +157,16 @@ export const httpClient = {
     const qs = params.toString();
     const response = await fetch(`/api/documents/${documentId}/export${qs ? `?${qs}` : ''}`);
     if (!response.ok) {
+      const json = await response.json().catch(() => undefined);
+      const envelope = ErrorEnvelope.safeParse(json);
+      if (envelope.success) {
+        throw new ApiError(
+          response.status,
+          envelope.data.error.code,
+          envelope.data.error.message,
+          envelope.data.error.details,
+        );
+      }
       throw new ApiError(response.status, 'UNKNOWN', 'Export failed');
     }
     return response.text();
