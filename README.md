@@ -54,6 +54,30 @@ into view.
 Preview's own rendering/behavior and the History panel are unchanged by this layout — only their
 column position shifted to make room for the Canvas.
 
+### Screenshots
+
+**Canvas mode** — Preview, editor, and a conversation panel side by side, with the agent's
+reasoning and proposed edits visible:
+
+![Canvas mode: preview, editor, and conversation panel](docs/screenshots/canvas-mode-preview-editor-conversation.png)
+
+Multiple conversations open at once, each with its own pending/applied proposed edits:
+
+![Canvas mode: multiple conversations with proposed edits](docs/screenshots/canvas-mode-multiple-conversations-proposed-edits.png)
+
+Reviewing a proposed edit as an added/removed diff before accepting it:
+
+![Proposed edit shown as an added/removed diff](docs/screenshots/proposed-edit-diff-view.png)
+
+The History panel comparing two document revisions:
+
+![Document history panel comparing two revisions](docs/screenshots/document-history-version-diff.png)
+
+**Thread mode** — the sticky HUD bar listing every thread, with expand-all/export-all/done
+controls:
+
+![Thread mode HUD with threads list](docs/screenshots/thread-mode-hud-threads-list.png)
+
 ---
 
 ## Prerequisites
