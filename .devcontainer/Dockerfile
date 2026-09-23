@@ -33,18 +33,13 @@ RUN apt-get update && apt-get install -y \
 	jq \
 	ripgrep
 
+RUN npm install --global openwiki@1.5.2
+
 USER $USERNAME
 
 # claude + uv + pi
 RUN curl -fsSL https://claude.ai/install.sh | bash \
 	&& curl -LsSf https://astral.sh/uv/install.sh | sh \
 	&& curl -fsSL https://pi.dev/install.sh | sh
-
-# openwiki: generates/maintains the openwiki/ Markdown wiki (see
-# .github/workflows/openwiki-update.yml). Pinned to match that workflow's
-# version. Ships a prebuilt better-sqlite3 binary for linux/arm64 and
-# linux/amd64, so no build toolchain (build-essential/python3/make/g++) is
-# needed here - verified by a real `npm install -g` in this sandbox.
-RUN npm install --global openwiki@0.5.2
 
 RUN npx playwright install chromium
