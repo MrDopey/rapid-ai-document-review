@@ -5,6 +5,7 @@ app/backend/data/
 .scratch-*
 todo.md
 supervisor.md
+openwiki/.run.json
 
 # Node
 node_modules/
