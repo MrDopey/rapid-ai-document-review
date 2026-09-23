@@ -1032,6 +1032,8 @@ const actions = computed<ActionDescriptor[]>(() => {
   flex: 1;
   resize: vertical;
   min-height: 2.5rem;
+  min-block-size: 3lh;
+  field-sizing: content;
 }
 .composer-hint {
   display: flex;

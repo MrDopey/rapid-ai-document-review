@@ -96,6 +96,8 @@ defineExpose({ focus: () => textareaRef.value?.focus() });
 .thread-composer textarea {
   flex: 1 1 auto;
   min-height: 4.8rem;
+  min-block-size: 3lh;
+  field-sizing: content;
   resize: vertical;
   font: inherit;
   padding: 0.4rem 0.5rem;
