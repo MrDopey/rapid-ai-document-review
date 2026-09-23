@@ -101,7 +101,17 @@ watch(threadFocus.activeThreadId, (threadId) => {
 // rename }` source already established for canvas/thread code-sharing in this codebase, and matches
 // `DocumentCanvas.vue`'s own precedent of exposing specific methods/refs for `App.vue` to call
 // (`documentCanvasRef.value?.scrollEl`) rather than lifting all of this view's state up.
-defineExpose({ jumpToIndex: threadFocus.jumpToIndex });
+//
+// Bug fix: Ctrl+Alt+H/L/ArrowLeft/ArrowRight (`cycle-conversation-prev`/`-next` and their arrow/alt
+// variants, also `'Global'` scope) were a silent no-op in Thread mode — App.vue's own handler for
+// them only ever cycled `orderedFocusedConversations` (canvas mode's multi-focus overlay set, see
+// `focusPanelState.ts`), which stays permanently empty for a `documentType: 'thread'` document
+// (`conversationsStore` is never even loaded there). Thread mode has no equivalent "N floating
+// panels" concept to cycle among (see `threadFocusState.ts`'s own doc comment) — its one and only
+// focus concept is this same single `activeThreadId` cursor Ctrl+Alt+J/K already moves via
+// `cycleByOffset` — so exposing that same method here lets App.vue reuse it for H/L too, exactly
+// mirroring `jumpToIndex` just above rather than inventing a second, parallel focus model.
+defineExpose({ jumpToIndex: threadFocus.jumpToIndex, cycleByOffset: threadFocus.cycleByOffset });
 
 /** Document-wide "Expand all"/"Collapse all" (`stores/thread.ts`'s own doc comment explains why
  *  this is document-wide rather than per-Thread, unlike canvas mode's `useBulkToggleAction`).

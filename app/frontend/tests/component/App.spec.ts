@@ -1929,7 +1929,7 @@ describe('App.vue — Thread-mode header: History removed, Export all relocated'
 // against a `documentType: 'thread'` document with several threads, so the digit binding's dispatch
 // reaches `ThreadModeView`'s own exposed `jumpToIndex` (see that component's doc comment) for real,
 // the same way `App.spec.ts`'s existing canvas-mode digit suite exercises the pre-existing behavior.
-describe('App.vue — Ctrl+Alt+1..9 numbered-jump in Thread mode', () => {
+describe('App.vue — Ctrl+Alt+1..9 numbered-jump, and Ctrl+Alt+H/L/Arrow cycling, in Thread mode', () => {
   let pinia: Pinia;
 
   // jsdom implements no `Element.scrollIntoView` — same pre-existing gap/workaround
@@ -2098,5 +2098,119 @@ describe('App.vue — Ctrl+Alt+1..9 numbered-jump in Thread mode', () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('.thread-card--active').exists()).toBe(false);
+  });
+
+  // Bug fix: `cycle-conversation-prev`/`-next` (Ctrl+Alt+H/L/ArrowLeft/ArrowRight/N) is `'Global'`
+  // scope, so — like the digit bindings above before their own fix — it used to unconditionally
+  // call `cycleFocusedConversation`, which only ever cycles canvas mode's multi-focus overlay set
+  // (`orderedFocusedConversations`), always empty for a thread document. This mirrors the digit
+  // suite above but for H/L/Arrow, dispatching through `ThreadModeView`'s newly-exposed
+  // `cycleByOffset` (the exact same cursor `threadFocus.cycleByOffset` that Ctrl+Alt+J/K already
+  // uses) instead of silently doing nothing.
+  function pressCycle(code: string): void {
+    document.dispatchEvent(new KeyboardEvent('keydown', { code, ctrlKey: true, altKey: true }));
+  }
+
+  it('Ctrl+Alt+L moves the active thread forward (wraps from the last to the first)', async () => {
+    const wrapper = await mountThreadApp();
+    pressCycle('KeyL');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+
+    pressCycle('KeyL');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+
+    // Wraps back to the first thread from the last.
+    pressCycle('KeyL');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+  });
+
+  it('Ctrl+Alt+ArrowRight behaves identically to Ctrl+Alt+L', async () => {
+    const wrapper = await mountThreadApp();
+    pressCycle('ArrowRight');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+  });
+
+  it('Ctrl+Alt+H (and Ctrl+Alt+ArrowLeft) moves the active thread backward, wrapping from the first to the last', async () => {
+    const wrapper = await mountThreadApp();
+    // Start from a known position (2nd thread) via the numbered-jump binding, rather than relying
+    // on the "nothing active yet" edge case, whose landing index depends on list length.
+    pressDigit(2);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+
+    pressCycle('KeyH');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+
+    // Wraps from the first thread back to the last.
+    pressCycle('ArrowLeft');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+  });
+
+  it('does not conflict with the Ctrl+Alt+<N> numbered-jump — both remain independently usable', async () => {
+    const wrapper = await mountThreadApp();
+    pressDigit(2);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+
+    pressCycle('KeyH');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
   });
 });

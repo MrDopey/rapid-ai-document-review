@@ -124,6 +124,19 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   bindingHandlersByAction[binding.action]?.();
 }
 
+/** Ctrl+Alt+1..9 (`focus-toggle-<N>` in `a11y/keymap-registry.ts`, dispatched by App.vue's
+ *  `onGlobalKeydown` for canvas mode's `orderedVisibleConversations` and
+ *  `threadFocusState.ts#jumpToIndex` for Thread mode's `orderedThreadIds`) targets the Nth item of
+ *  this exact `items` order, 1-based — both callers build `hudItems` as a plain, unfiltered
+ *  `.map()` over that same ordered list (see each caller's own `hudItems` computed), so `items`'
+ *  own index here always agrees with the hotkey's target with no separate lookup needed. Only
+ *  returns a number for the first 9 rows — there is no `focus-toggle-10`+ binding
+ *  (`FOCUS_TOGGLE_BINDINGS` in the keymap registry only generates 1..9) — rather than showing a
+ *  number nothing actually binds to. */
+function hotkeyNumber(index: number): number | null {
+  return index < 9 ? index + 1 : null;
+}
+
 /** 005-canvas-conversation-threads (multi-focus overlay): a row's `title` — Primary's existing
  *  explanation stays first-class; a row that would exceed the live focus cap (not already
  *  focused, and the set is already at `focusCap`) also names *why* clicking it won't do anything
@@ -212,7 +225,7 @@ onBeforeUnmount(() => {
            benefit; the generalization here is about the data source (`items` prop vs. a hardcoded
            store), not a cosmetic rename. -->
       <li
-        v-for="item in props.items"
+        v-for="(item, index) in props.items"
         :key="item.id"
         :style="{ paddingLeft: `${(item.depth ?? 0) * 0.3}rem` }"
       >
@@ -236,6 +249,23 @@ onBeforeUnmount(() => {
             :aria-current="item.id === props.activeId ? 'true' : undefined"
             :aria-pressed="props.focusedIds.has(item.id)"
           >
+            <!-- Ctrl+Alt+<N> hotkey chip — only for the first 9 rows (see `hotkeyNumber` above),
+                 styled off the same shared `.badge` shape/border/font every other row chip
+                 (`ConversationStatusBadges.vue`'s status/stale/pending badges in the `#badge` slot
+                 below) already uses, so it reads as one more badge rather than a one-off style.
+                 Bug fix: this used to wrap the number in literal `[`/`]` characters on top of
+                 `.badge`'s own real `border: 1px solid currentColor` — the bracket glyphs sit right
+                 against the chip's padded edges and read as a second, doubled outline. `.badge`'s
+                 border already IS the chip framing, so the bracket text was purely redundant. -->
+            <span
+              v-if="hotkeyNumber(index) !== null"
+              class="badge hotkey-badge"
+              aria-hidden="true"
+              >{{ hotkeyNumber(index) }}</span
+            >
+            <span v-if="hotkeyNumber(index) !== null" class="visually-hidden"
+              >Hotkey Ctrl+Alt+{{ hotkeyNumber(index) }}.
+            </span>
             <span v-if="item.isPrimary" class="primary-icon" aria-hidden="true">★</span>
             <span v-if="item.isPrimary" class="visually-hidden">Primary conversation. </span>
             <span class="name">{{ item.name }}</span>
@@ -408,6 +438,17 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   color: var(--accent-color, #2563eb);
   font-size: 0.75rem;
+  line-height: 1;
+}
+/* Ctrl+Alt+<N> hotkey chip: same shared `.badge` pill (style.css) every status badge in
+   `ConversationStatusBadges.vue` already uses for shape/border/padding/font-size — only the color
+   is set here, `--accent-color` (already this row's "interactive affordance" color: `.is-focused`'s
+   border, `.primary-icon`'s star) so the chip visually pops against the row's own muted default
+   text instead of blending into it. */
+.hotkey-badge {
+  flex: 0 0 auto;
+  color: var(--accent-color, #2563eb);
+  font-weight: 700;
   line-height: 1;
 }
 .conversation-status-cell {

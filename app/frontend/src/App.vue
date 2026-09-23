@@ -518,6 +518,24 @@ function cycleFocusedConversation(offset: number): void {
   lastInteractedId.value = list[nextIndex]!.id;
 }
 
+// Bug fix: same "Nth item" dispatch split `focus-toggle-<N>`'s `digitMatch` branch below already
+// uses — `cycle-conversation-prev`/`-next` (Ctrl+Alt+H/L/ArrowLeft/ArrowRight/N) is `'Global'`
+// scope, so it used to unconditionally call `cycleFocusedConversation` above regardless of which
+// mode's view tree is mounted. That function only ever cycles `orderedFocusedConversations`
+// (canvas mode's multi-focus overlay set), which is always empty for a `documentType: 'thread'`
+// document — even its own "nothing focused yet" fallback targets `orderedVisibleConversations`,
+// also always empty there — so the hotkey was a complete, silent no-op in Thread mode. Thread mode
+// has no multi-focus-overlay concept to begin with (see `threadFocusState.ts`'s doc comment); its
+// one focus concept is the single `activeThreadId` cursor Ctrl+Alt+J/K already moves via
+// `ThreadModeView.vue`'s exposed `cycleByOffset` — reused here instead of inventing a second model.
+function cycleConversationOrThread(offset: number): void {
+  if (isThreadDocument.value) {
+    threadModeViewRef.value?.cycleByOffset?.(offset);
+    return;
+  }
+  cycleFocusedConversation(offset);
+}
+
 /** Every `HOTKEY_BINDINGS` id this component owns, mapped to its actual handler — Y ("sync") sits
  *  alongside R/H's "Global Actions" box for the same reason: a global, toolbar-level toggle, not
  *  owned by any single pane. P/E (Preview/Editor visibility) share `togglePreviewVisible`/
@@ -534,11 +552,11 @@ const globalBindingHandlers: Record<string, () => void> = {
   'toggle-sync-scroll': toggleSyncScroll,
   'toggle-preview': togglePreviewVisible,
   'toggle-editor': toggleEditorVisible,
-  'cycle-conversation-prev': () => cycleFocusedConversation(-1),
-  'cycle-conversation-prev-arrow': () => cycleFocusedConversation(-1),
-  'cycle-conversation-next': () => cycleFocusedConversation(1),
-  'cycle-conversation-next-arrow': () => cycleFocusedConversation(1),
-  'cycle-conversation-next-alt': () => cycleFocusedConversation(1),
+  'cycle-conversation-prev': () => cycleConversationOrThread(-1),
+  'cycle-conversation-prev-arrow': () => cycleConversationOrThread(-1),
+  'cycle-conversation-next': () => cycleConversationOrThread(1),
+  'cycle-conversation-next-arrow': () => cycleConversationOrThread(1),
+  'cycle-conversation-next-alt': () => cycleConversationOrThread(1),
   'switch-document-next': () => cycleDocument(1),
   'switch-document-prev': () => cycleDocument(-1),
 };
