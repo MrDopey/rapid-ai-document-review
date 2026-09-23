@@ -36,8 +36,8 @@ jobs:
         continue-on-error: true
         run: openwiki code --update --print
         env:
-          OPENWIKI_PROVIDER: ${{ vars.OPENWIKI_PROVIDER || 'openrouter' }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENWIKI_PROVIDER: ${{ vars.OPENWIKI_PROVIDER || 'gemini' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENWIKI_MODEL_ID: ${{ vars.OPENWIKI_MODEL_ID || 'qwen/qwen3.8-27b:free' }}
 
       # file, even though staging below is already scoped to doc paths only.
