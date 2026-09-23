@@ -624,6 +624,73 @@ body {
   top: -1rem;
   z-index: 1;
 }
+/* Shared left/right-split HUD-bar layout — used by App.vue's canvas-mode `.toolbar` (left column:
+   the "Conversations (HUD)" box; right column: "Global Actions") and ThreadModeView.vue's
+   `.thread-mode-hud` (left column: the shared `HudPanel` "Threads" list; right column: Expand-all/
+   Export-all/Done). Each host's own OUTER painted bar (`.toolbar`/`.thread-mode-hud`) stays under
+   its own mode-specific class — sticky positioning, background, border, full-viewport width are
+   each bar's own concern, not shared — only this INNER left/right split (and each column's own
+   bordered-box treatment) is common to both, so this is one ruleset both hosts mount unchanged
+   rather than two hand-copied, drifting definitions of the same layout. */
+.hud-bar-columns {
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  min-width: 0;
+}
+/* Left column (~80%): just the HUD box. Kept as a flex column (rather than collapsed straight into
+   `.hud-box`) for future extensibility — a later addition to this column would otherwise have to
+   reintroduce the wrapper. */
+.hud-bar-left {
+  flex: 4 1 0%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+/* Right column (~20%): `align-items: stretch` on `.hud-bar-columns` (the flex default) already
+   makes this column exactly as tall as `.hud-bar-left` — i.e. it starts level with, and extends
+   down through the bottom of, the HUD box — with no extra sizing math needed here. */
+.hud-bar-right {
+  flex: 1 1 0%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* The HUD box and the right column's actions box are each their own visually-boxed section, styled
+   identically so the two-column layout reads as one system. */
+.hud-box,
+.actions-group {
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+}
+.hud-box {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.actions-group {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 0.75rem;
+}
+.actions-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.actions-col-buttons {
+  align-items: stretch;
+}
+.actions-col-buttons > button {
+  width: 100%;
+}
+
 .dialog-header h2 {
   margin: 0;
   font-size: 1rem;

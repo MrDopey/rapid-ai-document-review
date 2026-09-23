@@ -547,7 +547,7 @@ describe('App.vue — auto-focus on branch from the focus view', () => {
 //      on each side (replacing an earlier fixed-`200px` floor).
 //   2. Independent Preview/Canvas visibility toggles (`.actions-group` buttons + Ctrl+Alt+P/E),
 //      each persisted via panePersistence.ts, with a "never hide both" guard.
-//   3. The document title moved out of `.toolbar-left` into `document.title` (a reactive watch),
+//   3. The document title moved out of `.hud-bar-left` into `document.title` (a reactive watch),
 //      freeing that column's height for the HUD box.
 // `jsdom` gives every element a zero-size `getBoundingClientRect()` by default, so the resize-drag
 // suite below stubs `.panes`' own rect directly — the same element `useResizeHandle`'s
@@ -825,7 +825,7 @@ describe('App.vue — Preview/Editor visibility toggles (.actions-group)', () =>
   });
 });
 
-describe('App.vue — document.title reflects the loaded document (moved out of .toolbar-left)', () => {
+describe('App.vue — document.title reflects the loaded document (moved out of .hud-bar-left)', () => {
   let pinia: Pinia;
   const originalTitle = document.title;
 
@@ -849,10 +849,10 @@ describe('App.vue — document.title reflects the loaded document (moved out of 
     expect(document.title).toBe('Test Document - AI Document Review');
   });
 
-  it('no longer renders the document title anywhere inside .toolbar-left', async () => {
+  it('no longer renders the document title anywhere inside .hud-bar-left', async () => {
     const wrapper = await mountApp(pinia);
-    expect(wrapper.get('.toolbar-left').text()).not.toContain('Test Document');
-    expect(wrapper.find('.toolbar-left h1').exists()).toBe(false);
+    expect(wrapper.get('.hud-bar-left').text()).not.toContain('Test Document');
+    expect(wrapper.find('.hud-bar-left h1').exists()).toBe(false);
   });
 });
 

@@ -150,7 +150,9 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
   });
 
   // Regression coverage for BOTH user-reported complaints about this HUD (see
-  // `ThreadModeView.vue`'s own template/CSS doc comments for the full history):
+  // `ThreadModeView.vue`'s own template/CSS doc comments for the full history), now fixed via the
+  // same `.hud-bar-columns`/`.hud-bar-left`/`.hud-bar-right` split (style.css) canvas mode's own
+  // toolbar uses — a literal shared ruleset, not a hand-copied look-alike:
   //  1. Original: the sticky `.thread-mode-hud` bar used to paint the visible box itself as a flat,
   //     full-viewport-bleed strip with no border/rounding/relationship to the narrower, centered,
   //     bordered `.thread-card` tree beneath it.
@@ -159,31 +161,38 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
   //     common single-Thread case (confirmed visually via Playwright against canvas mode's own HUD,
   //     which stays full-width regardless of conversation count).
   // jsdom performs no real CSS layout, so none of this can assert actual rendered pixel widths —
-  // these assertions only cover what jsdom CAN see: the two wrapper elements exist, in the right
+  // these assertions only cover what jsdom CAN see: the wrapper elements exist, in the right
   // nesting, with the right classes. A real committed Playwright test
   // (`tests/e2e/thread-mode-hud.spec.ts`) covers the actual rendered-width regression this component
   // test structurally cannot.
-  it('renders the shared HudPanel inside a centered inner wrapper, nested inside the full-width sticky bar', () => {
+  it('renders the shared HudPanel inside the left/right-split bar, nested inside the full-width sticky bar', () => {
     seedTree();
     const wrapper = mountView();
     const shell = wrapper.find('.thread-mode-hud');
-    const inner = shell.find('.thread-mode-hud-inner');
-    expect(inner.exists()).toBe(true);
-    expect(inner.find('nav.hud-panel').exists()).toBe(true);
-    // The outer bar itself must not also carry the inner wrapper's class — they're deliberately two
-    // distinct elements (full-width painted bar vs. centered/width-capped content row), not one
-    // dual-purpose element (that dual-purpose collapse is exactly what caused complaint #1).
-    expect(shell.classes()).not.toContain('thread-mode-hud-inner');
+    const columns = shell.find('.hud-bar-columns');
+    expect(columns.exists()).toBe(true);
+    const left = columns.find('.hud-bar-left');
+    expect(left.exists()).toBe(true);
+    expect(left.find('nav.hud-panel').exists()).toBe(true);
+    // The outer bar itself must not also carry the inner split's class — they're deliberately two
+    // distinct elements (full-width painted bar vs. the left/right-split content row it wraps), not
+    // one dual-purpose element (that dual-purpose collapse is exactly what caused complaint #1).
+    expect(shell.classes()).not.toContain('hud-bar-columns');
   });
 
-  it('keeps the Expand all/Export all/Done actions inside the shared HUD header', () => {
+  it('renders the Expand all/Export all/Done actions in the right-hand column, not the shared HUD header', () => {
     seedTree();
     const wrapper = mountView();
+    // These document-wide actions no longer feed HudPanel's own `#actions` slot (`.hud-header`) —
+    // they're sibling markup in `.hud-bar-right`, matching canvas mode's own HUD/Global-Actions
+    // split (App.vue's `.hud-bar-left`/`.hud-bar-right`).
     const header = wrapper.find('.hud-header');
-    expect(header.find('.thread-mode-bulk-toggle').exists()).toBe(true);
-    expect(header.find('.thread-mode-export-all').exists()).toBe(true);
-    expect(header.find('.thread-mode-export-all').text()).toBe('Export all');
-    expect(header.find('.thread-mode-done-toggle').text()).toContain('Done (0)');
+    expect(header.find('.thread-mode-bulk-toggle').exists()).toBe(false);
+    const right = wrapper.find('.hud-bar-right');
+    expect(right.find('.thread-mode-bulk-toggle').exists()).toBe(true);
+    expect(right.find('.thread-mode-export-all').exists()).toBe(true);
+    expect(right.find('.thread-mode-export-all').text()).toBe('Export all');
+    expect(right.find('.thread-mode-done-toggle').text()).toContain('Done (0)');
   });
 
   it('clicking "Export all" calls threadStore.exportDocumentSession and opens the result in a new tab', async () => {

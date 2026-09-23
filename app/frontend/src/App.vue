@@ -1082,11 +1082,10 @@ async function onToggleReasoning(event: Event): Promise<void> {
           </button>
         </div>
       </div>
-      <div class="toolbar-columns">
-        <div class="toolbar-left">
+      <div class="hud-bar-columns">
+        <div class="hud-bar-left">
           <div class="hud-box">
             <HudPanel
-              class="toolbar-hud"
               :items="hudItems"
               :active-id="lastInteractedId"
               :focused-ids="focusedConversationIds"
@@ -1102,9 +1101,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
             </HudPanel>
           </div>
         </div>
-        <div class="toolbar-right">
+        <div class="hud-bar-right">
           <!-- Global Actions: two side-by-side columns — checkboxes on the left, buttons on the
-               right — now `.toolbar-right`'s only content, since Primary's own visible chrome moved
+               right — now `.hud-bar-right`'s only content, since Primary's own visible chrome moved
                into `ConversationThreadBox.vue`/`ConversationView.vue`'s own per-conversation action
                rows (see `composables/primaryAction.ts`). -->
           <div class="actions-group">
@@ -1343,82 +1342,17 @@ async function onToggleReasoning(event: Event): Promise<void> {
   min-width: 0;
   min-height: 0;
 }
-/* 006-toolbar-reorg (confirmed layout): `.toolbar` is now a column — `.toolbar-columns` (the
-   80/20 title+HUD | Primary+Global-Actions row) on top, and (only while there's an error) the
-   full-width error strip beneath it. */
+/* 006-toolbar-reorg (confirmed layout): `.toolbar` is now a column — `.hud-bar-columns` (the
+   80/20 title+HUD | Primary+Global-Actions row, hoisted to style.css so ThreadModeView.vue's own
+   `.thread-mode-hud` can share the same left/right-split rules rather than a hand-copied
+   look-alike — see that shared rule's own doc comment) on top, and (only while there's an error)
+   the full-width error strip beneath it. */
 .toolbar {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border-color, #ddd);
-}
-.toolbar-columns {
-  display: flex;
-  align-items: stretch;
-  gap: 1rem;
-  min-width: 0;
-}
-/* Left column (~80%): just the "Conversations (HUD)" box. Kept as a flex column (rather than
-   collapsed straight into `.hud-box`) for future extensibility — a later addition to this column
-   would otherwise have to reintroduce the wrapper. */
-.toolbar-left {
-  flex: 4 1 0%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-/* Right column (~20%): `align-items: stretch` on `.toolbar-columns` (the flex default) already
-   makes this column exactly as tall as `.toolbar-left` — i.e. it starts level with, and extends
-   down through the bottom of, the HUD box — with no extra sizing math needed here. */
-.toolbar-right {
-  flex: 1 1 0%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-/* The "Conversations (HUD)" box and the right column's "Global Actions" box are each their own
-   visually-boxed section, styled identically so the two-column layout reads as one system. */
-.hud-box,
-.actions-group {
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-}
-.hud-box {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.toolbar-hud {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* "Global Actions" is now `.toolbar-right`'s only content (Primary's own visible chrome moved into
-   `ConversationThreadBox.vue`/`ConversationView.vue`'s own action rows), so it alone absorbs the
-   column's stretched height, keeping the column's bottom edge level with the HUD box's own bottom
-   edge. Two side-by-side columns: the checkbox toggles on the left, the action buttons on the
-   right (see `.actions-col` below). */
-.actions-group {
-  flex: 1 1 auto;
-  display: flex;
-  gap: 0.75rem;
-}
-.actions-col {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex: 1 1 0%;
-  min-width: 0;
-}
-.actions-col-buttons {
-  align-items: stretch;
-}
-.actions-col-buttons > button {
-  width: 100%;
 }
 .reasoning-toggle {
   display: flex;
@@ -1436,8 +1370,8 @@ async function onToggleReasoning(event: Event): Promise<void> {
   line-height: 0;
   color: inherit;
 }
-/* Deliberately small/unobtrusive — this two-column toolbar layout (see the comment on
-   `.toolbar-columns` below) has no spare vertical room for a large heading. A flex row: the
+/* Deliberately small/unobtrusive — this two-column toolbar layout (see the shared `.hud-bar-columns`
+   rule in style.css) has no spare vertical room for a large heading. A flex row: the
    document switcher takes the available space with the Keyboard-shortcuts/Help icon buttons
    pinned to the right. */
 .document-title-bar {

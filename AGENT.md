@@ -54,8 +54,9 @@ Grep the class name before acting on layout/UI instructions — this app has lay
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ header.toolbar                                                           │
 │  .document-title-bar : title ............ [shortcuts] [help]            │
-│  .toolbar-columns:                                                      │
-│    .toolbar-left/.hud-box   → <HudPanel>  "HUD"    │ .toolbar-right/    │
+│  .hud-bar-columns:  (shared, style.css — Thread mode's .thread-mode-hud  │
+│                      below reuses this same ruleset, not a copy)        │
+│    .hud-bar-left/.hud-box   → <HudPanel>  "HUD"    │ .hud-bar-right/    │
 │                                                     │ .actions-group    │
 │  [.toolbar-conflict-banner]  (only when a conflict message is set)      │
 ├──────────────────────────────────────────────────────────────────────────┤
@@ -82,15 +83,21 @@ Grep the class name before acting on layout/UI instructions — this app has lay
 
 `ThreadModeView.vue` (`app/frontend/src/components/thread/`) is the whole view: a sticky
 `.thread-mode-hud` bar (wraps the same shared `HudPanel` canvas mode uses, plus Expand-all/Export-
-all/Done buttons) above a scrolling `.thread-mode-content` → `.thread-mode-list` of `ThreadCard`s.
+all/Done buttons, via the SAME `.hud-bar-columns`/`.hud-bar-left`/`.hud-bar-right` split Canvas
+mode's own toolbar uses — see the Canvas-mode diagram above) above a scrolling `.thread-mode-content`
+→ `.thread-mode-list` of `ThreadCard`s, both now left-aligned/full-width like Canvas's `.panes`
+(no longer centered/content-sized).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ .thread-mode-view                                                        │
-│  ┌─ .thread-mode-hud (sticky) ───────────────────────────────────────┐  │
-│  │  .thread-mode-hud-inner: <HudPanel> "Threads"  │ [Expand-all]      │  │
-│  │                                                 │ [Export-all]      │  │
-│  │                                                 │ [Done (n)]        │  │
+│  ┌─ .thread-mode-hud (sticky, full-width painted bar) ─────────────────┐  │
+│  │  .hud-bar-columns:                                                  │  │
+│  │    .hud-bar-left/.hud-box → <HudPanel> "Threads" │ .hud-bar-right/  │  │
+│  │                                                   │ .actions-group: │  │
+│  │                                                   │  [Expand-all]   │  │
+│  │                                                   │  [Export-all]   │  │
+│  │                                                   │  [Done (n)]     │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │  ┌─ .thread-mode-content ────────────────────────────────────────────┐  │
 │  │  .thread-mode-list:                                               │  │

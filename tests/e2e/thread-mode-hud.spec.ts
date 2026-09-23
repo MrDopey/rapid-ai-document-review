@@ -11,14 +11,17 @@ import { test, expect } from '@playwright/test';
 //     the viewport (a second, later user report), since canvas mode's own HUD area (`.hud-box` +
 //     `.actions-group` inside `.toolbar`) always spans (nearly) the full toolbar row regardless of
 //     how many conversations are open — it is never coupled to any content's own width.
-// The fix restores `.thread-mode-hud` as a real full-width painted bar (background + border,
-// structurally the same role as canvas mode's own always-full-width `.toolbar`), while a plain,
-// unstyled inner wrapper (`.thread-mode-hud-inner`) centers the actual HudPanel/action row so it
-// still visually lines up with the thread tree beneath it. This spec asserts BOTH halves at a real
-// rendered viewport width, since only a real browser layout engine can catch a regression in
-// either direction (outer bar shrinking again, or the inner alignment silently being dropped).
+// Root-cause fix for both, together: `.thread-mode-hud` stays a real, full-width painted bar
+// (background + border, structurally the same role as canvas mode's own always-full-width
+// `.toolbar`), and — instead of a separate centered/content-sized inner wrapper that had to be kept
+// in sync with the tree's own width — its inner content now uses the SAME shared
+// `.hud-bar-columns`/`.hud-bar-left`/`.hud-bar-right` split canvas mode's own toolbar uses
+// (style.css), with the thread tree below (`.thread-mode-content`/`.thread-mode-list`) left-aligned/
+// full-width like canvas's own `.panes` rather than centered. This spec asserts the HUD bar's width
+// at a real rendered viewport width, since only a real browser layout engine can catch a regression
+// in either direction (the outer bar shrinking again, or the left/right split silently collapsing).
 test.describe('Thread mode — page-level HUD width (regression)', () => {
-  test('the HUD bar spans the full viewport width, matching canvas mode, while its content row aligns with the thread tree', async ({
+  test('the HUD bar spans the full viewport width, matching canvas mode, with the HUD list on the left and actions on the right', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -59,26 +62,33 @@ test.describe('Thread mode — page-level HUD width (regression)', () => {
       expect(Math.abs(hudBox.width - canvasToolbarWidth)).toBeLessThan(5);
     });
 
-    await test.step('the HUD content row still lines up with the (narrow, single-thread) tree below it', async () => {
-      const innerBox = await page.locator('.thread-mode-hud-inner').boundingBox();
-      const contentBox = await page.locator('.thread-mode-content').boundingBox();
-      if (!innerBox || !contentBox) throw new Error('missing inner HUD/content bounding box');
-      // The original complaint's fix: the HUD's own content (not the bar behind it) should be a
-      // modest, content-sized row — dramatically narrower than the full-width bar it sits inside —
-      // not a flat strip spanning the viewport.
-      expect(innerBox.width).toBeLessThan(500);
-      // Both `.thread-mode-hud-inner` and `.thread-mode-content` use the exact same `width:
-      // fit-content; margin: 0 auto` formula within siblings of the same overall width, so even
-      // though their own content-driven widths differ, they share the same horizontal CENTER —
-      // i.e. the HUD's controls visibly sit directly above the thread card beneath them, which is
-      // the actual fix for "doesn't fit with the thread" (equal widths was never the property that
-      // mattered; a shared center axis is).
-      const innerCenter = innerBox.x + innerBox.width / 2;
-      const contentCenter = contentBox.x + contentBox.width / 2;
-      expect(Math.abs(innerCenter - contentCenter)).toBeLessThan(5);
+    await test.step('the HUD list sits on the left, the Expand-all/Export-all/Done actions on the right — same split as canvas mode', async () => {
+      const left = page.locator('.thread-mode-hud .hud-bar-left');
+      const right = page.locator('.thread-mode-hud .hud-bar-right');
+      const leftBox = await left.boundingBox();
+      const rightBox = await right.boundingBox();
+      if (!leftBox || !rightBox) throw new Error('missing hud-bar-left/hud-bar-right bounding box');
+      // Left column sits to the left of the right column (mirrors canvas mode's own
+      // `.hud-bar-left`/`.hud-bar-right` split).
+      expect(leftBox.x).toBeLessThan(rightBox.x);
+      await expect(left.locator('nav.hud-panel')).toBeVisible();
+      await expect(right.getByRole('button', { name: /Expand all|Collapse all/ })).toBeVisible();
+      await expect(right.getByRole('button', { name: 'Export all' })).toBeVisible();
+      await expect(right.getByRole('button', { name: /Done \(\d+\)/ })).toBeVisible();
     });
 
-    await test.step('after branching (a wider tree), the HUD bar is still full width and still tracks the wider content', async () => {
+    await test.step("the thread tree below is left-aligned/full-width, sharing the HUD bar's own left edge", async () => {
+      const hudBox = await page.locator('.thread-mode-hud').boundingBox();
+      const contentBox = await page.locator('.thread-mode-content').boundingBox();
+      if (!hudBox || !contentBox) throw new Error('missing HUD/content bounding box');
+      // Regression guard for the ORIGINAL complaint's replacement fix: the tree is no longer a
+      // narrow, centered column independent of the HUD bar above it — it now shares the same left
+      // edge as the HUD bar (both left-aligned within the same page padding), rather than a
+      // separate `width: fit-content; margin: 0 auto` column that could drift out of alignment.
+      expect(Math.abs(hudBox.x - contentBox.x)).toBeLessThan(5);
+    });
+
+    await test.step('after branching (a wider tree), the HUD bar is still full width', async () => {
       const textarea = page.locator('textarea[id^="thread-composer-"]').first();
       await textarea.fill('First message in the root thread.');
       await page.locator('.thread-send-button').first().click();
@@ -97,21 +107,14 @@ test.describe('Thread mode — page-level HUD width (regression)', () => {
       });
       await firstMessage.dispatchEvent('mouseup');
       await page.locator('.highlight-branch-button', { hasText: 'Branch from here' }).click();
-      await expect(page.locator('.thread-mode-hud-inner .conversation-row')).toHaveCount(2);
+      await expect(page.locator('.thread-mode-hud .conversation-row')).toHaveCount(2);
 
       const hudBox = await page.locator('.thread-mode-hud').boundingBox();
-      const innerBox = await page.locator('.thread-mode-hud-inner').boundingBox();
-      const contentBox = await page.locator('.thread-mode-content').boundingBox();
-      if (!hudBox || !innerBox || !contentBox) throw new Error('missing bounding box');
+      if (!hudBox) throw new Error('missing bounding box');
       // The outer bar's width must stay decoupled from the tree's width in BOTH directions — this
       // is the actual regression this whole spec exists to catch (a fix that only handled the
       // narrow case, e.g. by hardcoding a width, would not necessarily also survive a wider tree).
       expect(hudBox.width).toBeGreaterThan(1400);
-      // The tree grew noticeably wider than the single-thread case above; the HUD's own content row
-      // keeps sharing its horizontal center with it regardless.
-      const innerCenter = innerBox.x + innerBox.width / 2;
-      const contentCenter = contentBox.x + contentBox.width / 2;
-      expect(Math.abs(innerCenter - contentCenter)).toBeLessThan(5);
     });
   });
 });
