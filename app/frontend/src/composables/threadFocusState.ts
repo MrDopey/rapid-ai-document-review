@@ -50,11 +50,24 @@ export function useThreadFocusState() {
     activeThreadId.value = list[nextIndex]!;
   }
 
+  /** Thread mode's own equivalent of App.vue's Ctrl+Alt+1..9 numbered-jump for canvas
+   *  conversations (`onGlobalKeydown`'s `focus-toggle-<N>` handling there, which indexes into
+   *  `orderedVisibleConversations`): jumps straight to the thread at `index` (0-based; `N - 1` for
+   *  a 1-based Ctrl+Alt+<N> keypress) within `orderedThreadIds` — the exact same tree/DFS order the
+   *  HUD list renders and `cycleByOffset` above traverses, so numbered-jump and J/K cycling can
+   *  never disagree about "which thread is Nth". A no-op (matching canvas mode's own out-of-range
+   *  no-op) when `index` is out of range, e.g. fewer than N threads currently visible. */
+  function jumpToIndex(index: number): void {
+    const id = orderedThreadIds.value[index];
+    if (id) jumpTo(id);
+  }
+
   return {
     activeThreadId,
     orderedEntries,
     orderedThreadIds,
     jumpTo,
     cycleByOffset,
+    jumpToIndex,
   };
 }

@@ -84,6 +84,8 @@ vi.mock('../../src/transport/http-client.js', () => ({
     deleteDocument: vi.fn(),
     // Used only by the "Thread-mode header" suite below (011-linear-thread-mode).
     listThreads: vi.fn(),
+    // Used only by the "Ctrl+Alt+1..9 numbered-jump in Thread mode" suite below.
+    getThreadMessages: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status: number;
@@ -213,6 +215,48 @@ function conversationFixture(
     ...overrides,
   };
 }
+
+// Test-isolation hygiene (pre-existing gap, surfaced — not introduced — by this file's newer
+// suites that dispatch real `document`-level keydowns): several suites above mount `App.vue` via
+// the bare `mountApp`/`mount(App, ...)` helpers above without ever calling `wrapper.unmount()`
+// afterward. Since `App.vue`'s own `onGlobalKeydown` (and `HudPanel.vue`'s own copy) register a
+// real `document`-level `keydown` listener in `onMounted`, a wrapper left mounted — even one
+// `mount()`ed detached from `document.body` — keeps that listener alive for the rest of this
+// file's run, silently reacting to any LATER suite's own `document.dispatchEvent(new
+// KeyboardEvent('keydown', ...))` calls (e.g. `pressDigit` in the numbered-jump suites below) with
+// its own long-stale component/store state. Rather than retrofitting every such suite with its own
+// `currentWrapper`/`afterEach(() => wrapper.unmount())` bookkeeping (the convention most, but not
+// all, suites in this file already individually follow), this tracks every `'keydown'` listener
+// `document.addEventListener` registers during a test and strips whatever's left after that same
+// test via a single, file-wide `afterEach` — pruning only listeners that OUTLIVE the test that
+// added them, never a listener still in use by that same test's own (already-completed-by-then)
+// assertions.
+const trackedKeydownListeners = new Set<EventListenerOrEventListenerObject>();
+const realDocumentAddEventListener = document.addEventListener.bind(document);
+const realDocumentRemoveEventListener = document.removeEventListener.bind(document);
+document.addEventListener = ((
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+) => {
+  if (type === 'keydown') trackedKeydownListeners.add(listener);
+  return realDocumentAddEventListener(type, listener, options);
+}) as typeof document.addEventListener;
+document.removeEventListener = ((
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | EventListenerOptions,
+) => {
+  if (type === 'keydown') trackedKeydownListeners.delete(listener);
+  return realDocumentRemoveEventListener(type, listener, options);
+}) as typeof document.removeEventListener;
+
+afterEach(() => {
+  for (const listener of trackedKeydownListeners) {
+    realDocumentRemoveEventListener('keydown', listener);
+  }
+  trackedKeydownListeners.clear();
+});
 
 describe('App.vue — "Sync scroll" toggle (Global Actions box)', () => {
   let pinia: Pinia;
@@ -1814,5 +1858,185 @@ describe('App.vue — Thread-mode header: History removed, Export all relocated'
     const wrapper = await mountThreadApp();
     const titleBar = wrapper.find('.document-title-bar');
     expect(titleBar.text()).not.toContain('Export all');
+  });
+});
+
+// Bug fix: Ctrl+Alt+1..9 used to unconditionally index into canvas mode's own
+// `orderedVisibleConversations` regardless of which mode's whole view tree is actually mounted —
+// for a `documentType: 'thread'` document, `conversationsStore` is never loaded at all
+// (`loadActiveDocumentThreadOrConversations`'s own `isThreadDocument` branch), so this silently did
+// nothing in Thread mode. This suite mounts the real `App.vue` AND a real (unstubbed) `ThreadModeView`
+// against a `documentType: 'thread'` document with several threads, so the digit binding's dispatch
+// reaches `ThreadModeView`'s own exposed `jumpToIndex` (see that component's doc comment) for real,
+// the same way `App.spec.ts`'s existing canvas-mode digit suite exercises the pre-existing behavior.
+describe('App.vue — Ctrl+Alt+1..9 numbered-jump in Thread mode', () => {
+  let pinia: Pinia;
+
+  // jsdom implements no `Element.scrollIntoView` — same pre-existing gap/workaround
+  // `ThreadModeView.spec.ts` already uses for this exact watcher.
+  Element.prototype.scrollIntoView = vi.fn();
+
+  const threadDocumentFixture: DocumentDto = {
+    id: 'thread-doc-digit',
+    title: 'Thread Digit Document',
+    currentRevision: 1,
+    documentType: 'thread',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  function threadFixture(overrides: Partial<ConversationDto> & { id: string }): ConversationDto {
+    return {
+      name: overrides.id,
+      kind: 'thread-root',
+      parentId: null,
+      branchDepth: 0,
+      status: 'idle',
+      isPrimary: false,
+      contextRevision: 1,
+      isStale: false,
+      pendingEditCount: 0,
+      canEdit: true,
+      canBranch: true,
+      errorMessage: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      closedAt: null,
+      readOnly: false,
+      seedSelection: null,
+      anchorOrphaned: false,
+      forkedFromMessageId: null,
+      doneAt: null,
+      seedExcerptText: null,
+      ...overrides,
+    } as ConversationDto;
+  }
+
+  const threads = [
+    threadFixture({ id: 'root-1', name: 'Root', createdAt: '2026-01-01T00:00:00.000Z' }),
+    threadFixture({
+      id: 'branch-1',
+      name: 'Branch',
+      kind: 'thread-branch',
+      parentId: 'root-1',
+      branchDepth: 1,
+      forkedFromMessageId: 'r0',
+      createdAt: '2026-01-01T00:01:00.000Z',
+    }),
+  ];
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    stubMatchMedia(true);
+    vi.mocked(httpClient.listDocuments).mockResolvedValue({
+      documents: [
+        {
+          id: threadDocumentFixture.id,
+          title: threadDocumentFixture.title,
+          documentType: 'thread',
+          isActive: true,
+          lastActiveAt: threadDocumentFixture.updatedAt,
+        },
+      ],
+    });
+    vi.mocked(httpClient.getDocument).mockResolvedValue({
+      document: threadDocumentFixture,
+      content: '# Thread digit document',
+      eventSequence: 0,
+    });
+    vi.mocked(httpClient.listThreads).mockResolvedValue({
+      currentRevision: 1,
+      conversations: threads,
+      nextCursor: null,
+    });
+    vi.mocked(httpClient.getThreadMessages).mockImplementation(async (_docId, threadId) => ({
+      conversation: threads.find((t) => t.id === threadId)!,
+      // `root-1`'s own single message must be id `'r0'` — `branch-1`'s fixture forks from
+      // `forkedFromMessageId: 'r0'`, and `useThreadSegments` groups a Thread's children by matching
+      // that id against the PARENT's own actual message ids, not by a bare string convention.
+      messages: [
+        {
+          id: threadId === 'root-1' ? 'r0' : `${threadId}-m0`,
+          role: 'assistant',
+          text: 'hi',
+          createdAt: threads[0]!.createdAt,
+        },
+      ],
+    }));
+  });
+
+  let currentWrapper: VueWrapper | null = null;
+
+  afterEach(() => {
+    // Unmounted explicitly (unlike the stubbed-`ThreadModeView` "Thread-mode header" suite above,
+    // which never renders a real `ThreadCard`/composer) — this suite's `mountThreadApp` attaches a
+    // REAL `ThreadModeView` to `document.body`, whose `activeThreadId` watch schedules further
+    // `nextTick`-deferred `scrollIntoView`/`focus` work; leaving a previous test's instance mounted
+    // let that stale work fire during a LATER test, racing its own assertions/mocks.
+    currentWrapper?.unmount();
+    currentWrapper = null;
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  // Real ThreadModeView (not stubbed) — HistoryPanel/dialogs stubbed the same way the
+  // "Thread-mode header" suite above does, since they're unrelated to this hotkey.
+  async function mountThreadApp(): Promise<VueWrapper> {
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          HistoryPanel: true,
+          KeyboardShortcutsDialog: true,
+          HelpDialog: true,
+          SystemPromptDialog: true,
+        },
+      },
+    });
+    currentWrapper = wrapper;
+    await flushPromises();
+    await flushPromises();
+    return wrapper;
+  }
+
+  function pressDigit(n: number): void {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { code: `Digit${n}`, ctrlKey: true, altKey: true }),
+    );
+  }
+
+  it('Ctrl+Alt+2 jumps to and highlights the 2nd thread in HUD/tree order', async () => {
+    const wrapper = await mountThreadApp();
+    pressDigit(2);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+  });
+
+  it("Ctrl+Alt+2 also moves DOM focus into that thread's own composer", async () => {
+    const wrapper = await mountThreadApp();
+    pressDigit(2);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(document.activeElement?.id).toBe('thread-composer-branch-1');
+  });
+
+  it('Ctrl+Alt+9 (out of range — only 2 threads) is a no-op', async () => {
+    const wrapper = await mountThreadApp();
+    pressDigit(9);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card--active').exists()).toBe(false);
   });
 });

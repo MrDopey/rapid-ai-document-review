@@ -71,14 +71,37 @@ function onThreadHudSelect(threadId: string): void {
   threadFocus.jumpTo(threadId);
 }
 
+// Bug fix (parity with canvas mode): activating a thread — via a HUD row click OR either of the
+// Ctrl+Alt+J/K/1..9 hotkeys, all three of which land here through `threadFocus.jumpTo`/
+// `cycleByOffset`/`jumpToIndex` — used to only scroll/highlight the target `ThreadCard`, never
+// move actual DOM focus into it. Canvas mode's own equivalent (`ConversationDetailPanel.vue`'s
+// `useFocusTrap` + `getPreferredInitialFocus`) moves focus into the conversation's own composer by
+// querying its `#composer-<id>` element and focusing it the moment that panel becomes active.
+// Thread mode has no modal/focus-trap to key off (every `ThreadCard` renders inline, always — see
+// `threadFocusState.ts`'s own doc comment), so this watcher does the same underlying
+// lookup-by-id-and-focus directly: `ThreadComposer.vue`'s own textarea carries the matching
+// `#thread-composer-<threadId>` id (same id-prefix convention `isEditingContext`'s `allowComposer`
+// option already recognizes). Lands the reviewer ready to type immediately, exactly like canvas
+// mode's click-a-HUD-row/hotkey behavior.
 watch(threadFocus.activeThreadId, (threadId) => {
   if (!threadId) return;
   void nextTick(() => {
     document
       .querySelector(`.thread-card[data-thread-id="${threadId}"]`)
       ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.querySelector<HTMLTextAreaElement>(`#thread-composer-${threadId}`)?.focus();
   });
 });
+
+// Ctrl+Alt+1..9 numbered-jump (bug fix, parity with canvas mode's own `focus-toggle-<N>`
+// handling in `App.vue#onGlobalKeydown`): that binding is `'Global'` scope, so it's dispatched
+// from App.vue (mounted for the app's whole lifetime), which has no direct access to this view's
+// own `threadFocus` composable instance — exposing just this one narrow method (not the whole
+// composable) mirrors the same "narrow accessor" convention `useConversationRename`'s `{ find,
+// rename }` source already established for canvas/thread code-sharing in this codebase, and matches
+// `DocumentCanvas.vue`'s own precedent of exposing specific methods/refs for `App.vue` to call
+// (`documentCanvasRef.value?.scrollEl`) rather than lifting all of this view's state up.
+defineExpose({ jumpToIndex: threadFocus.jumpToIndex });
 
 /** Document-wide "Expand all"/"Collapse all" (`stores/thread.ts`'s own doc comment explains why
  *  this is document-wide rather than per-Thread, unlike canvas mode's `useBulkToggleAction`).

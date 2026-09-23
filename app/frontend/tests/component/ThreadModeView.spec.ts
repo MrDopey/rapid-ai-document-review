@@ -319,4 +319,64 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
       'thread-card--active',
     );
   });
+
+  // Bug fix (parity with canvas mode's `ConversationDetailPanel.vue`, whose `useFocusTrap` +
+  // `getPreferredInitialFocus` moves DOM focus into a conversation's own `#composer-<id>` the
+  // moment it's activated): activating a thread here — via a HUD row click OR Ctrl+Alt+J/K — used
+  // to only scroll/highlight the target `ThreadCard`, never move actual focus into its composer.
+  describe("auto-focuses the activated thread's own composer", () => {
+    it('on a HUD row click', async () => {
+      seedTree();
+      const wrapper = mountView();
+
+      await wrapper.find('.conversation-row[data-conversation-id="branch-1"]').trigger('click');
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(document.activeElement?.id).toBe('thread-composer-branch-1');
+    });
+
+    it('on Ctrl+Alt+J cycling', async () => {
+      seedTree();
+      const wrapper = mountView();
+
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { code: 'KeyJ', ctrlKey: true, altKey: true }),
+      );
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(document.activeElement?.id).toBe('thread-composer-root-1');
+    });
+
+    it("on the exposed jumpToIndex accessor (App.vue's Ctrl+Alt+<N> dispatch point)", async () => {
+      seedTree();
+      const wrapper = mountView();
+
+      wrapper.vm.jumpToIndex(1);
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+        'thread-card--active',
+      );
+      expect(document.activeElement?.id).toBe('thread-composer-branch-1');
+    });
+  });
+
+  // Bug fix regression: App.vue's Ctrl+Alt+1..9 numbered-jump used to unconditionally index into
+  // canvas mode's own conversation list regardless of mode, so it silently did nothing in Thread
+  // mode. `jumpToIndex` is the narrow accessor this view now exposes for App.vue to call instead
+  // (mirroring `DocumentCanvas.vue`'s own precedent of exposing specific methods/refs).
+  it('exposes jumpToIndex, a no-op out of range', async () => {
+    seedTree();
+    const wrapper = mountView();
+
+    wrapper.vm.jumpToIndex(99);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card--active').exists()).toBe(false);
+  });
 });

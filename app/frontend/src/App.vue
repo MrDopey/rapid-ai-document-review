@@ -260,6 +260,12 @@ function toggleEditorVisible(): void {
 const syncScrollEnabled = ref(loadSyncScrollEnabled());
 const previewComponentRef = ref<InstanceType<typeof PreviewComponent> | null>(null);
 const documentCanvasRef = ref<InstanceType<typeof DocumentCanvas> | null>(null);
+// Bug fix (Thread mode's own equivalent of canvas mode's Ctrl+Alt+1..9 numbered-jump): this
+// component owns Thread mode's own focus/cursor state (`threadFocusState.ts`), not App.vue, so
+// `onGlobalKeydown`'s digit branch below reaches it via this exposed ref — same
+// `documentCanvasRef.value?.scrollEl`-style precedent already used for `DocumentCanvas.vue` just
+// above, rather than lifting Thread mode's whole focus composable up into App.vue.
+const threadModeViewRef = ref<InstanceType<typeof ThreadModeView> | null>(null);
 let detachScrollSync: (() => void) | null = null;
 
 function toggleSyncScroll(): void {
@@ -554,8 +560,23 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   const digitMatch = /^focus-toggle-(\d)$/.exec(binding.id);
   if (digitMatch) {
     const index = Number(digitMatch[1]) - 1;
-    const target = orderedVisibleConversations.value[index];
-    if (target) toggleFocus(target.id);
+    // Bug fix: this used to unconditionally index into `orderedVisibleConversations` (canvas
+    // mode's own HUD order) regardless of which mode's whole view tree is actually mounted — for a
+    // `documentType: 'thread'` document, `conversationsStore` is never even loaded
+    // (`loadActiveDocumentThreadOrConversations` above), so `orderedVisibleConversations` was
+    // always empty there and Ctrl+Alt+<N> silently did nothing in Thread mode. Same binding, same
+    // dispatch site, same "Nth item in the HUD's own order" semantics — just resolved against
+    // whichever mode's own ordered list is actually on screen, mirroring `loadActiveDocument
+    // ThreadOrConversations`'s own `isThreadDocument` branch immediately below.
+    if (isThreadDocument.value) {
+      // `?.()`, not just `?.`: `threadModeViewRef.value` can be a stub/placeholder component
+      // instance lacking this exposed method (e.g. a test mounting App.vue with `ThreadModeView`
+      // itself stubbed out) — guard the call itself, not only the ref's own nullability.
+      threadModeViewRef.value?.jumpToIndex?.(index);
+    } else {
+      const target = orderedVisibleConversations.value[index];
+      if (target) toggleFocus(target.id);
+    }
     return;
   }
 
@@ -958,7 +979,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
     </Transition>
 
     <div class="thread-mode-panes">
-      <ThreadModeView class="thread-mode-body" />
+      <ThreadModeView ref="threadModeViewRef" class="thread-mode-body" />
     </div>
   </div>
 

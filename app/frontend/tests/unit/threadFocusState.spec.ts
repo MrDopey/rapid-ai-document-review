@@ -94,4 +94,39 @@ describe('useThreadFocusState', () => {
     focus.jumpTo('root-2');
     expect(focus.activeThreadId.value).toBe('root-2');
   });
+
+  // Bug fix: Thread mode's own equivalent of canvas mode's Ctrl+Alt+1..9 numbered-jump — App.vue's
+  // `onGlobalKeydown` used to unconditionally index into canvas mode's own `orderedVisibleConversations`
+  // regardless of which mode's view tree was actually mounted, so the hotkey silently did nothing in
+  // Thread mode (that store is never loaded there). `jumpToIndex` is the narrow accessor
+  // `ThreadModeView.vue` now exposes for App.vue to call instead.
+  describe('jumpToIndex', () => {
+    it('jumps to the thread at the given 0-based index, in the same order as orderedThreadIds', () => {
+      seedThreeThreads();
+      const focus = useThreadFocusState();
+      focus.jumpToIndex(1);
+      expect(focus.activeThreadId.value).toBe('root-2');
+    });
+
+    it('jumps to the first thread for index 0', () => {
+      seedThreeThreads();
+      const focus = useThreadFocusState();
+      focus.jumpToIndex(0);
+      expect(focus.activeThreadId.value).toBe('root-1');
+    });
+
+    it('is a no-op when index is out of range (fewer threads than requested)', () => {
+      seedThreeThreads();
+      const focus = useThreadFocusState();
+      focus.jumpTo('root-2');
+      focus.jumpToIndex(9);
+      expect(focus.activeThreadId.value).toBe('root-2');
+    });
+
+    it('is a no-op on an empty tree', () => {
+      const focus = useThreadFocusState();
+      expect(() => focus.jumpToIndex(0)).not.toThrow();
+      expect(focus.activeThreadId.value).toBeNull();
+    });
+  });
 });
