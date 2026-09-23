@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@automerge/automerge": "^3.4.1",
-    "@earendil-works/pi-coding-agent": "0.84.3",
-    "@fastify/static": "^8.3.0",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@fastify/static": "^10.1.4",
     "@fastify/websocket": "^11.0.2",
     "@rapid-ai-document-review/shared": "*",
     "fastify": "^5.12.1",
