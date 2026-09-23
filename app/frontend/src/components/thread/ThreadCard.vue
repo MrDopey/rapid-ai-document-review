@@ -102,8 +102,19 @@ onMounted(() => {
 // Every recursive per-run instance of the same thread re-seeds/reads the exact same
 // `store.expandedByMessage[threadId]` map — harmless (idempotent) duplication across instances,
 // same as the `onMounted` `loadDetail` guard above.
+// Watches `messages.value.length`, not `messages` itself — canvas mode's WS-driven equivalent
+// (`ConversationThreadBox.vue`/`ConversationView.vue`) has the exact same fix, for the exact same
+// reason: `stores/thread.ts`'s WS handlers append to the same array via `.push()` rather than
+// reassigning it, so a plain `watch(messages, ...)` never re-fires for a live-streamed message
+// (the computed only tracks the outer `messagesByThread[threadId]` lookup, not the array's own
+// contents) — leaving it unseeded and silently defaulting to the template's own `?? false`
+// (collapsed) fallback below, instead of the role-aware default this seeding is supposed to apply.
 const expandedByMessage = computed(() => store.expandedByMessage[props.threadId] ?? {});
-watch(messages, () => store.ensureMessageExpandedSeeded(props.threadId), { immediate: true });
+watch(
+  () => messages.value.length,
+  () => store.ensureMessageExpandedSeeded(props.threadId),
+  { immediate: true },
+);
 
 function setMessageExpanded(messageId: string, expanded: boolean): void {
   store.setMessageExpanded(props.threadId, messageId, expanded);

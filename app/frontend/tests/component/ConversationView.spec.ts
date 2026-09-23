@@ -870,6 +870,30 @@ describe('ConversationView — scroll-to-top-of-message on new/expanded messages
 
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
+
+  // Regression test: `conversations.ts`'s WS handlers (`message_started`/`text_delta`) append a
+  // brand-new message to `messagesByConversation[id]` via `.push()` on the SAME array instance,
+  // rather than reassigning it — a plain `watch(messages, ...)` (where `messages` is a computed
+  // wrapping that array) never re-fires for that kind of in-place mutation, since the computed's
+  // own tracked dependency is only the outer `messagesByConversation[id]` lookup, not the array's
+  // contents. Without watching `messages.value.length` instead, a message that streams in AFTER
+  // this view's initial mount never gets seeded into `expandedByMessage`, so it silently falls
+  // back to the template's own `?? false` (collapsed) default instead of the role-aware "assistant
+  // replies start expanded" default `ensureMessageExpandedSeeded` is supposed to apply.
+  it('seeds a newly-pushed assistant message as expanded, not just messages present at mount', async () => {
+    const { store } = mountView('conv-1', [
+      makeMessage({ id: 'm1', role: 'user', text: 'question' }),
+    ]);
+    await flushPromises();
+    expect(store.expandedByMessage['conv-1']).toEqual({ m1: false });
+
+    store.messagesByConversation['conv-1']!.push(
+      makeMessage({ id: 'm2-live', role: 'assistant', text: 'reply', streaming: true }),
+    );
+    await flushPromises();
+
+    expect(store.expandedByMessage['conv-1']).toEqual({ m1: false, 'm2-live': true });
+  });
 });
 
 // Tool calls as their own message component (011-linear-thread-mode follow-up): a tool-call-carrier

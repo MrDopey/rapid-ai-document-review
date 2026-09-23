@@ -121,8 +121,22 @@ const { parentConversation, continuityMessages } = useConversationContinuity(
 // the two silently show different expanded/collapsed state for the same message. Both components
 // read/write the exact same reactive source; `localStorage` stays purely the persistence layer
 // underneath it.
+//
+// Watches `messages.value.length`, NOT `messages` itself: `conversations.ts`'s WS handlers
+// (`message_started`/`text_delta`/etc.) append to the SAME array instance via `.push()` — they
+// never reassign `messagesByConversation[id]` — so a plain `watch(messages, ...)` never re-fires
+// for a live-streamed message (the computed's own tracked dependency is only the outer
+// `messagesByConversation[id]` lookup, not the array's contents), leaving every message sent/
+// streamed after this box's initial mount unseeded and silently defaulting to the template's own
+// `?? false` (collapsed) fallback below. `.length` is a real property read that push() does
+// notify, so this fires exactly once per newly-appended message, same intent the comment above
+// already described.
 const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
-watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
+watch(
+  () => messages.value.length,
+  () => store.ensureMessageExpandedSeeded(props.conversationId),
+  { immediate: true },
+);
 
 // Root DOM node of the sticky header — passed to `scrollMessageTopIntoView` below so it can offset
 // for the header's own live rendered height (see that composable's doc comment for why a fixed CSS

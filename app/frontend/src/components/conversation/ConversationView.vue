@@ -142,8 +142,17 @@ const { parentConversation, continuityMessages } = useConversationContinuity(
 // component would let the two silently show different expanded/collapsed state for the same
 // message. Both components read/write the exact same reactive source; `localStorage` stays purely
 // the persistence layer underneath it.
+// Watches `messages.value.length`, not `messages` itself — see `ConversationThreadBox.vue`'s
+// identical watcher for why: the WS handlers driving this store append to the same array via
+// `.push()` rather than reassigning it, so a plain `watch(messages, ...)` never re-fires for a
+// live-streamed message, leaving it unseeded and defaulting to the template's own `?? false`
+// (collapsed) fallback instead of this default.
 const expandedByMessage = computed(() => store.expandedByMessage[props.conversationId] ?? {});
-watch(messages, () => store.ensureMessageExpandedSeeded(props.conversationId), { immediate: true });
+watch(
+  () => messages.value.length,
+  () => store.ensureMessageExpandedSeeded(props.conversationId),
+  { immediate: true },
+);
 // Expanding a single message scrolls so its own top edge becomes visible — see
 // `ConversationThreadBox.vue`'s identical `setMessageExpanded` doc comment for why only the
 // collapsed -> expanded direction triggers this, and why the bulk toggle below deliberately

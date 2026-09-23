@@ -283,6 +283,56 @@ describe('ThreadCard — per-thread "Expand all"/"Collapse all"', () => {
   });
 });
 
+describe('ThreadCard — a live-streamed message defaults to expanded', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  function mountCard(threadId: string) {
+    return mount(ThreadCard, {
+      props: { threadId },
+      global: { plugins: [pinia] },
+    });
+  }
+
+  // Regression test: `stores/thread.ts`'s WS handlers (mirroring `conversations.ts`'s
+  // `message_started`/`text_delta`) append a brand-new message to `messagesByThread[threadId]`
+  // via `.push()` on the SAME array instance, rather than reassigning it — a plain
+  // `watch(messages, ...)` (where `messages` is a computed wrapping that array) never re-fires
+  // for that kind of in-place mutation, since the computed's own tracked dependency is only the
+  // outer `messagesByThread[threadId]` lookup, not the array's contents. Without watching
+  // `messages.value.length` instead, a message that streams in AFTER this card's initial mount
+  // never gets seeded into `expandedByMessage`, so it silently falls back to the template's own
+  // `?? false` (collapsed) default instead of the role-aware "assistant replies start expanded"
+  // default `ensureMessageExpandedSeeded` is supposed to apply.
+  it('seeds a newly-pushed assistant message as expanded, not just messages present at mount', async () => {
+    // Unique ids not reused by any other test in this file — `messageDisplayState.ts` persists
+    // explicit toggles to the real (jsdom) `localStorage` for the lifetime of this whole test
+    // file, so reusing an id another test explicitly toggled (e.g. the "Expand all"/"Collapse
+    // all" tests' `m0`) would read back that stale explicit choice instead of exercising this
+    // test's own seed-from-default path.
+    const store = useThreadStore();
+    store.threads = [threadFixture({ id: 'root-1', kind: 'thread-root' })];
+    store.messagesByThread['root-1'] = [makeMessage('live-seed-m0')];
+
+    mountCard('root-1');
+    expect(store.expandedByMessage['root-1']).toEqual({ 'live-seed-m0': true });
+
+    // Simulate a live WS-driven append (`message_started`/`text_delta`) — mutates the existing
+    // array in place, exactly like `stores/thread.ts`'s real handlers.
+    store.messagesByThread['root-1']!.push(makeMessage('live-seed-m1'));
+    await flushPromises();
+
+    expect(store.expandedByMessage['root-1']).toEqual({
+      'live-seed-m0': true,
+      'live-seed-m1': true,
+    });
+  });
+});
+
 // Tool calls as their own message component (011-linear-thread-mode follow-up): a tool-call-carrier
 // message inside a real Thread-mode transcript must render via `ToolCallMessage.vue`, with
 // `data-message-id` present on its root — `composables/messageScroll.ts`'s
