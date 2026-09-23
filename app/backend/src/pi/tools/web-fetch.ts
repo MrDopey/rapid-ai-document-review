@@ -172,7 +172,7 @@ export function createWebFetchTool(deps: WebFetchToolDeps) {
         // own `executePreparedToolCall` already awaits this `execute()` inside a try/catch, so
         // throwing here rejects cleanly into that existing error-result path — it does not crash
         // the agent turn.
-        throw new Error(`Could not fetch ${url}: request failed (${message}).`);
+        throw new Error(`Could not fetch ${url}: request failed (${message}).`, { cause: err });
       } finally {
         clearTimeout(timer);
       }

@@ -80,7 +80,7 @@ export function createWebSearchTool(deps: WebSearchToolDeps) {
         // Activity Logging) rather than being logged as an ordinary successful tool call — see
         // `web-fetch.ts`'s matching catch block for why throwing here is safe (caught by the SDK's
         // own `executePreparedToolCall`, not an unhandled crash of the agent turn).
-        throw new Error(`Web search failed: ${message}.`);
+        throw new Error(`Web search failed: ${message}.`, { cause: err });
       } finally {
         clearTimeout(timer);
       }

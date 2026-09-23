@@ -816,6 +816,7 @@ export class SqliteStorageAdapter implements StorageAdapter {
           throw new AggregateError(
             [err, rollbackErr],
             'transaction failed and rollback also failed',
+            { cause: rollbackErr },
           );
         }
       }
