@@ -187,15 +187,16 @@ const MAX_VISIBLE_BRANCH_COLUMNS = 4;
 const BRANCH_COLUMN_GAP_PX = 32;
 
 /** Every sibling column in one fork point's row renders at the exact same depth (`depth + 1`) — see
- *  `cardStyle` below for the per-depth width lookup this mirrors, so the cap below budgets for the
- *  REAL column width instead of guessing. */
+ *  the `.thread-node[data-depth]` CSS rules below for the per-depth width lookup this mirrors, so the
+ *  cap below budgets for the REAL column width instead of guessing. */
 const branchColumnWidthPx = computed(
   () => CARD_MAX_WIDTH_PX[props.depth + 1] ?? DEEPER_CARD_MAX_WIDTH_PX,
 );
 /** `.thread-branch-row`'s own `margin-left` indent — a FIXED value from `depth` (the same per-depth
- *  budget `cardStyle` below uses for THIS run-card's own width), not anything measured or dependent
- *  on a sibling's rendered size. This is what keeps every branch row at the same depth landing at
- *  the SAME horizontal offset regardless of what else this thread's own continuation later needs —
+ *  budget the `.thread-node[data-depth]` CSS rules below use for THIS run-card's own width), not
+ *  anything measured or dependent on a sibling's rendered size. This is what keeps every branch row
+ *  at the same depth landing at the SAME horizontal offset regardless of what else this thread's own
+ *  continuation later needs —
  *  see this file's own top doc comment: the continuation renders as a separate, later block (plain
  *  block flow, below this whole branch row), never a flex-row sibling sharing width negotiation
  *  with it, so a continuation that itself forks arbitrarily wide can never push this row sideways. */
@@ -426,16 +427,21 @@ const headerActions = computed<ActionDescriptor[]>(() => [
  *  at depth 0 (the trunk of whichever tree this is) keeps the original full comfortable reading
  *  width, but a branch box's own width cap shrinks the deeper it nests — a branch is typically a
  *  short, focused side-exchange, not a full transcript. Also the fixed per-depth budget
- *  `branchRowStyle` above reuses for its own `margin-left` indent. */
+ *  `branchRowStyle` above reuses for its own `margin-left` indent.
+ *  The actual per-depth WIDTH of the rendered box, though, is no longer set from these constants via
+ *  an inline style (that was JS "computing" a value CSS can express on its own) — `.thread-node[data-
+ *  depth]` attribute selectors below (CSS, not script) own that now; `depth` is passed straight
+ *  through to the DOM as a plain `data-depth` attribute (template), same idea as this component's
+ *  existing `data-thread-id`/`data-thread-kind`. These two constants stay here only because
+ *  `branchColumnWidthPx`/`branchRowStyle` above still need the real pixel numbers for their own row-
+ *  cap/indent ARITHMETIC (`* MAX_VISIBLE_BRANCH_COLUMNS`, `+ gap`) — keep the pixel values in the CSS
+ *  rules below in sync with these if either ever changes. */
 const CARD_MAX_WIDTH_PX: Record<number, number> = { 0: 640, 1: 420 };
 const DEEPER_CARD_MAX_WIDTH_PX = 300;
-const cardStyle = computed(() => ({
-  width: `min(${CARD_MAX_WIDTH_PX[props.depth] ?? DEEPER_CARD_MAX_WIDTH_PX}px, calc(100vw - 2.5rem))`,
-}));
 </script>
 
 <template>
-  <div v-if="thread" class="thread-node">
+  <div v-if="thread" class="thread-node" :data-depth="depth">
     <!-- Header containment fix: the Y-split redesign (`fa163d9`) pulled this header out of the
          single continuous `.thread-card` it used to be the first child of — needed so it can stay
          sticky across the WHOLE run-chain (every run-card, not just the first) rather than
@@ -519,7 +525,6 @@ const cardStyle = computed(() => ({
         'thread-card--active': threadId === activeThreadId,
         'thread-card--flush-header': runStartIndex === 0,
       }"
-      :style="cardStyle"
       :data-thread-id="threadId"
       :data-thread-kind="thread.kind"
     >
@@ -536,7 +541,6 @@ const cardStyle = computed(() => ({
         'thread-card--active': threadId === activeThreadId,
         'thread-card--flush-header': runStartIndex === 0,
       }"
-      :style="cardStyle"
       :data-thread-id="threadId"
       :data-thread-kind="thread.kind"
     >
@@ -593,7 +597,6 @@ const cardStyle = computed(() => ({
             : 'thread-branch-fork'
         "
       >
-        <span v-if="isFan" class="thread-branch-fan-arrow" aria-hidden="true"></span>
         <ThreadCard :thread-id="childId" :depth="depth + 1" :active-thread-id="activeThreadId" />
       </div>
     </div>
@@ -639,17 +642,32 @@ const cardStyle = computed(() => ({
    continuation — see this file's own top doc comment for why that distinction is load-bearing (it's
    what keeps a later, unrelated fork's own branch row from being pushed sideways by an earlier
    fork's continuation). `align-items: flex-start` (not the flex default `stretch`) is load-bearing
-   too: it lets `.thread-node` size itself to its own content's natural width instead of stretching
-   to fill whatever width its own parent (`ThreadModeView.vue`'s `.thread-mode-list`, or a
-   `.thread-branch-row` column) happens to have — which is what lets a deep/wide tree grow rightward
-   past that ancestor's own box and get picked up by `.thread-mode-list`'s `overflow-x: auto`
-   instead of stretching every ancestor's assigned width to match. */
+   too: it keeps `.thread-node` left-aligned within (never horizontally stretched by) whatever width
+   its own parent (`ThreadModeView.vue`'s `.thread-mode-list`, or a `.thread-branch-row` column)
+   happens to have. A wide/deep subtree — e.g. this run's own `.thread-branch-row`, which can be
+   wider than this node's own fixed width below — still overflows rightward past this box (default
+   `overflow: visible`) rather than being clipped, and gets picked up by `.thread-mode-list`'s own
+   `overflow-x: auto` the same as before.
+   `width` here (moved from `.thread-card`, and off an inline `cardStyle` computed/`:style` binding —
+   see this file's own git history, commit 505ab5d) is now pure CSS: `depth` is passed straight
+   through as a plain `data-depth` attribute (template) and these attribute-selector rules pick the
+   per-depth pixel budget, no JS math involved. `.thread-card` (and `.thread-card-header`, its own
+   "lid") fill this node's own width at `width: 100%` below, so the node — not the card — is the one
+   true source of this run's rendered width; that's also what the `.thread-branch-column`/
+   `.thread-branch-fork` connector geometry (CSS further down) relies on lining up with. */
 .thread-node {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.4rem;
   min-width: 0;
+  width: min(300px, calc(100vw - 2.5rem));
+}
+.thread-node[data-depth='0'] {
+  width: min(640px, calc(100vw - 2.5rem));
+}
+.thread-node[data-depth='1'] {
+  width: min(420px, calc(100vw - 2.5rem));
 }
 .thread-card {
   display: flex;
@@ -667,9 +685,11 @@ const cardStyle = computed(() => ({
      border swap) so it layers over this card's own `border`/`background` without shifting layout
      or fighting `[data-thread-kind]`-based styling elsewhere. */
   transition: box-shadow 0.15s ease;
-  /* Width itself is set inline (`cardStyle`, script above) rather than here — it depends on this
-     card's own `depth` prop (trunk vs. branch vs. branch-of-a-branch), which a static class rule
-     can't express. */
+  /* Fills its own `.thread-node` parent's width (set above, per `data-depth`) — `.thread-node`
+     itself is now the one place this run's rendered width is decided; without this, `align-items:
+     flex-start` on `.thread-node` would let this card shrink-wrap to its own message content
+     instead of matching the node's (and the header's, below) fixed per-depth width. */
+  width: 100%;
   flex: 0 0 auto;
 }
 .thread-card.thread-card--active {
@@ -706,7 +726,10 @@ const cardStyle = computed(() => ({
      can't show through underneath). Bordered, rounded on top only, with no bottom border
      (`.thread-card--flush-header`'s own squared-off top corners are this rule's exact counterpart)
      — together the two read as one continuous box, header lid included. Horizontal padding matches
-     `.thread-card`'s own 0.75rem so the title lines up with message content below it. */
+     `.thread-card`'s own 0.75rem so the title lines up with message content below it. `width: 100%`
+     matches `.thread-card`'s own (both fill their shared `.thread-node` parent, CSS above) — without
+     it, `.thread-node`'s `align-items: flex-start` would let this header shrink-wrap to just its own
+     title/button content instead of reading as the run-card's own full-width lid. */
   margin: 0;
   padding: 0.15rem 0.75rem;
   border: 1px solid var(--border-color, #ccc);
@@ -716,6 +739,7 @@ const cardStyle = computed(() => ({
   top: 0;
   z-index: var(--z-raised, 1);
   background: var(--panel-bg, #f7f7f8);
+  width: 100%;
 }
 /* This header's own equivalent of `.thread-card.thread-card--active` (same tokens, same ring
    treatment) — now that it visually reads as this box's own lid rather than a disconnected label
@@ -814,8 +838,9 @@ const cardStyle = computed(() => ({
    width-cap decision is horizontal SCROLL past `MAX_VISIBLE_BRANCH_COLUMNS` siblings (script),
    never a second row. `max-width`/the `--thread-branch-fan-gap` custom property both come from the
    inline `branchRowStyle` rather than a static rule here, since the cap depends on this row's own
-   child depth (`depth + 1`, which varies per `ThreadCard` instance) the way `cardStyle`'s per-depth
-   width already does. `padding-top` reserves the "fan zone" every child's own connector
+   child depth (`depth + 1`, which varies per `ThreadCard` instance) the way `.thread-node[data-
+   depth]`'s own per-depth width rules already do. `padding-top` reserves the "fan zone" every child's
+   own connector
    (`.thread-branch-fork`/`.thread-branch-column` below) draws its downward drop into. */
 .thread-branch-row {
   display: flex;
@@ -858,9 +883,9 @@ const cardStyle = computed(() => ({
 }
 /* Two or more active children at this fork point: a fan-bar column instead of the single-branch
    `.thread-branch-fork` above. `flex: 0 0 auto` so a column never shrinks below its own nested
-   `ThreadCard`'s fixed inline width (`cardStyle`) — the whole point of the width-cap/scroll decision
-   is that columns keep their real width and the ROW scrolls, rather than columns silently squashing
-   to fit. */
+   `ThreadCard`'s fixed width (its own `.thread-node[data-depth]` CSS rule) — the whole point of the
+   width-cap/scroll decision is that columns keep their real width and the ROW scrolls, rather than
+   columns silently squashing to fit. */
 .thread-branch-column {
   position: relative;
   flex: 0 0 auto;
@@ -879,9 +904,9 @@ const cardStyle = computed(() => ({
   height: 0;
   border-top: 2px solid var(--neutral-muted-color, #4b5563);
 }
-/* Every column's own downward drop from the shared fan-bar level down into its own box's top edge
-   — the vertical half of the connector, paired with `.thread-branch-fan-arrow` (template) for the
-   actual arrowhead. */
+/* Every column's own downward drop from the shared fan-bar level down into its own box's top edge —
+   the vertical half of the connector (no separate arrowhead element — `.thread-branch-fan-arrow` was
+   removed as unneeded chrome; this plain drop line is the whole of a fan column's own connector). */
 .thread-branch-column::after {
   content: '';
   position: absolute;
@@ -890,17 +915,5 @@ const cardStyle = computed(() => ({
   width: 0;
   height: 1.25rem;
   border-left: 2px solid var(--neutral-muted-color, #4b5563);
-}
-/* A real templated element (not a 3rd pseudo-element — `::before`/`::after` above are already
-   spoken for by the bridging bar and the drop line) marking this column's own real destination. */
-.thread-branch-fan-arrow {
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  width: 0;
-  height: 0;
-  border: 5px solid transparent;
-  border-top-color: var(--neutral-muted-color, #4b5563);
-  border-bottom-width: 0;
 }
 </style>

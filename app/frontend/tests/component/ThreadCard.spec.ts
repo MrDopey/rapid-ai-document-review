@@ -463,9 +463,9 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     // Still just one fork point in the trunk (m0), so one continuation run-card + one connector...
     expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(2);
     expect(wrapper.findAll('.thread-fork-connector').length).toBe(1);
-    // ...but now 2 sibling columns laid out side by side inside one `.thread-branch-row`, each with
-    // its own fan-bar drop arrow — never the old vertical `.thread-branch-spine` (removed by the
-    // horizontal-column redesign; a fan bridges siblings left-to-right instead of top-to-bottom).
+    // ...but now 2 sibling columns laid out side by side inside one `.thread-branch-row` — never the
+    // old vertical `.thread-branch-spine` (removed by the horizontal-column redesign; a fan bridges
+    // siblings left-to-right instead of top-to-bottom).
     expect(wrapper.find('.thread-branch-spine').exists()).toBe(false);
     const row = wrapper.find('.thread-branch-row');
     expect(row.exists()).toBe(true);
@@ -480,10 +480,9 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
         (el) => el === columns[0]!.element || el === columns[1]!.element,
       ),
     ).toBe(true);
-    // Every column gets its own drop-arrow into its own box; only the LAST column skips the
+    // Every column gets its own drop line into its own box; only the LAST column skips the
     // rightward bridging segment (`::before`, unchecked here since jsdom can't compute pseudo-
     // element geometry) — the structural signal checkable here is the `--last` modifier class.
-    expect(row.findAll('.thread-branch-fan-arrow').length).toBe(2);
     expect(columns[0]!.classes()).not.toContain('thread-branch-column--last');
     expect(columns[1]!.classes()).toContain('thread-branch-column--last');
   });
@@ -524,7 +523,6 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     const columns = row.findAll('.thread-branch-column');
 
     expect(columns.length).toBe(3);
-    expect(row.findAll('.thread-branch-fan-arrow').length).toBe(3);
     // Exactly one column (the 3rd) is marked last — the other two each still bridge rightward to
     // their own next sibling.
     expect(columns.filter((c) => c.classes().includes('thread-branch-column--last')).length).toBe(
