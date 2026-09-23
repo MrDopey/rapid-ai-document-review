@@ -1,0 +1,69 @@
+# Dependabot configuration reference:
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# This is an npm workspaces monorepo (root package.json "workspaces": app/shared,
+# app/backend, app/frontend). GitHub's docs don't state that a single root
+# `directory: "/"` entry auto-discovers/updates dependencies declared in nested
+# workspace package.json files - their own monorepo guidance instead shows explicit
+# per-directory entries (e.g. `directories: ["/frontend", "/admin-panel", ...]`) - so
+# each workspace directory is listed here as its own package-ecosystem entry to
+# guarantee coverage.
+#
+# Each entry groups all updates into at most two PRs per month (dev vs. production
+# dependencies) via `groups.<name>.dependency-type`, instead of one PR per package.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+
+  - package-ecosystem: "npm"
+    directory: "/app/shared"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+
+  - package-ecosystem: "npm"
+    directory: "/app/backend"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+
+  - package-ecosystem: "npm"
+    directory: "/app/frontend"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
