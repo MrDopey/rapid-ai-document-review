@@ -480,11 +480,6 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
         (el) => el === columns[0]!.element || el === columns[1]!.element,
       ),
     ).toBe(true);
-    // Every column gets its own drop line into its own box; only the LAST column skips the
-    // rightward bridging segment (`::before`, unchecked here since jsdom can't compute pseudo-
-    // element geometry) — the structural signal checkable here is the `--last` modifier class.
-    expect(columns[0]!.classes()).not.toContain('thread-branch-column--last');
-    expect(columns[1]!.classes()).toContain('thread-branch-column--last');
   });
 
   it('three active branches off the very same segment fan out as a 3-column row (N-way fan-bar)', () => {
@@ -523,12 +518,6 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     const columns = row.findAll('.thread-branch-column');
 
     expect(columns.length).toBe(3);
-    // Exactly one column (the 3rd) is marked last — the other two each still bridge rightward to
-    // their own next sibling.
-    expect(columns.filter((c) => c.classes().includes('thread-branch-column--last')).length).toBe(
-      1,
-    );
-    expect(columns[2]!.classes()).toContain('thread-branch-column--last');
   });
 
   it('two independent fork points in the same trunk each get their own `.thread-branch-row`, chained via the trunk continuation', () => {
@@ -690,16 +679,14 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
   });
 });
 
-// Structural coverage for the horizontal-column redesign's own locked-in width-cap decision
-// (`MAX_VISIBLE_BRANCH_COLUMNS` in `ThreadCard.vue`'s script): jsdom never computes real CSS layout
-// (no real box widths, no real `overflow-x` scrollbar), so this can't verify the actual visual
-// scroll behavior with 5+ siblings — that's covered separately via Playwright against the real dev
-// server per this repo's own convention (see the supervisor log). What IS checkable here is the
-// STRUCTURAL/arithmetic precondition that visual behavior depends on: `.thread-branch-row`'s own
-// inline `max-width` is computed from the real constant (`MAX_VISIBLE_BRANCH_COLUMNS` siblings' own
-// column width, at the children's real depth, plus the gaps between them) rather than some
-// unrelated/magic value, and every sibling (including the 5th, past the 4-column cap) still renders
-// as a real column inside the row rather than being dropped or wrapped to a second row.
+// Structural coverage for the branch row's own explicit no-cap decision: `.thread-branch-row` no
+// longer carries a `max-width` (or any `overflow-x`) of its own — a 3+ column fan must render every
+// sibling column fully, side by side, growing the row as wide as needed, rather than clipping/
+// scrolling past some fixed number of columns. jsdom never computes real CSS layout (no real box
+// widths), so this can't verify actual on-screen pixel visibility — that's confirmed separately by
+// hand against the real dev server. What IS checkable here is the STRUCTURAL precondition: every
+// sibling renders as a real column inside the one row (never dropped or wrapped to a second row),
+// and the row's own inline style carries no leftover `max-width` clamp.
 describe('ThreadCard — branch row width cap (structural)', () => {
   let pinia: Pinia;
 
@@ -715,7 +702,7 @@ describe('ThreadCard — branch row width cap (structural)', () => {
     });
   }
 
-  it('caps the row at exactly 4 columns worth of width, with a 5th sibling still rendered (no wrap) rather than dropped', () => {
+  it('renders all 5 sibling columns in one uncapped row, with no max-width/overflow-x clamp', () => {
     const store = useThreadStore();
     store.threads = [
       threadFixture({ id: 'root-1', kind: 'thread-root' }),
@@ -739,23 +726,18 @@ describe('ThreadCard — branch row width cap (structural)', () => {
     const columns = row.findAll('.thread-branch-column');
 
     // All 5 siblings render as real columns in the SAME row (no wrap to a second row, no dropped
-    // sibling) — the width cap is purely a `max-width`/`overflow-x` concern, never a rendering limit.
+    // sibling, no cap on how many render).
     expect(columns.length).toBe(5);
     expect(row.element.children.length).toBe(5);
-    // Only the LAST (5th) column is marked `--last`.
-    expect(columns.filter((c) => c.classes().includes('thread-branch-column--last')).length).toBe(
-      1,
-    );
+    // No `--last` modifier class anywhere — it was only ever used to bridge a fan-bar connector
+    // between columns, and that connector was removed per explicit request.
+    expect(columns.some((c) => c.classes().includes('thread-branch-column--last'))).toBe(false);
 
-    // The row's own inline `max-width` budgets for exactly `MAX_VISIBLE_BRANCH_COLUMNS` (4) siblings
-    // at their real per-depth column width (420px, depth 1's own `CARD_MAX_WIDTH_PX`) plus 3 gaps
-    // between them (32px each, `BRANCH_COLUMN_GAP_PX`): 4*420 + 3*32 = 1680 + 96 = 1776px — NOT
-    // sized for all 5 actual siblings (which would need a 4th gap too), which is exactly what forces
-    // the 5th column past the cap into `overflow-x: auto` territory in a real browser.
-    // (`overflow-x: auto`/no-wrap themselves are static CSS, not inline style — see this file's own
-    // top-of-suite comment for why the real scroll behavior is verified via Playwright instead.)
+    // The row's own inline style carries no `max-width` clamp — it grows unbounded to fit however
+    // many sibling columns this fork has (`branchRowStyle` in `ThreadCard.vue` only sets
+    // `margin-left` and the `--thread-branch-fan-gap` custom property now).
     const style = row.attributes('style') ?? '';
-    expect(style).toContain('1776px');
+    expect(style).not.toContain('max-width');
   });
 });
 
