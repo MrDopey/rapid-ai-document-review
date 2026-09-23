@@ -1,0 +1,60 @@
+name: OpenWiki Pages
+
+# Push-triggered (unlike openwiki-update.yml's manual-only trigger): this job
+# only publishes the already-committed openwiki/ content as a static site, it
+# never calls an LLM or costs money, so re-publishing automatically whenever
+# openwiki/ changes on main (e.g. after an openwiki-update.yml PR merges) is
+# the natural "keep the published wiki in sync" behavior. workflow_dispatch
+# is kept too for manual re-publish (e.g. after changing Pages settings).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openwiki/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install OpenWiki
+        run: npm install --global openwiki@0.5.2 mermaid@11.16.0 jsdom@29.1.1
+
+      - name: Export static OpenWiki visualizer
+        run: openwiki visualize openwiki --export site
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

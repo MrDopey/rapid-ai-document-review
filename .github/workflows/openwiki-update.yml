@@ -1,0 +1,103 @@
+name: OpenWiki Update
+
+# Manual only (no schedule) - unlike upstream openwiki's example, which also
+# runs on a daily cron. Dispatched by hand until the update quality/cost is
+# proven out.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: openwiki-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install OpenWiki
+        run: npm install --global openwiki@0.5.2 mermaid@11.16.0 jsdom@29.1.1
+
+      # NOTE on auth: this repo uses the default secrets.GITHUB_TOKEN
+      # throughout (no separate fine-grained PAT), including for the
+      # auto-merge step below. Tradeoff: PRs opened with the default
+      # GITHUB_TOKEN don't trigger this repo's own pull_request-triggered CI,
+      # so tests won't run against the bot's PR before it auto-merges. That's
+      # accepted here because this workflow only ever touches doc/wiki paths
+      # (openwiki/, AGENTS.md, CLAUDE.md), never application code.
+      - name: Run OpenWiki
+        id: openwiki
+        continue-on-error: true
+        run: openwiki code --update --print
+        env:
+          OPENWIKI_PROVIDER: openrouter
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      - name: Exclude workflow changes
+        if: ${{ !cancelled() }}
+        run: git checkout -- .github/workflows/openwiki-update.yml
+
+      - name: Remove transient OpenWiki run state
+        if: ${{ !cancelled() }}
+        run: rm -f -- openwiki/.run.json
+
+      - name: Create OpenWiki update pull request
+        id: create-pr
+        if: ${{ !cancelled() }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: |
+            openwiki
+            AGENTS.md
+            CLAUDE.md
+          branch: openwiki/update
+          commit-message: "docs: update OpenWiki"
+          title: "docs: update OpenWiki"
+          body: |
+            Automated OpenWiki documentation update.
+
+            OpenWiki result: ${{ steps.openwiki.outcome }}
+
+            When the result is `failure`, this PR intentionally preserves only the
+            pages completed before the failure. A later successful run can update it.
+
+      - name: Enable auto-merge after a successful update
+        if: ${{ steps.openwiki.outcome == 'success' && steps.create-pr.outputs.pull-request-number != '' }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          gh pr merge --auto --squash "$PR_NUMBER"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+
+      - name: Disable auto-merge after a failed update
+        if: ${{ steps.openwiki.outcome == 'failure' && steps.create-pr.outputs.pull-request-number != '' }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          gh pr merge --disable-auto "$PR_NUMBER"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+
+      - name: Annotate OpenWiki update pull request
+        if: ${{ !cancelled() && steps.create-pr.outputs.pull-request-url != '' }}
+        run: echo "::notice title=OpenWiki update pull request::${{ steps.create-pr.outputs.pull-request-url }}"
+
+      - name: Propagate OpenWiki failure
+        if: ${{ steps.openwiki.outcome == 'failure' }}
+        run: exit 1
