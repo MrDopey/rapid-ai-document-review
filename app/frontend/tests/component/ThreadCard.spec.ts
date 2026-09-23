@@ -344,313 +344,15 @@ describe('ThreadCard — tool-call-carrier message renders via ToolCallMessage',
   });
 });
 
-// Regression test for the bug fix described in `ThreadCard.vue`'s own `syncBranchAlignment` doc
-// comment: `.thread-trunk` (the run-card chain) and `.thread-branches` (the branch column) are two
-// independently-stacking flex columns with no CSS relationship between a `.thread-branch-group`'s
-// position and the run-card it forked from — jsdom gives every element a zero-size
-// `getBoundingClientRect()` by default (same caveat `App.spec.ts`/`DocumentCanvas.spec.ts` already
-// document for their own layout-math tests), so this stubs the three elements the alignment math
-// actually reads to prove the *arithmetic* itself is correct, not just that it runs without
-// throwing. Since the Y-split redesign gives every forking segment its own dedicated `.thread-card`
-// run-box (rather than one continuous box holding every segment), root-1's two segments (`m0`, the
-// fork anchor, then `m1`, the tip) now render as TWO sibling `.thread-card`s inside one
-// `.thread-trunk` — these tests stub the FIRST one's own bottom edge (the actual fork point) rather
-// than a `.thread-segment` div's, matching what `syncBranchAlignment` itself now measures.
-describe('ThreadCard — branch connector alignment (bug fix)', () => {
-  let pinia: Pinia;
-
-  beforeEach(() => {
-    pinia = createPinia();
-    setActivePinia(pinia);
-  });
-
-  function mountCard(threadId: string) {
-    return mount(ThreadCard, {
-      props: { threadId },
-      global: { plugins: [pinia] },
-    });
-  }
-
-  function stubRect(el: Element, rect: Partial<DOMRect>): void {
-    (el as HTMLElement).getBoundingClientRect = () => rect as DOMRect;
-  }
-
-  // `syncBranchAlignment` runs off a `requestAnimationFrame`/`setTimeout(cb, 0)`-scheduled callback
-  // chained behind a `flush: 'post'` watcher's own `nextTick` — polling sidesteps having to
-  // replicate that exact microtask/macrotask interleaving here.
-  async function waitFor(check: () => boolean, timeoutMs = 500): Promise<void> {
-    const start = Date.now();
-    while (!check()) {
-      if (Date.now() - start > timeoutMs) throw new Error('waitFor: condition never became true');
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-  }
-
-  it("nudges a branch group's margin-top so it lands level with the trunk segment it forked from", async () => {
-    const store = useThreadStore();
-    store.threads = [
-      threadFixture({ id: 'root-1', kind: 'thread-root' }),
-      threadFixture({
-        id: 'branch-1',
-        kind: 'thread-branch',
-        parentId: 'root-1',
-        forkedFromMessageId: 'm0',
-        seedExcerptText: 'excerpt',
-      }),
-    ];
-    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-    const wrapper = mountCard('root-1');
-    // Let the initial (all-zero-rect) alignment pass run and settle before installing the stubs
-    // below, so it can't race with — or mask — the assertions that follow.
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    // Scoped to the ROOT thread's own `.thread-trunk` wrapper — the nested branch `ThreadCard`'s
-    // own (sibling, not descendant, of the root's `.thread-trunk`) run-card(s) live under a
-    // completely separate `.thread-branches` subtree, so an unscoped `wrapper.findAll` would
-    // otherwise also pick those up.
-    const trunkWrapper = wrapper.find('.thread-trunk');
-    const trunkEl = trunkWrapper.element;
-    const runCards = trunkWrapper.findAll('.thread-card');
-    const groupEl = wrapper.find('.thread-branch-group').element;
-    // One run-card ending at the fork anchor (m0), one for the tip segment (m1) — see `runs`' own
-    // doc comment in `ThreadCard.vue`.
-    expect(runCards.length).toBe(2);
-    expect(groupEl).toBeTruthy();
-
-    stubRect(trunkEl, { top: 100 } as DOMRect);
-    // The forking run-card (ends at `m0`) sits far down the trunk (e.g. `m0` is a long message)…
-    const runCardBottom = 500;
-    stubRect(runCards[0]!.element, { bottom: runCardBottom } as DOMRect);
-    // …while the branch column's own natural (un-nudged) stacking would put this group much higher.
-    const groupNaturalTop = 250;
-    stubRect(groupEl, { top: groupNaturalTop } as DOMRect);
-
-    // Re-triggers `syncBranchAlignment` the same way a real expand/collapse toggle would (the
-    // `watch([branchSegments, expandedByMessage], ...)` in `ThreadCard.vue`).
-    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-
-    // The actual invariant ("lands level with the trunk segment it forked from"), not the
-    // internal nudge formula's own arithmetic: the group's effective top (its natural,
-    // un-nudged top plus whatever margin got applied) must land exactly on the forking
-    // run-card's bottom edge — the two elements' own stubbed rects are both already
-    // relative to the same fixed trunk top, so no further offsetting is needed.
-    const effectiveGroupTop = (): number =>
-      groupNaturalTop + (parseFloat((groupEl as HTMLElement).style.marginTop || '0') || 0);
-    await waitFor(() => effectiveGroupTop() === runCardBottom);
-    expect(effectiveGroupTop()).toBe(runCardBottom);
-  });
-
-  // Regression test for the "jiggle" bug: a naive implementation reset `margin-top` to `0px` before
-  // every measurement, then wrote the real nudge back — two writes per pass, either of which changes
-  // `.thread-branch-group`'s margin and so (since a flex column's auto height includes child
-  // margins) `.thread-branches`' own rendered height, which is exactly what the `ResizeObserver`
-  // below watches — a write-triggers-observer-triggers-write loop, made worse by `margin-top`'s own
-  // `transition` restarting on every intermediate `0px` write. This proves the fix converges instead:
-  // once a nudge is applied, re-running the exact same alignment pass against an UNCHANGED layout
-  // (simulating the `ResizeObserver` re-firing itself, or any other spurious re-trigger) must not
-  // write a different value — `style.marginTop` should hold steady, not oscillate — and must not
-  // keep touching the style at all once converged, which is what actually breaks a real feedback
-  // loop (a real browser only restarts the `transition`/re-fires `ResizeObserver` on an actual
-  // change).
-  it('converges instead of oscillating when re-run against an unchanged layout (no feedback loop)', async () => {
-    const store = useThreadStore();
-    store.threads = [
-      threadFixture({ id: 'root-1', kind: 'thread-root' }),
-      threadFixture({
-        id: 'branch-1',
-        kind: 'thread-branch',
-        parentId: 'root-1',
-        forkedFromMessageId: 'm0',
-        seedExcerptText: 'excerpt',
-      }),
-    ];
-    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-    const wrapper = mountCard('root-1');
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const trunkWrapper = wrapper.find('.thread-trunk');
-    const trunkEl = trunkWrapper.element;
-    const runCards = trunkWrapper.findAll('.thread-card');
-    const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
-
-    stubRect(trunkEl, { top: 100 } as DOMRect);
-    stubRect(runCards[0]!.element, { bottom: 500 } as DOMRect);
-    // Unlike the fixed-rect stubs the other two tests in this suite use, this one has to behave like
-    // a REAL element's `getBoundingClientRect()` — i.e. move by however much `margin-top` currently
-    // pushes it down — specifically so a second alignment pass over an unchanged layout re-measures
-    // the group at its NEW (already-nudged) rendered position, the same way a real browser's layout
-    // engine would after the previous pass's write actually took effect. A naive fixed-rect stub
-    // can't exercise this regression at all: it would silently hide exactly the kind of
-    // double-subtraction bug that made an earlier draft of this fix re-inflate `margin-top` by
-    // another full nudge on every subsequent pass instead of converging.
-    const groupNaturalTop = 250;
-    groupEl.getBoundingClientRect = () =>
-      ({ top: groupNaturalTop + (parseFloat(groupEl.style.marginTop) || 0) }) as DOMRect;
-
-    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-    await waitFor(() => groupEl.style.marginTop === '250px');
-
-    // Same rects, same story (nothing in the layout actually changed) — re-trigger alignment
-    // several more times in a row, the way a self-triggering `ResizeObserver` would, and confirm the
-    // margin never drifts away from its converged value (no oscillation) and no write is even
-    // attempted once converged (a real no-op, matching what stops a real observer loop).
-    let writeCount = 0;
-    let currentValue = groupEl.style.marginTop;
-    Object.defineProperty(groupEl.style, 'marginTop', {
-      configurable: true,
-      get: () => currentValue,
-      set: (v: string) => {
-        writeCount += 1;
-        currentValue = v;
-      },
-    });
-
-    for (let i = 0; i < 5; i += 1) {
-      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(currentValue).toBe('250px');
-    }
-    expect(writeCount).toBe(0);
-  });
-
-  it('never nudges a branch group upward (never overlaps the group above it)', async () => {
-    const store = useThreadStore();
-    store.threads = [
-      threadFixture({ id: 'root-1', kind: 'thread-root' }),
-      threadFixture({
-        id: 'branch-1',
-        kind: 'thread-branch',
-        parentId: 'root-1',
-        forkedFromMessageId: 'm0',
-        seedExcerptText: 'excerpt',
-      }),
-    ];
-    store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-    store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-    const wrapper = mountCard('root-1');
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const trunkWrapper = wrapper.find('.thread-trunk');
-    const trunkEl = trunkWrapper.element;
-    const runCards = trunkWrapper.findAll('.thread-card');
-    const groupEl = wrapper.find('.thread-branch-group').element;
-
-    stubRect(trunkEl, { top: 100 } as DOMRect);
-    // The forking run-card sits HIGHER than the branch group's own natural stacking position —
-    // the group must stay put (margin-top 0), never move up to "chase" it. Spied so the test can
-    // positively confirm a sync pass actually re-read it (rather than just asserting a margin that
-    // was already '' before the toggle, which would trivially "pass" without proving anything).
-    const groupRectSpy = vi.fn(() => ({ top: 400 }) as DOMRect);
-    stubRect(runCards[0]!.element, { bottom: 150 } as DOMRect);
-    (groupEl as HTMLElement).getBoundingClientRect = groupRectSpy;
-
-    await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-    await waitFor(() => groupRectSpy.mock.calls.length > 0);
-
-    expect((groupEl as HTMLElement).style.marginTop).toBe('');
-  });
-
-  // Regression test for the initial-load animation bug: a freshly mounted/refreshed page fires the
-  // exact same `syncBranchAlignment` correction machinery `onMounted` already schedules, but a
-  // static `transition: margin-top 0.1s ease` CSS rule made every one of those corrective mount-time
-  // writes visibly animate — confirmed via Playwright against a real seeded multi-branch document to
-  // take ~1-2s of visible motion end-to-end. `alignTransitionsReady`/`branchGroupStyle` (script)
-  // suppress the transition (`transition: none`, inline) until this card's own alignment activity
-  // has gone quiet for `ALIGN_SETTLE_QUIET_MS`, then flip it on permanently — this suite asserts that
-  // state machine directly, mirroring `App.vue`'s `previewSplitDragging`/`DocumentCanvas.vue`'s
-  // `editorSplitDragging` drag-suppression convention (a boolean-driven inline `transition`, not a
-  // static CSS rule).
-  describe('initial-mount transition suppression (no-visible-animation-on-load fix)', () => {
-    it('suppresses the branch-group margin-top transition immediately after mount', () => {
-      const store = useThreadStore();
-      store.threads = [
-        threadFixture({ id: 'root-1', kind: 'thread-root' }),
-        threadFixture({
-          id: 'branch-1',
-          kind: 'thread-branch',
-          parentId: 'root-1',
-          forkedFromMessageId: 'm0',
-          seedExcerptText: 'excerpt',
-        }),
-      ];
-      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-      const wrapper = mountCard('root-1');
-      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
-
-      // Mount just happened — `onMounted`'s own `scheduleAlignSync()` call has armed the settle
-      // timer but it can't have fired yet (0ms have elapsed), so the transition must still read as
-      // suppressed.
-      expect(groupEl.style.transition).toBe('none');
-    });
-
-    it('enables the real margin-top transition once alignment activity goes quiet', async () => {
-      const store = useThreadStore();
-      store.threads = [
-        threadFixture({ id: 'root-1', kind: 'thread-root' }),
-        threadFixture({
-          id: 'branch-1',
-          kind: 'thread-branch',
-          parentId: 'root-1',
-          forkedFromMessageId: 'm0',
-          seedExcerptText: 'excerpt',
-        }),
-      ];
-      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-      const wrapper = mountCard('root-1');
-      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
-      expect(groupEl.style.transition).toBe('none');
-
-      // No further alignment activity is triggered here — the quiet timer armed at mount should
-      // fire on its own and flip the transition on.
-      await waitFor(() => groupEl.style.transition === 'margin-top 0.1s ease');
-      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
-    });
-
-    it('never re-suppresses the transition for a later live interaction once settled', async () => {
-      const store = useThreadStore();
-      store.threads = [
-        threadFixture({ id: 'root-1', kind: 'thread-root' }),
-        threadFixture({
-          id: 'branch-1',
-          kind: 'thread-branch',
-          parentId: 'root-1',
-          forkedFromMessageId: 'm0',
-          seedExcerptText: 'excerpt',
-        }),
-      ];
-      store.messagesByThread['root-1'] = [makeMessage('m0'), makeMessage('m1')];
-      store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
-
-      const wrapper = mountCard('root-1');
-      const groupEl = wrapper.find('.thread-branch-group').element as HTMLElement;
-      await waitFor(() => groupEl.style.transition === 'margin-top 0.1s ease');
-
-      // A genuine later live interaction (the same bulk-toggle-driven re-alignment the other tests
-      // in this suite use) re-triggers `scheduleAlignSync()`/`markAlignActivity()` — this must NOT
-      // re-arm suppression, or a real user action shortly after mount would silently lose its
-      // animation too.
-      await wrapper.find('[data-action="bulk-toggle"]').trigger('click');
-      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
-      // Still true after the interaction's own alignment pass has had time to run.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(groupEl.style.transition).toBe('margin-top 0.1s ease');
-    });
-  });
-});
-
-// Structural coverage for the Y-split fork redesign itself (`runs`, script above): a fork visually
-// disconnects the trunk into sibling run-cards (this run's own continuation, plus one per active
-// branch) rather than the trunk rendering as one continuous box the branch column merely sits beside.
+// Structural coverage for the Y-split fork design (`runs`, script above): a fork visually
+// disconnects the trunk into sibling run-cards (this run's own continuation, self-mounted one
+// `runStartIndex` deeper, plus one nested `ThreadCard` per active branch) rather than the trunk
+// rendering as one continuous box a separate branch column merely sits beside. Since the
+// column-packing redesign made this whole layout flex/DOM-flow-driven (no more
+// `getBoundingClientRect()`-measured `margin-top` alignment — a fork's own `.thread-branch-row`
+// renders as a plain block with a fixed `margin-left` indent, and the continuation renders strictly
+// AFTER it, never beside it as a flex-row sibling — see `ThreadCard.vue`'s own top doc comment for
+// why), there is no separate "alignment" test suite to keep in sync with this one anymore.
 describe('ThreadCard — Y-split fork layout (structural)', () => {
   let pinia: Pinia;
 
@@ -673,9 +375,9 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
 
     const wrapper = mountCard('root-1');
 
-    expect(wrapper.find('.thread-trunk').findAll('.thread-card').length).toBe(1);
+    expect(wrapper.findAll('.thread-card').length).toBe(1);
     expect(wrapper.find('.thread-fork-connector').exists()).toBe(false);
-    expect(wrapper.find('.thread-branches').exists()).toBe(false);
+    expect(wrapper.find('.thread-branch-row').exists()).toBe(false);
   });
 
   it('a branch off a non-tip message splits the trunk into two sibling run-cards joined by a fork connector', () => {
@@ -694,23 +396,18 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
 
     const wrapper = mountCard('root-1');
-    const trunkWrapper = wrapper.find('.thread-trunk');
 
-    // Two sibling boxes: one ending at the fork anchor (m0), one the trunk's own continuation (m1)
-    // — never one continuous box spanning both, now that the trunk visually disconnects at m0.
-    expect(trunkWrapper.findAll('.thread-card').length).toBe(2);
-    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(1);
-    // The branch itself still renders in the sibling `.thread-branches` column, inside a
-    // `.thread-branch-row` (now always the immediate wrapper — see the horizontal-column redesign's
-    // doc comment), as the plain single-line `.thread-branch-fork` connector — never the fan/column
-    // treatment, which only kicks in for 2+ siblings sharing the same fork point.
-    expect(wrapper.find('.thread-branches .thread-branch-row .thread-branch-fork').exists()).toBe(
-      true,
-    );
-    expect(wrapper.find('.thread-branch-group').classes()).not.toContain(
-      'thread-branch-group--fan',
-    );
-    expect(wrapper.find('.thread-branches .thread-branch-column').exists()).toBe(false);
+    // Two sibling boxes for root-1 itself: one ending at the fork anchor (m0), the other its own
+    // continuation (m1, self-mounted one `runStartIndex` deeper) — never one continuous box
+    // spanning both, now that the trunk visually disconnects at m0.
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(2);
+    expect(wrapper.findAll('.thread-fork-connector').length).toBe(1);
+    // The branch itself renders inside a `.thread-branch-row` (now always the immediate wrapper —
+    // see the horizontal-column redesign's doc comment), as the plain single-line
+    // `.thread-branch-fork` connector — never the fan/column treatment, which only kicks in for
+    // 2+ siblings sharing the same fork point.
+    expect(wrapper.find('.thread-branch-row .thread-branch-fork').exists()).toBe(true);
+    expect(wrapper.find('.thread-branch-column').exists()).toBe(false);
   });
 
   it('a branch off the actual tip message forks WITHOUT a trunk continuation (nothing follows it)', () => {
@@ -730,13 +427,12 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
 
     const wrapper = mountCard('root-1');
-    const trunkWrapper = wrapper.find('.thread-trunk');
 
     // Nothing follows the fork point, so there is exactly one run-card and no continuation connector
     // — only the sideways branch connector, not a downward one.
-    expect(trunkWrapper.findAll('.thread-card').length).toBe(1);
-    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(0);
-    expect(wrapper.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(1);
+    expect(wrapper.find('.thread-fork-connector').exists()).toBe(false);
+    expect(wrapper.find('.thread-branch-fork').exists()).toBe(true);
   });
 
   it('two active branches off the very same segment share one fork point, laid out as a horizontal row of columns (2-way sibling fork)', () => {
@@ -763,24 +459,20 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-2'] = [makeMessage('seed-1')];
 
     const wrapper = mountCard('root-1');
-    const trunkWrapper = wrapper.find('.thread-trunk');
 
     // Still just one fork point in the trunk (m0), so one continuation run-card + one connector...
-    expect(trunkWrapper.findAll('.thread-card').length).toBe(2);
-    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(1);
-    // ...but now 2 sibling columns sharing that SAME `.thread-branch-group`, marked as a fan (2+
-    // active children) and laid out side by side inside one `.thread-branch-row`, each with its own
-    // fan-bar drop arrow — never the old vertical `.thread-branch-spine` (removed by the
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(2);
+    expect(wrapper.findAll('.thread-fork-connector').length).toBe(1);
+    // ...but now 2 sibling columns laid out side by side inside one `.thread-branch-row`, each with
+    // its own fan-bar drop arrow — never the old vertical `.thread-branch-spine` (removed by the
     // horizontal-column redesign; a fan bridges siblings left-to-right instead of top-to-bottom).
-    const group = wrapper.find('.thread-branch-group');
-    expect(group.classes()).toContain('thread-branch-group--fan');
     expect(wrapper.find('.thread-branch-spine').exists()).toBe(false);
-    const row = group.find('.thread-branch-row');
+    const row = wrapper.find('.thread-branch-row');
     expect(row.exists()).toBe(true);
     const columns = row.findAll('.thread-branch-column');
     expect(columns.length).toBe(2);
     // Single-branch fork's own `.thread-branch-fork` connector never appears once this is a fan.
-    expect(group.findAll('.thread-branch-fork').length).toBe(0);
+    expect(wrapper.find('.thread-branch-fork').exists()).toBe(false);
     // Every column is a direct child of the row (side by side, not nested inside one another).
     expect(row.element.children.length).toBe(2);
     expect(
@@ -828,8 +520,7 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-3'] = [makeMessage('seed-2')];
 
     const wrapper = mountCard('root-1');
-    const group = wrapper.find('.thread-branch-group');
-    const row = group.find('.thread-branch-row');
+    const row = wrapper.find('.thread-branch-row');
     const columns = row.findAll('.thread-branch-column');
 
     expect(columns.length).toBe(3);
@@ -842,7 +533,7 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     expect(columns[2]!.classes()).toContain('thread-branch-column--last');
   });
 
-  it('two independent fork points in the same trunk each get their own stacked `.thread-branch-group`', () => {
+  it('two independent fork points in the same trunk each get their own `.thread-branch-row`, chained via the trunk continuation', () => {
     const store = useThreadStore();
     store.threads = [
       threadFixture({ id: 'root-1', kind: 'thread-root' }),
@@ -867,19 +558,15 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-2'] = [makeMessage('seed-1')];
 
     const wrapper = mountCard('root-1');
-    const trunkWrapper = wrapper.find('.thread-trunk');
 
-    // Three run-cards (one ending at m0, one ending at m1, one for the m2 tip), two fork connectors.
-    expect(trunkWrapper.findAll('.thread-card').length).toBe(3);
-    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(2);
-    // Two SEPARATE groups, stacked top-to-bottom in `.thread-branches` — the horizontal-column
-    // redesign only rotates the axis WITHIN one group, never merges independent fork points into
-    // one row.
-    const groups = wrapper.findAll('.thread-branch-group');
-    expect(groups.length).toBe(2);
-    // Neither is a fan (each has exactly one active child) — each keeps the plain single-line
-    // `.thread-branch-fork` connector, not a `.thread-branch-row` fan/column.
-    expect(groups.every((g) => !g.classes().includes('thread-branch-group--fan'))).toBe(true);
+    // Three run-cards (one ending at m0, one ending at m1, one for the m2 tip) — root-1 itself
+    // self-mounted three deep (`runStartIndex` 0, 1, 2) — two fork connectors chaining them.
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(3);
+    expect(wrapper.findAll('.thread-fork-connector').length).toBe(2);
+    // Two SEPARATE `.thread-branch-row`s, one per fork point, each still just a single-branch
+    // (non-fan) `.thread-branch-fork` — the horizontal-column redesign only rotates the axis WITHIN
+    // one fork point's own row, never merges independent fork points into one row.
+    expect(wrapper.findAll('.thread-branch-row').length).toBe(2);
     expect(wrapper.findAll('.thread-branch-fork').length).toBe(2);
     expect(wrapper.findAll('.thread-branch-column').length).toBe(0);
   });
@@ -901,15 +588,14 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
     store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
 
     const wrapper = mountCard('root-1');
-    const trunkWrapper = wrapper.find('.thread-trunk');
 
     // m0's only child is done, so it never ends a run early — one continuous run-card, still split
     // into two `.thread-segment`s internally (the plain dashed border), no fork connector, no
-    // branches column at all (done branches never render inline — see `activeChildIds`).
-    expect(trunkWrapper.findAll('.thread-card').length).toBe(1);
-    expect(trunkWrapper.find('.thread-card').findAll('.thread-segment').length).toBe(2);
-    expect(trunkWrapper.findAll('.thread-fork-connector').length).toBe(0);
-    expect(wrapper.find('.thread-branches').exists()).toBe(false);
+    // branch row at all (done branches never render inline — see `activeChildIds`).
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(1);
+    expect(wrapper.find('.thread-card').findAll('.thread-segment').length).toBe(2);
+    expect(wrapper.find('.thread-fork-connector').exists()).toBe(false);
+    expect(wrapper.find('.thread-branch-row').exists()).toBe(false);
   });
 
   it('recursively applies the same Y-split treatment one level deeper to a branch that itself gets branched from', () => {
@@ -942,19 +628,17 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
 
     const wrapper = mountCard('root-1');
 
-    // root-1's own trunk: one run-card (fork is at the tip), one branch fork (to branch-1).
-    const rootTrunk = wrapper.find('.thread-trunk');
-    expect(rootTrunk.findAll('.thread-card').length).toBe(1);
+    // root-1's own run: one run-card (fork is at the tip), one branch fork (to branch-1).
+    expect(wrapper.findAll('.thread-card[data-thread-id="root-1"]').length).toBe(1);
 
-    // branch-1 renders recursively inside root-1's `.thread-branches` — its OWN nested `ThreadCard`
-    // gets its own `.thread-trunk`, independently split into 2 run-cards + 1 connector, with
-    // nested-1 rendered in ITS OWN `.thread-branches` one level deeper.
-    const branchNode = wrapper.find('.thread-branches .thread-branch-fork .thread-node');
+    // branch-1 renders recursively inside root-1's own `.thread-branch-fork` — its OWN nested
+    // `ThreadCard` gets its own independently self-mounted 2 run-cards + 1 connector, with
+    // nested-1 rendered one level deeper still.
+    const branchNode = wrapper.find('.thread-branch-fork .thread-node');
     expect(branchNode.exists()).toBe(true);
-    const branchTrunk = branchNode.find('.thread-trunk');
-    expect(branchTrunk.findAll('.thread-card').length).toBe(2);
-    expect(branchTrunk.findAll('.thread-fork-connector').length).toBe(1);
-    expect(branchNode.find('.thread-branches .thread-branch-fork').exists()).toBe(true);
+    expect(branchNode.findAll('.thread-card[data-thread-id="branch-1"]').length).toBe(2);
+    expect(branchNode.find('.thread-fork-connector').exists()).toBe(true);
+    expect(branchNode.find('.thread-branch-fork').exists()).toBe(true);
   });
 
   it('a depth-2 nested fork point (a fan inside a branch-of-a-branch) gets its own fan/row treatment independently of its ancestor', () => {
@@ -992,20 +676,19 @@ describe('ThreadCard — Y-split fork layout (structural)', () => {
 
     const wrapper = mountCard('root-1');
 
-    // root-1's own fork point is still the plain single-branch case (depth 0 -> depth 1).
-    expect(wrapper.find('.thread-branch-group').classes()).not.toContain(
-      'thread-branch-group--fan',
-    );
+    // root-1's own fork point is still the plain single-branch case (depth 0 -> depth 1): exactly
+    // one `.thread-branch-fork` connector anywhere in the tree (root-1's own), not a fan row.
+    const branchNode = wrapper.find('.thread-branch-fork .thread-node');
+    expect(branchNode.exists()).toBe(true);
+    expect(wrapper.findAll('.thread-branch-fork').length).toBe(1);
 
     // One level deeper, inside branch-1's own recursively-mounted `ThreadCard`, its fork point IS a
     // fan (2 active children sharing b0) — depth keeps growing rightward (this is still nested
-    // inside root-1's `.thread-branch-fork .thread-node`) independently of the sibling-column axis
-    // rotating within branch-1's own `.thread-branches`.
-    const branchNode = wrapper.find('.thread-branches .thread-branch-fork .thread-node');
-    const nestedGroup = branchNode.find('.thread-branch-group');
-    expect(nestedGroup.classes()).toContain('thread-branch-group--fan');
-    const nestedColumns = nestedGroup.find('.thread-branch-row').findAll('.thread-branch-column');
-    expect(nestedColumns.length).toBe(2);
+    // inside root-1's `.thread-branch-fork .thread-node`) independently of root-1's own
+    // single-branch fork point.
+    const nestedRow = branchNode.find('.thread-branch-row');
+    expect(nestedRow.exists()).toBe(true);
+    expect(nestedRow.findAll('.thread-branch-column').length).toBe(2);
   });
 });
 
@@ -1079,18 +762,13 @@ describe('ThreadCard — branch row width cap (structural)', () => {
 });
 
 // Regression test for the header containment bug (bug report: "the title and expand buttons render
-// outside the threaded conversation"): the Y-split redesign moved `.thread-card-header` out of the
-// single continuous `.thread-card` it used to be the first child of (needed so it stays sticky
-// across the WHOLE run-card chain, not just whichever run-card would otherwise contain it), but left
-// it a bare flex sibling of the run-card chain with no CSS relationship to it at all — so it read as
-// floating above the bordered box rather than as that box's own lid. The real visual fix is CSS
-// (`.thread-card-header`'s own border/padding, `.thread-run-chain > .thread-card:first-child`'s
-// squared-off top corners, and the `.thread-card-header + .thread-run-chain` zero-gap seam) — jsdom
-// doesn't compute layout, so what's actually checkable here is the STRUCTURAL precondition that CSS
-// depends on: every trunk box (the run-card chain, or the zero-message composer-only card) is now
-// grouped under one `.thread-run-chain` wrapper directly after the header, so `.thread-card-header +
-// .thread-run-chain` can match and `.thread-run-chain > .thread-card:first-child` unambiguously
-// identifies the one box the header is meant to sit flush against.
+// outside the threaded conversation"): a Thread's header must read as this box's own lid rather
+// than floating disconnected above it. The column-packing redesign dropped the old
+// `.thread-run-chain` wrapper (each `ThreadCard` instance renders at most one run-card of its own
+// now, rather than a whole thread's run-chain in one go — see this file's own top doc comment), so
+// the fix is now a direct `.thread-card-header + .thread-card` adjacency plus the
+// `.thread-card--flush-header` class (applied only to the `runStartIndex === 0` instance's own
+// run-card) squaring off that one box's top corners — see `ThreadCard.vue`'s own CSS doc comments.
 describe('ThreadCard — header containment (bug fix)', () => {
   let pinia: Pinia;
 
@@ -1106,7 +784,7 @@ describe('ThreadCard — header containment (bug fix)', () => {
     });
   }
 
-  it('wraps every run-card in one `.thread-run-chain` immediately after the header, so the header can sit flush against the first one', () => {
+  it("the header sits directly before this thread's own first run-card, which alone gets the flush-header treatment", () => {
     const store = useThreadStore();
     store.threads = [
       threadFixture({ id: 'root-1', kind: 'thread-root' }),
@@ -1122,31 +800,37 @@ describe('ThreadCard — header containment (bug fix)', () => {
     store.messagesByThread['branch-1'] = [makeMessage('seed-0')];
 
     const wrapper = mountCard('root-1');
-    const trunk = wrapper.find('.thread-trunk');
-    const header = trunk.find('.thread-card-header');
-    const runChain = trunk.find('.thread-run-chain');
+    const node = wrapper.find('.thread-node');
+    const header = node.find('.thread-card-header');
+    const firstCard = node.find('.thread-card');
 
     expect(header.exists()).toBe(true);
-    expect(runChain.exists()).toBe(true);
-    // The header is immediately followed by the run-chain in the trunk's own DOM order — the exact
-    // adjacency `.thread-card-header + .thread-run-chain`'s CSS zero-gap rule depends on.
-    expect(trunk.element.children[0]).toBe(header.element);
-    expect(trunk.element.children[1]).toBe(runChain.element);
-    // Both of this thread's own run-cards (the fork anchor's, and its continuation's) live INSIDE
-    // the run-chain wrapper, not as bare trunk children beside the header.
-    expect(runChain.findAll('.thread-card').length).toBe(2);
-    expect(trunk.element.querySelectorAll(':scope > .thread-card').length).toBe(0);
+    expect(firstCard.exists()).toBe(true);
+    // The header is immediately followed by this instance's own run-card in the node's own DOM
+    // order — the exact adjacency `.thread-card-header + .thread-card.thread-card--flush-header`'s
+    // CSS zero-gap rule depends on.
+    expect(node.element.children[0]).toBe(header.element);
+    expect(node.element.children[1]).toBe(firstCard.element);
+    expect(firstCard.classes()).toContain('thread-card--flush-header');
+
+    // The thread's own continuation (self-mounted one `runStartIndex` deeper) has no header of its
+    // own, so its run-card keeps full rounding rather than the flush-header treatment.
+    const rootCards = wrapper.findAll('.thread-card[data-thread-id="root-1"]');
+    expect(rootCards.length).toBe(2);
+    const continuationCard = rootCards[1]!;
+    expect(continuationCard.classes()).not.toContain('thread-card--flush-header');
   });
 
-  it('a zero-message thread (composer-only card) still wraps that card in `.thread-run-chain`', () => {
+  it('a zero-message thread still renders its composer-only card with the flush-header treatment', () => {
     const store = useThreadStore();
     store.threads = [threadFixture({ id: 'root-1', kind: 'thread-root' })];
     store.messagesByThread['root-1'] = [];
 
     const wrapper = mountCard('root-1');
-    const runChain = wrapper.find('.thread-trunk').find('.thread-run-chain');
+    const card = wrapper.find('.thread-card');
 
-    expect(runChain.findAll('.thread-card').length).toBe(1);
+    expect(card.exists()).toBe(true);
+    expect(card.classes()).toContain('thread-card--flush-header');
   });
 
   it('marks the header active in lockstep with its own run-card, so the HUD cursor ring wraps the whole unified box', () => {

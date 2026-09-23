@@ -101,12 +101,15 @@ mode's own toolbar uses — see the Canvas-mode diagram above) above a scrolling
 │  └────────────────────────────────────────────────────────────────────┘  │
 │  ┌─ .thread-mode-content ────────────────────────────────────────────┐  │
 │  │  .thread-mode-list:                                               │  │
-│  │   ┌─ <ThreadCard> (top-level thread) ───────────────────────────┐ │  │
+│  │   ┌─ <ThreadCard runStartIndex=0> (top-level thread) ───────────┐ │  │
 │  │   │  .thread-card-header : title/rename ......... [actions]     │ │  │
 │  │   │  [.error-banner]  (only when thread.status === 'errored')    │ │  │
-│  │   │  .thread-run-chain: [.thread-card] [.thread-card] ...        │ │  │
-│  │   │        ┆ .thread-branch-row → nested <ThreadCard> (branch)   │ │  │
-│  │   │  <ThreadComposer>  (open end of thread/branch)                │ │  │
+│  │   │  .thread-card  (exactly ONE run — see below)                 │ │  │
+│  │   │  .thread-branch-row  (only if this run forks; one            │ │  │
+│  │   │   <ThreadCard depth+1> per branch — a SEPARATE block, own    │ │  │
+│  │   │   fixed margin-left indent, never a sibling of the row below)│ │  │
+│  │   │  <ThreadCard runStartIndex+1>  (this run's own continuation, │ │  │
+│  │   │   strictly AFTER the branch row above, same column/depth)    │ │  │
 │  │   └────────────────────────────────────────────────────────────┘ │  │
 │  │   ┌─ <ThreadCard> (next top-level thread) ─────────────────────┐  │  │
 │  │   │  ...                                                       │  │  │
@@ -116,9 +119,28 @@ mode's own toolbar uses — see the Canvas-mode diagram above) above a scrolling
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **thread card** = `ThreadCard.vue`'s `.thread-card-header` (title/rename/actions) plus its
-  `.thread-run-chain` — the chain of message-run boxes (also class `.thread-card`) below it.
-- **branch** = a nested `ThreadCard` reachable via `.thread-branch-row`, forked off a parent run.
+`ThreadCard.vue` (column-packing redesign) is self-recursive PER RUN, not per thread: each mounted
+instance renders exactly one message-run box (`runs[runStartIndex]`) and, if that run forks, (a) a
+`.thread-branch-row` beneath it — one nested `ThreadCard` per active branch, at `depth + 1` — and,
+strictly AFTER that entire branch row (never beside it), (b) this same thread's own continuation,
+self-mounted one `runStartIndex` deeper at the same `depth`. Only the `runStartIndex === 0` instance
+renders the header/rename/done/error-banner chrome. There is no JS-measured alignment anywhere (no
+`getBoundingClientRect`/`ResizeObserver` margin-nudging, unlike Canvas mode's
+`computeConversationLayout`). Branch row and continuation are deliberately SEQUENTIAL BLOCKS, not
+flex-row siblings sharing width negotiation — an earlier draft made them siblings, which meant a
+continuation that itself forked further (needing more width) pushed its OWN row-sibling branch row
+sideways, breaking column alignment between unrelated forks at the same depth (bug report:
+"branch-4 doesn't align with branch-1"). Sequential blocks fix both bugs at once: a branch row's own
+`margin-left` (`branchRowStyle`, a FIXED per-depth constant) never depends on anything rendered
+elsewhere, and normal block stacking guarantees the continuation can never overlap the branch row
+above it. Column "reuse" between unrelated forks (two forks that aren't ancestor/descendant of each
+other) falls out of that same fixed-indent property, not an explicit lane-tracking algorithm.
+
+- **thread card** = `ThreadCard.vue`'s `.thread-card-header` (title/rename/actions, `runStartIndex
+=== 0` only) plus one `.thread-card` box per rendered run.
+- **branch** = a nested `ThreadCard` reachable via `.thread-branch-row`
+  (`.thread-branch-fork` for a single active child, `.thread-branch-column` × N for a fan),
+  forked off a parent run.
 - **composer** = `ThreadComposer.vue`, the send box at a thread/branch's open end.
 - **Done panel** = `DoneThreadsPanel.vue`, opened via the HUD's Done button into a
   `.done-threads-overlay`.
