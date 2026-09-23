@@ -23,6 +23,17 @@ export function useThreadFocusState() {
 
   const activeThreadId = ref<string | null>(null);
 
+  /** Set by `jumpTo`'s own `hotkey` option, read by `ThreadModeView.vue`'s `activeThreadId` watcher
+   *  to decide how aggressively to scroll the newly-active `ThreadCard` into view: a genuine
+   *  keyboard-driven jump (Ctrl+Alt+1..9/J/K/H/L, all of which end up going through `cycleByOffset`/
+   *  `jumpToIndex` below) centers the target, since the user has no other visual cue for where focus
+   *  just landed; a HUD row click (`jumpTo` called with no `hotkey` option, from a mouse click the
+   *  user could already see land) only nudges the viewport the minimum amount needed. Deliberately a
+   *  plain ref, not part of the `jumpTo` call's return value — the watcher reacts asynchronously to
+   *  `activeThreadId` itself changing, so it needs this recorded somewhere it can still read it by
+   *  the time it runs. */
+  const wasHotkeyJump = ref(false);
+
   /** The whole active tree, in on-screen left-to-right/top-to-bottom order — see
    *  `buildThreadTreeOrder`'s own doc comment for exactly what "order" means here. Recomputed live
    *  from the (reactive) thread store, same convention as `ThreadCard.vue`'s own
@@ -32,22 +43,27 @@ export function useThreadFocusState() {
 
   /** A plain cursor jump — used both by a HUD row click (Thread mode's `toggle-focus` handler,
    *  since there is no real multi-focus set to toggle membership in — see `ThreadModeView.vue`'s
-   *  own doc comment on that decision) and as the target of `cycleByOffset` below. */
-  function jumpTo(threadId: string): void {
+   *  own doc comment on that decision) and as the target of `cycleByOffset` below. `opts.hotkey`
+   *  (see `wasHotkeyJump` above) distinguishes the two callers — omitted (falsy) for a plain row
+   *  click, `true` for every keyboard-driven caller. */
+  function jumpTo(threadId: string, opts?: { hotkey?: boolean }): void {
     activeThreadId.value = threadId;
+    wasHotkeyJump.value = opts?.hotkey === true;
   }
 
   /** Moves `activeThreadId` to the thread `offset` positions away from the current one within
    *  `orderedThreadIds` (wrapping around) — mirrors `HudPanel.vue`'s own `cycleByOffset` exactly,
    *  kept here too (rather than relying solely on `HudPanel.vue`'s copy, which independently
    *  computes the same result over the `items` list `ThreadModeView.vue` hands it) so this
-   *  traversal/wrap behavior is directly unit-testable without mounting a component. */
+   *  traversal/wrap behavior is directly unit-testable without mounting a component. Always a
+   *  keyboard-driven caller (Ctrl+Alt+J/K, or Ctrl+Alt+H/L via `ThreadModeView.vue`'s exposed
+   *  `cycleByOffset`) — see `jumpTo`'s `hotkey` option above. */
   function cycleByOffset(offset: number): void {
     const list = orderedThreadIds.value;
     if (list.length === 0) return;
     const currentIndex = list.findIndex((id) => id === activeThreadId.value);
     const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + list.length) % list.length;
-    activeThreadId.value = list[nextIndex]!;
+    jumpTo(list[nextIndex]!, { hotkey: true });
   }
 
   /** Thread mode's own equivalent of App.vue's Ctrl+Alt+1..9 numbered-jump for canvas
@@ -56,14 +72,16 @@ export function useThreadFocusState() {
    *  a 1-based Ctrl+Alt+<N> keypress) within `orderedThreadIds` — the exact same tree/DFS order the
    *  HUD list renders and `cycleByOffset` above traverses, so numbered-jump and J/K cycling can
    *  never disagree about "which thread is Nth". A no-op (matching canvas mode's own out-of-range
-   *  no-op) when `index` is out of range, e.g. fewer than N threads currently visible. */
+   *  no-op) when `index` is out of range, e.g. fewer than N threads currently visible. Always a
+   *  keyboard-driven caller — see `jumpTo`'s `hotkey` option above. */
   function jumpToIndex(index: number): void {
     const id = orderedThreadIds.value[index];
-    if (id) jumpTo(id);
+    if (id) jumpTo(id, { hotkey: true });
   }
 
   return {
     activeThreadId,
+    wasHotkeyJump,
     orderedEntries,
     orderedThreadIds,
     jumpTo,

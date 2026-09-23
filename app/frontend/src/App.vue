@@ -509,13 +509,17 @@ function cycleFocusedConversation(offset: number): void {
   const list = orderedFocusedConversations.value;
   if (list.length === 0) {
     const fallback = orderedVisibleConversations.value[0];
-    if (fallback) focusConversation(fallback.id);
+    if (fallback) {
+      focusConversation(fallback.id);
+      scrollComposerIntoView(fallback.id);
+    }
     return;
   }
   if (list.length === 1) return;
   const currentIndex = list.findIndex((c) => c.id === lastInteractedId.value);
   const nextIndex = currentIndex === -1 ? 0 : (currentIndex + offset + list.length) % list.length;
   lastInteractedId.value = list[nextIndex]!.id;
+  scrollComposerIntoView(list[nextIndex]!.id);
 }
 
 // Bug fix: same "Nth item" dispatch split `focus-toggle-<N>`'s `digitMatch` branch below already
@@ -593,7 +597,12 @@ function onGlobalKeydown(event: KeyboardEvent): void {
       threadModeViewRef.value?.jumpToIndex?.(index);
     } else {
       const target = orderedVisibleConversations.value[index];
-      if (target) toggleFocus(target.id);
+      if (target) {
+        toggleFocus(target.id);
+        // `toggleFocus` can also be a toggle-*off* (Ctrl+Alt+<N> on an already-focused
+        // conversation) — nothing to scroll to in that case, only when it just became focused.
+        if (focusedConversationIds.value.has(target.id)) scrollComposerIntoView(target.id);
+      }
     }
     return;
   }
@@ -815,6 +824,32 @@ function scrollBoxIntoView(id: string): void {
     ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+/** Keyboard-only counterpart to `scrollBoxIntoView` above: that one nudges the always-rendered
+ *  sidebar box into view (used by the HUD row click/cycle handlers below), but a hotkey-driven
+ *  focus change (Ctrl+Alt+1..9's digit-jump, Ctrl+Alt+H/L/arrows' `cycleFocusedConversation`, and
+ *  HudPanel's own Ctrl+Alt+J/K `cycle-focus` — never its click-only `toggle-focus`, see
+ *  `onHudCycleFocus`'s call site below) has no other visual cue for "where did focus just land," so
+ *  it also centers that conversation's own composer — `ConversationDetailPanel.vue`'s
+ *  `#composer-<id>` textarea, the same element `useFocusTrap`'s `getPreferredInitialFocus` already
+ *  moves keyboard focus into once the panel becomes `active` — inside whichever pane actually
+ *  scrolls it (that panel's own `overflow: auto` vertically, `.conversation-detail-overlay`'s
+ *  `overflow-x: auto` horizontally when several focused panels overflow it — see that class's own
+ *  doc comment). Falls back to the panel's own dialog element (`data-conversation-id`) for a closed
+ *  conversation, which renders no composer at all.
+ *
+ *  Deferred one `nextTick`: the digit-jump caller may be opening a brand-new panel this same tick
+ *  (`toggleFocus` adding to the focus set), so the composer/dialog might not exist in the DOM yet. */
+function scrollComposerIntoView(id: string): void {
+  void nextTick(() => {
+    const target =
+      document.querySelector<HTMLElement>(`#composer-${id}`) ??
+      document.querySelector<HTMLElement>(
+        `.conversation-detail-dialog[data-conversation-id="${id}"]`,
+      );
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  });
+}
+
 /** US4/T033, extended for multi-focus: a HUD row click toggles that conversation's focus (add/
  *  remove, same as `ConversationThreadBox.vue`'s Focus button) and always scrolls its
  *  `ConversationThreadBox` into view regardless of direction — the box itself stays on the canvas
@@ -825,10 +860,14 @@ function onHudToggleFocus(id: string): void {
 }
 
 /** Ctrl+Alt+J/K cycling (HudPanel.vue) — a "replace" cursor move, not a toggle (see `replaceFocus`'s
- *  own doc comment above). */
+ *  own doc comment above). `HudPanel.vue`'s `cycle-focus` emit (unlike its click-only `toggle-focus`)
+ *  is only ever fired from its own keyboard `cycleByOffset` — see `scrollComposerIntoView`'s doc
+ *  comment — so this is always a hotkey-driven move; centers the composer alongside the existing
+ *  sidebar-box nudge. */
 function onHudCycleFocus(id: string): void {
   replaceFocus(lastInteractedId.value, id);
   scrollBoxIntoView(id);
+  scrollComposerIntoView(id);
 }
 
 async function onToggleReasoning(event: Event): Promise<void> {

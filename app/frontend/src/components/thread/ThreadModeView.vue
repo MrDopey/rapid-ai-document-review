@@ -66,9 +66,15 @@ const hudItems = computed<HudItem[]>(() =>
  *  here — see the doc comment above for why Thread mode collapses the two into one "jump the
  *  cursor to this thread" action. Scrolls the matching `ThreadCard` into view; the
  *  `.thread-card--active` highlight itself follows reactively from `threadFocus.activeThreadId`
- *  (passed down to every `ThreadCard` below), no separate DOM write needed for that part. */
-function onThreadHudSelect(threadId: string): void {
-  threadFocus.jumpTo(threadId);
+ *  (passed down to every `ThreadCard` below), no separate DOM write needed for that part.
+ *
+ *  `isHotkey` (default `false`, set `true` only by the template's `cycle-focus` listener below)
+ *  distinguishes which of the two emits actually fired: `HudPanel.vue`'s own `cycle-focus` is
+ *  ONLY ever emitted from its keyboard `cycleByOffset` (Ctrl+Alt+J/K), never a click — `toggle-focus`
+ *  is the click-only emit — so this flag reliably tells `threadFocus.jumpTo`'s own `hotkey` option
+ *  (see `threadFocusState.ts`) whether to center the resulting scroll or just nudge it into view. */
+function onThreadHudSelect(threadId: string, isHotkey = false): void {
+  threadFocus.jumpTo(threadId, { hotkey: isHotkey });
 }
 
 // Bug fix (parity with canvas mode): activating a thread — via a HUD row click OR either of the
@@ -83,12 +89,17 @@ function onThreadHudSelect(threadId: string): void {
 // `#thread-composer-<threadId>` id (same id-prefix convention `isEditingContext`'s `allowComposer`
 // option already recognizes). Lands the reviewer ready to type immediately, exactly like canvas
 // mode's click-a-HUD-row/hotkey behavior.
+// `block`: 'center' for a genuine keyboard-driven jump (Ctrl+Alt+1..9/J/K/H/L — see
+// `threadFocusState.ts`'s `wasHotkeyJump` doc comment), so the reviewer never has to hunt for where
+// focus just landed; plain 'nearest' for a HUD row click, since the user just clicked something they
+// could already see and a forced re-center would be a needless jolt.
 watch(threadFocus.activeThreadId, (threadId) => {
   if (!threadId) return;
+  const block = threadFocus.wasHotkeyJump.value ? 'center' : 'nearest';
   void nextTick(() => {
     document
       .querySelector(`.thread-card[data-thread-id="${threadId}"]`)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      ?.scrollIntoView({ behavior: 'smooth', block });
     document.querySelector<HTMLTextAreaElement>(`#thread-composer-${threadId}`)?.focus();
   });
 });
@@ -215,7 +226,7 @@ async function onExportDocument(): Promise<void> {
               :show-filter="false"
               hotkey-scope="Thread list"
               @toggle-focus="onThreadHudSelect"
-              @cycle-focus="onThreadHudSelect"
+              @cycle-focus="onThreadHudSelect($event, true)"
             />
           </div>
         </div>

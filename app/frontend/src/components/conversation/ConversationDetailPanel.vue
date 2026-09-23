@@ -80,6 +80,7 @@ const name = computed(
       role="dialog"
       aria-modal="true"
       :aria-label="`${name} — full view`"
+      :data-conversation-id="conversationId"
       @focusin="emit('interact')"
       @mousedown.capture="emit('interact')"
     >
