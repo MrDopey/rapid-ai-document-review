@@ -829,6 +829,14 @@ const CARD_WIDTH_PX = 420;
   position: relative;
   height: 1.25rem;
   width: 100%;
+  /* Bug fix: purely decorative (`aria-hidden="true"`, no interactive content) but its box was
+     still hit-testable — the spanning variant below stretches this across the full branch row's
+     height/width, landing directly on top of a continuation's composer beneath it and silently
+     swallowing every click there. A mouse click landing on the connector never reached the
+     textarea underneath, so the composer could only be focused via a HUD row click or hotkey jump
+     (`ThreadModeView.vue`'s `activeThreadId` watcher calls `.focus()` directly, bypassing hit
+     testing entirely) — never by clicking it directly. */
+  pointer-events: none;
 }
 .thread-fork-connector::before {
   content: '';
