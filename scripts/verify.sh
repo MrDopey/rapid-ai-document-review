@@ -5,6 +5,22 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+run_e2e=0
+
+usage() {
+  echo "Usage: $(basename "${BASH_SOURCE[0]}") [-e] [-h]"
+  echo "  -e  Also run e2e tests (npm run test:e2e) after the build"
+  echo "  -h  Show this help"
+}
+
+while getopts "eh" opt; do
+  case "$opt" in
+    e) run_e2e=1 ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+
 echo "==> Lint"
 npm run lint
 
@@ -22,3 +38,8 @@ npm run build
 
 echo "==> Check frontend bundle size"
 npm run check:bundle-size --workspace=app/frontend
+
+if [ "$run_e2e" -eq 1 ]; then
+  echo "==> E2E"
+  npm run test:e2e
+fi
