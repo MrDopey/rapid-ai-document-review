@@ -292,3 +292,125 @@ describe("ToolCallMessage — tool calls clamp/expand like MessageBubble.vue's m
     expect(wrapper.find('.tool-call .expand-toggle-button').exists()).toBe(false);
   });
 });
+
+describe('ToolCallMessage — message-scoped bulk expand/collapse (2+ tool calls)', () => {
+  let pinia: Pinia;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  const longCall = (id: string) => ({
+    toolCallId: id,
+    name: 'web_fetch',
+    args: { url: `https://example.com/${id}` },
+    resultText: 'x'.repeat(2000),
+    failureReason: null,
+    stagedEditId: null,
+  });
+  const shortCall = (id: string) => ({
+    toolCallId: id,
+    name: 'web_search',
+    args: { query: 'short' },
+    resultText: 'short result',
+    failureReason: null,
+    stagedEditId: null,
+  });
+
+  async function mountAndMeasure(
+    toolCalls: ConversationMessageState['toolCalls'],
+    overflowingIds: readonly string[],
+    expanded?: boolean,
+  ) {
+    const wrapper = mount(ToolCallMessage, {
+      props: {
+        message: makeMessage({ id: 'tc-bulk', toolCalls }),
+        ...(expanded === undefined ? {} : { expanded }),
+      },
+      global: { plugins: [pinia] },
+    });
+    const bodies = wrapper.findAll('.tool-call-body');
+    (toolCalls ?? []).forEach((call, i) => {
+      if (overflowingIds.includes(call.toolCallId)) {
+        mockTallScrollHeight(bodies[i]!.element);
+      }
+    });
+    await wrapper.vm.$nextTick();
+    return wrapper;
+  }
+
+  it('renders no bulk toggle with 0 tool calls', async () => {
+    const wrapper = await mountAndMeasure([], []);
+    expect(wrapper.find('.tool-call-bulk-toggle').exists()).toBe(false);
+  });
+
+  it('renders no bulk toggle with exactly 1 tool call, even if it overflows', async () => {
+    const wrapper = await mountAndMeasure([longCall('tc_1')], ['tc_1']);
+    expect(wrapper.find('.tool-call-bulk-toggle').exists()).toBe(false);
+  });
+
+  it('renders no bulk toggle with 2+ short (non-overflowing) tool calls', async () => {
+    const wrapper = await mountAndMeasure([shortCall('tc_1'), shortCall('tc_2')], []);
+    expect(wrapper.find('.tool-call-bulk-toggle').exists()).toBe(false);
+  });
+
+  it('renders the bulk toggle with 2+ calls where only one overflows', async () => {
+    const wrapper = await mountAndMeasure([longCall('tc_1'), shortCall('tc_2')], ['tc_1']);
+    expect(wrapper.find('.tool-call-bulk-toggle').exists()).toBe(true);
+  });
+
+  it('renders the bulk toggle with 2+ calls where all overflow', async () => {
+    const wrapper = await mountAndMeasure([longCall('tc_1'), longCall('tc_2')], ['tc_1', 'tc_2']);
+    expect(wrapper.find('.tool-call-bulk-toggle').exists()).toBe(true);
+  });
+
+  it('label reads "Expand all" by default (all default-collapsed), "Collapse all" after clicking it', async () => {
+    const wrapper = await mountAndMeasure([longCall('tc_1'), longCall('tc_2')], ['tc_1', 'tc_2']);
+    const bulkToggle = wrapper.get('.tool-call-bulk-toggle');
+    expect(bulkToggle.text()).toBe('Expand all');
+
+    await bulkToggle.trigger('click');
+
+    expect(wrapper.get('.tool-call-bulk-toggle').text()).toBe('Collapse all');
+    for (const toggle of wrapper.findAll('.tool-call .expand-toggle-button')) {
+      expect(toggle.text()).toBe('Show less');
+    }
+  });
+
+  it('clicking with default expanded=true prop but all-default-collapsed secondaries emits update:expanded(true)', async () => {
+    const wrapper = await mountAndMeasure(
+      [longCall('tc_1'), longCall('tc_2')],
+      ['tc_1', 'tc_2'],
+      true,
+    );
+    expect(wrapper.get('.tool-call-bulk-toggle').text()).toBe('Expand all');
+
+    await wrapper.get('.tool-call-bulk-toggle').trigger('click');
+
+    expect(wrapper.emitted('update:expanded')?.[0]).toEqual([true]);
+  });
+
+  it('clicking after independently expanding all overflowing calls (primary prop still false) emits update:expanded(false)', async () => {
+    const wrapper = await mountAndMeasure(
+      [longCall('tc_1'), longCall('tc_2')],
+      ['tc_1', 'tc_2'],
+      false,
+    );
+    for (const toggle of wrapper.findAll('.tool-call .expand-toggle-button')) {
+      await toggle.trigger('click');
+    }
+    expect(wrapper.get('.tool-call-bulk-toggle').text()).toBe('Collapse all');
+
+    await wrapper.get('.tool-call-bulk-toggle').trigger('click');
+
+    expect(wrapper.emitted('update:expanded')?.[0]).toEqual([false]);
+  });
+
+  it('the bulk toggle button is distinguishable from per-call toggle buttons', async () => {
+    const wrapper = await mountAndMeasure([longCall('tc_1'), longCall('tc_2')], ['tc_1', 'tc_2']);
+    expect(wrapper.findAll('.tool-call .expand-toggle-button')).toHaveLength(2);
+    expect(wrapper.findAll('.tool-call-bulk-toggle')).toHaveLength(1);
+    expect(wrapper.find('.tool-call .tool-call-bulk-toggle').exists()).toBe(false);
+  });
+});

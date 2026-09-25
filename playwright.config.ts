@@ -68,6 +68,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'tool-call-bulk-toggle',
+      // Self-contained spec (creates its own document) — same ordering-only 'stories' dependency
+      // as 'history-diff'/'thread-mode-hud' above. Real-browser regression coverage for
+      // ToolCallMessage.vue's message-scoped "Expand all"/"Collapse all" toggle: jsdom's own
+      // ToolCallMessage.spec.ts component tests already cover the underlying logic exhaustively,
+      // but only a real rendered browser can prove the 160px clamp genuinely overflows/doesn't for
+      // real content, and that the toggle's own click actually reflows the DOM.
+      testMatch: /tool-call-bulk-toggle\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
       name: 'hud-bar-height',
       // Self-contained spec (creates its own canvas + thread documents) — same
       // ordering-only 'stories' dependency as 'history-diff'/'thread-mode-hud' above. Real-browser

@@ -66,11 +66,20 @@ export function useClampToggle(
     }
   }
 
+  // `els` itself is a plain, non-reactive `Map`, so it can't drive a computed — `secondaryExpanded`
+  // doubles as the reactive registry of which secondary ids are currently mounted. The `!(id in
+  // ...)` guard matters: a redundant `setEl(id, sameEl)` fires on every re-render of an unchanged
+  // v-for entry (Vue's function-ref dispatch only passes `null` on a genuine unmount), so without
+  // it every re-render would stomp an already-expanded secondary back to collapsed.
   function setEl(id: string, el: Element | null): void {
     if (el instanceof HTMLElement) {
       els.set(id, el);
+      if (id !== primaryId && !(id in secondaryExpanded.value)) {
+        secondaryExpanded.value[id] = false;
+      }
     } else {
       els.delete(id);
+      if (id !== primaryId) delete secondaryExpanded.value[id];
     }
   }
 
@@ -109,5 +118,57 @@ export function useClampToggle(
     setExpanded(id, !isExpanded(id));
   }
 
-  return { setEl, recompute, isOverflowing, isExpanded, toggle, clampStyle, label };
+  // Message-scoped bulk toggle: any consumer registering 2+ secondaries under one primary gets
+  // this for free (e.g. `ToolCallMessage.vue`'s multiple tool-call rows); a consumer with 0-1
+  // secondaries (e.g. `MessageBubble.vue`'s single text region) always sees `canBulkToggle()` as
+  // false, so no per-type gating is needed in the consumer itself. Plain functions, like
+  // `isOverflowing`/`isExpanded`/`label` above, not bare `computed()` refs: Vue only auto-unwraps a
+  // nested ref reached via a plain returned object inside `{{ }}` text interpolation, not inside a
+  // `v-if`/`:attr` expression — returning a ref here would make `v-if="clamp.canBulkToggle"` always
+  // truthy (the ref object itself), regardless of its `.value`.
+  function anySecondaryCollapsed(): boolean {
+    return Object.keys(secondaryExpanded.value).some((id) => !secondaryExpanded.value[id]);
+  }
+
+  function canBulkToggle(): boolean {
+    const ids = Object.keys(secondaryExpanded.value);
+    return ids.length >= 2 && ids.some((id) => overflowing.value[id]);
+  }
+
+  function bulkLabel(): string {
+    return anySecondaryCollapsed() ? 'Expand all' : 'Collapse all';
+  }
+
+  // Deliberately not `toggle(primaryId)`: once a secondary has been toggled independently of the
+  // primary, the primary's own stored flag can disagree with "are all secondaries expanded," so a
+  // blind flip of it can invert the wrong direction relative to what `bulkLabel()` just told the
+  // user. Derive the target value from actual secondary state instead.
+  //
+  // Also can't rely solely on `setExpanded(primaryId, target)` triggering the cascade `watch`
+  // above: that watch only fires on an actual *change* to the primary's value, so when the
+  // primary's own flag already happens to equal `target` (e.g. `expanded` defaults to `true` while
+  // every secondary defaults to collapsed, since the cascade watch isn't `immediate`), setting it
+  // to the same value again is a no-op and the secondaries would never move. Set every registered
+  // secondary directly, and still call `setExpanded` on the primary so the caller's own persisted
+  // state stays in sync regardless of whether that particular call changes anything.
+  function toggleAll(): void {
+    const target = anySecondaryCollapsed();
+    for (const id of Object.keys(secondaryExpanded.value)) {
+      secondaryExpanded.value[id] = target;
+    }
+    setExpanded(primaryId, target);
+  }
+
+  return {
+    setEl,
+    recompute,
+    isOverflowing,
+    isExpanded,
+    toggle,
+    clampStyle,
+    label,
+    canBulkToggle,
+    bulkLabel,
+    toggleAll,
+  };
 }

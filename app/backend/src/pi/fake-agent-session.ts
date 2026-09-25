@@ -131,6 +131,34 @@ function parseListItemToolDirective(
 }
 
 /**
+ * Same protocol family as the directives above, but invokes *several* real tools within a single
+ * tool-call-carrier message instead of one — every other directive here calls `emitToolCallCarrier()`
+ * exactly once per turn, so a real carrier message from this fake session never has more than one
+ * `toolCalls[]` entry. `ToolCallMessage.vue`'s message-scoped "Expand all"/"Collapse all" toggle only
+ * appears with 2+ tool calls in one message, which no other directive can produce — this one exists
+ * so an e2e spec can drive that precondition through a real UI-driven agent turn rather than seeding
+ * data directly. A message beginning with this prefix, followed by JSON
+ * `{ calls: { tool: string; params?: Record<string, unknown> }[] }`, invokes each named real tool
+ * object in turn, all attributed to the same carrier message.
+ */
+export const MULTI_TOOL_DIRECTIVE = '__MULTI_TOOL_CALL__';
+
+function parseMultiToolDirective(
+  text: string,
+): { calls: { tool: string; params: Record<string, unknown> }[] } | null {
+  if (!text.startsWith(MULTI_TOOL_DIRECTIVE)) return null;
+  try {
+    const parsed = JSON.parse(text.slice(MULTI_TOOL_DIRECTIVE.length)) as {
+      calls: { tool: string; params?: Record<string, unknown> }[];
+    };
+    if (!Array.isArray(parsed.calls) || parsed.calls.length === 0) return null;
+    return { calls: parsed.calls.map((c) => ({ tool: c.tool, params: c.params ?? {} })) };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A message beginning with this prefix causes the fake session to simulate a stuck tool call/turn:
  * `runScript` never resolves on its own for it. Exercises the case where a hung tool call would
  * otherwise leave `streaming` stuck `true` forever — `prompt()` fires-and-forgets `runScript()`, so
@@ -368,6 +396,10 @@ export class FakeAgentSession implements AgentSessionLike {
       proposeDirective || readDirective || webSearchDirective
         ? null
         : parseListItemToolDirective(userText);
+    const multiToolDirective =
+      proposeDirective || readDirective || webSearchDirective || listItemDirective
+        ? null
+        : parseMultiToolDirective(userText);
     if (proposeDirective) {
       await this.runProposeEditDirective(proposeDirective);
     } else if (readDirective) {
@@ -376,6 +408,8 @@ export class FakeAgentSession implements AgentSessionLike {
       await this.runWebSearchDirective(webSearchDirective);
     } else if (listItemDirective) {
       await this.runListItemToolDirective(listItemDirective);
+    } else if (multiToolDirective) {
+      await this.runMultiToolDirective(multiToolDirective);
     } else {
       await this.runPlainAnswer(userText);
     }
@@ -587,6 +621,60 @@ export class FakeAgentSession implements AgentSessionLike {
     });
 
     const text = result.content?.[0]?.text ?? 'Done.';
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    for (const delta of chunk(text, 12)) {
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
+      await sleep(this.chunkDelayMs);
+    }
+    this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+    return text;
+  }
+
+  /** Invokes each named real tool object in turn, all attributed to one carrier message (a single
+   *  `emitToolCallCarrier()` call up front) — see `MULTI_TOOL_DIRECTIVE` above. Unlike the other
+   *  directives, a missing tool is skipped (not an early bail-out) so the remaining calls in the
+   *  same message still land, matching what a real multi-tool-call turn would do if only one tool
+   *  were unavailable. */
+  private async runMultiToolDirective(directive: {
+    calls: { tool: string; params: Record<string, unknown> }[];
+  }): Promise<string> {
+    this.emitToolCallCarrier();
+
+    const results: string[] = [];
+    for (const call of directive.calls) {
+      const tool = this.tools.find((t) => t.name === call.tool);
+      if (!tool) {
+        results.push(`${call.tool} is not available in this conversation.`);
+        continue;
+      }
+      const toolCallId = `fake_tool_${randomUUID()}`;
+      this.emit({
+        type: 'tool_execution_start',
+        toolCallId,
+        toolName: call.tool,
+        args: call.params,
+      });
+      const result = (await tool.execute(
+        toolCallId,
+        call.params,
+        undefined,
+        undefined,
+        undefined,
+      )) as {
+        content?: { type: string; text?: string }[];
+      };
+      this.emit({
+        type: 'tool_execution_end',
+        toolCallId,
+        toolName: call.tool,
+        isError: false,
+        result,
+      });
+      results.push(result.content?.[0]?.text ?? 'Done.');
+    }
+
+    const text = results.join('\n\n');
     const messageId = `fake_msg_${randomUUID()}`;
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
     for (const delta of chunk(text, 12)) {

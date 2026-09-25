@@ -74,6 +74,20 @@ function formatToolArgs(args: unknown): string {
       Tool call — this segment carries no reply text of its own.
     </p>
 
+    <!-- Message-scoped bulk toggle: only appears when this carrier has 2+ tool calls and at least
+         one overflows (`clamp.canBulkToggle`, from the shared `useClampToggle` controller) — a
+         single-call or all-short carrier never shows it. -->
+    <div v-if="clamp.canBulkToggle()" class="tool-call-message-header">
+      <button
+        type="button"
+        class="expand-toggle-button tool-call-bulk-toggle"
+        :aria-label="`${clamp.bulkLabel()} tool calls in this message`"
+        @click="clamp.toggleAll()"
+      >
+        {{ clamp.bulkLabel() }}
+      </button>
+    </div>
+
     <!-- Tool-call detail (contracts/frontend-display.md): a factual record of what the agent did,
          not gated by "Show reasoning" at all (Research Decision 5) — renders whenever this message
          has any `toolCalls`, regardless of the toggle. Plain text interpolation only (no v-html):
@@ -122,6 +136,13 @@ function formatToolArgs(args: unknown): string {
   font-size: 0.85rem;
   font-style: italic;
   opacity: 0.7;
+}
+/* New leading sibling above the per-call rows, matching `.tool-call-carrier-note`'s vertical
+   rhythm — doesn't touch `.tool-call-message`/`.tool-call` spacing. */
+.tool-call-message-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.35rem;
 }
 /* contracts/frontend-display.md: informational/read-only agent activity gets its own dedicated
    token pair (`--info-*`), distinct from `--status-active-*`/`--queue-*`; a failed call reuses the
