@@ -6,6 +6,7 @@ app/backend/data/
 todo.md
 supervisor.md
 openwiki/.run.json
+/CLAUDE.md
 
 # Node
 node_modules/
