@@ -331,6 +331,61 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
     );
   });
 
+  // Regression fix (report: focusing a message from the Todo/Parking Lot rail, HUD, or a hotkey,
+  // then starting work in a DIFFERENT thread, left the reviewer unable to "refocus" the first
+  // thread via any of those same normal means): re-selecting an ALREADY-active thread used to be a
+  // silent no-op — `threadFocus.jumpTo` reassigning `activeThreadId` to its own current value never
+  // fires a `watch`, so the scroll/composer-focus step this view drove off that watch never ran a
+  // second time. Fixed by moving that step to an imperative call at every jump entry point
+  // (`scrollActiveThreadIntoView`), the same pattern canvas mode's `onHudToggleFocus`/
+  // `onHudCycleFocus` already use (calling `scrollBoxIntoView`/`scrollComposerIntoView` directly,
+  // never via a `watch`).
+  it("re-clicking an already-active thread's HUD row re-scrolls/re-focuses it (not a silent no-op)", async () => {
+    seedTree();
+    const wrapper = mountView();
+
+    await wrapper.find('.conversation-row[data-conversation-id="root-1"]').trigger('click');
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+    // Simulates the reported scenario: the reviewer has since interacted elsewhere (moving DOM
+    // focus away, though nothing in this view ever moves `activeThreadId` off `root-1` on its
+    // own), then tries the exact same HUD click again to come back.
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    await wrapper.find('.conversation-row[data-conversation-id="root-1"]').trigger('click');
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
+      'thread-card--active',
+    );
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(document.activeElement?.id).toBe('thread-composer-root-1');
+  });
+
+  it('the exposed jumpToIndex accessor also re-scrolls/re-focuses an already-active thread on a repeat call', async () => {
+    seedTree();
+    const wrapper = mountView();
+
+    wrapper.vm.jumpToIndex(0);
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    wrapper.vm.jumpToIndex(0);
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
   // Bug fix (parity with canvas mode's `ConversationDetailPanel.vue`, whose `useFocusTrap` +
   // `getPreferredInitialFocus` moves DOM focus into a conversation's own `#composer-<id>` the
   // moment it's activated): activating a thread here — via a HUD row click OR Ctrl+Alt+J/K — used

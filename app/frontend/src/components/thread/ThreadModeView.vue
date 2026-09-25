@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useListItemsStore } from '../../stores/listItems.js';
 import { useThreadFocusState } from '../../composables/threadFocusState.js';
@@ -66,76 +66,41 @@ const hudItems = computed<HudItem[]>(() =>
   }),
 );
 
-/** Both `HudPanel.vue`'s `toggle-focus` (row click) and `cycle-focus` (Ctrl+Alt+J/K) emits land
- *  here — see the doc comment above for why Thread mode collapses the two into one "jump the
- *  cursor to this thread" action. Scrolls the matching `ThreadCard` into view; the
- *  `.thread-card--active` highlight itself follows reactively from `threadFocus.activeThreadId`
- *  (passed down to every `ThreadCard` below), no separate DOM write needed for that part.
- *
- *  `isHotkey` (default `false`, set `true` only by the template's `cycle-focus` listener below)
- *  distinguishes which of the two emits actually fired: `HudPanel.vue`'s own `cycle-focus` is
- *  ONLY ever emitted from its keyboard `cycleByOffset` (Ctrl+Alt+J/K), never a click — `toggle-focus`
- *  is the click-only emit — so this flag reliably tells `threadFocus.jumpTo`'s own `hotkey` option
- *  (see `threadFocusState.ts`) whether to center the resulting scroll or just nudge it into view. */
-function onThreadHudSelect(threadId: string, isHotkey = false): void {
-  threadFocus.jumpTo(threadId, { hotkey: isHotkey });
-}
-
 /** 012-todo-parking-lists follow-up: pending message target for `focusListItemLink` below, kept
- *  as a sibling of `threadFocus.activeThreadId` (not reusing that ref itself) since the
- *  `activeThreadId` watcher also fires for a plain HUD/hotkey jump with no message target. */
+ *  as a sibling of `threadFocus.activeThreadId` (not reusing that ref itself) since
+ *  `scrollActiveThreadIntoView` below also runs for a plain HUD/hotkey jump with no message
+ *  target. */
 const targetMessageId = ref<string | null>(null);
 
-/** `TodoParkingListsPanel.vue`'s `focus-link` emit for a linked item, Thread mode's counterpart to
- *  `App.vue`'s own `focusListItemLink` (Canvas mode). Branches on `doneAt`: a done thread is never
- *  auto-reopened (`store.reopen` stays its own explicit action) — it's opened read-only via the
- *  Done panel instead, reusing the same imperative scroll pattern. An active thread reuses the
- *  existing jump mechanism, deferring the actual scroll-to-message to the `activeThreadId` watcher
- *  below once its target `ThreadCard` is confirmed mounted. */
-async function focusListItemLink(conversationId: string, messageId: string): Promise<void> {
-  const thread = store.findThread(conversationId);
-  if (thread && thread.doneAt !== null) {
-    doneOpen.value = true;
-    await store.loadDetail(conversationId);
-    void nextTick(() => scrollMessageTopIntoView(document.body, messageId));
-    return;
-  }
-  targetMessageId.value = messageId;
-  threadFocus.jumpTo(conversationId);
-}
-
-/** `DoneThreadsPanel.vue`'s Reopen action (User Story 3): "reopening pops it out of the Done list
- *  and re-enters the main thread list" — the thread itself already stops appearing in
- *  `DoneThreadsPanel.vue` the moment `store.reopen` flips its `doneAt` (that panel's own
- *  `doneThreads` computed re-filters live), so the only two things left to do here are close the
- *  Done overlay and land the reviewer on the newly-reopened thread in the normal list. Reuses the
- *  exact same "jump the cursor to this thread" mechanism a HUD row click/Ctrl+Alt+J/K hotkey
- *  already drives (`threadFocus.jumpTo`, `hotkey: true` so the `activeThreadId` watcher below
- *  centers + focuses its composer the same way a genuine keyboard jump does) rather than inventing
- *  a second, parallel "focus a specific thread" path. */
-function onThreadReopened(threadId: string): void {
-  doneOpen.value = false;
-  threadFocus.jumpTo(threadId, { hotkey: true });
-}
-
-// Bug fix (parity with canvas mode): activating a thread — via a HUD row click OR either of the
-// Ctrl+Alt+J/K/1..9 hotkeys, all three of which land here through `threadFocus.jumpTo`/
-// `cycleByOffset`/`jumpToIndex` — used to only scroll/highlight the target `ThreadCard`, never
-// move actual DOM focus into it. Canvas mode's own equivalent (`ConversationDetailPanel.vue`'s
-// `useFocusTrap` + `getPreferredInitialFocus`) moves focus into the conversation's own composer by
-// querying its `#composer-<id>` element and focusing it the moment that panel becomes active.
-// Thread mode has no modal/focus-trap to key off (every `ThreadCard` renders inline, always — see
-// `threadFocusState.ts`'s own doc comment), so this watcher does the same underlying
-// lookup-by-id-and-focus directly: `ThreadComposer.vue`'s own textarea carries the matching
-// `#thread-composer-<threadId>` id (same id-prefix convention `isEditingContext`'s `allowComposer`
-// option already recognizes). Lands the reviewer ready to type immediately, exactly like canvas
-// mode's click-a-HUD-row/hotkey behavior.
+// Bug fix (parity with canvas mode, and its own later follow-up): activating a thread — via a HUD
+// row click OR either of the Ctrl+Alt+J/K/1..9 hotkeys — used to only scroll/highlight the target
+// `ThreadCard` via a `watch(threadFocus.activeThreadId, ...)`, never move actual DOM focus into it.
+// Canvas mode's own equivalent (`ConversationDetailPanel.vue`'s `useFocusTrap` +
+// `getPreferredInitialFocus`) moves focus into the conversation's own composer by querying its
+// `#composer-<id>` element and focusing it the moment that panel becomes active. Thread mode has no
+// modal/focus-trap to key off (every `ThreadCard` renders inline, always — see
+// `threadFocusState.ts`'s own doc comment), so this does the same underlying lookup-by-id-and-focus
+// directly: `ThreadComposer.vue`'s own textarea carries the matching `#thread-composer-<threadId>`
+// id (same id-prefix convention `isEditingContext`'s `allowComposer` option already recognizes).
+//
+// Regression fix (report: focusing a message from the Todo/Parking Lot rail, HUD, or a hotkey,
+// then starting work in a DIFFERENT thread, left the reviewer unable to "refocus" the first thread
+// via any of those same normal means): a `watch` on `threadFocus.activeThreadId` only reacts to
+// that ref's value actually CHANGING — re-selecting the SAME already-active thread (exactly what
+// "refocus" means) reassigns the ref to its current value, which Vue never treats as a change, so
+// the watcher silently never fires and the scroll/composer-focus step never runs. Canvas mode never
+// has this class of bug at all: `App.vue`'s `onHudToggleFocus`/`onHudCycleFocus` call
+// `scrollBoxIntoView(id)`/`scrollComposerIntoView(id)` directly and unconditionally inside the click/
+// hotkey handler itself, not via a `watch` over `lastInteractedId`. This function is Thread mode's
+// exact copy of that same fix: every jump entry point below (`onThreadHudSelect`,
+// `focusListItemLink`, `onThreadReopened`, and the exposed `jumpToIndex`/`cycleByOffset`) calls this
+// directly, right after moving the cursor — so re-selecting an already-active thread reliably
+// re-scrolls/re-focuses it every time, exactly like a first-time jump.
 // `block`: 'center' for a genuine keyboard-driven jump (Ctrl+Alt+1..9/J/K/H/L — see
 // `threadFocusState.ts`'s `wasHotkeyJump` doc comment), so the reviewer never has to hunt for where
 // focus just landed; plain 'nearest' for a HUD row click, since the user just clicked something they
 // could already see and a forced re-center would be a needless jolt.
-watch(threadFocus.activeThreadId, (threadId) => {
-  if (!threadId) return;
+function scrollActiveThreadIntoView(threadId: string): void {
   const block = threadFocus.wasHotkeyJump.value ? 'center' : 'nearest';
   void nextTick(() => {
     document
@@ -154,7 +119,57 @@ watch(threadFocus.activeThreadId, (threadId) => {
       document.querySelector<HTMLTextAreaElement>(`#thread-composer-${threadId}`)?.focus();
     }
   });
-});
+}
+
+/** Both `HudPanel.vue`'s `toggle-focus` (row click) and `cycle-focus` (Ctrl+Alt+J/K) emits land
+ *  here — see the doc comment above for why Thread mode collapses the two into one "jump the
+ *  cursor to this thread" action. Scrolls the matching `ThreadCard` into view; the
+ *  `.thread-card--active` highlight itself follows reactively from `threadFocus.activeThreadId`
+ *  (passed down to every `ThreadCard` below), no separate DOM write needed for that part.
+ *
+ *  `isHotkey` (default `false`, set `true` only by the template's `cycle-focus` listener below)
+ *  distinguishes which of the two emits actually fired: `HudPanel.vue`'s own `cycle-focus` is
+ *  ONLY ever emitted from its keyboard `cycleByOffset` (Ctrl+Alt+J/K), never a click — `toggle-focus`
+ *  is the click-only emit — so this flag reliably tells `threadFocus.jumpTo`'s own `hotkey` option
+ *  (see `threadFocusState.ts`) whether to center the resulting scroll or just nudge it into view. */
+function onThreadHudSelect(threadId: string, isHotkey = false): void {
+  threadFocus.jumpTo(threadId, { hotkey: isHotkey });
+  scrollActiveThreadIntoView(threadId);
+}
+
+/** `TodoParkingListsPanel.vue`'s `focus-link` emit for a linked item, Thread mode's counterpart to
+ *  `App.vue`'s own `focusListItemLink` (Canvas mode). Branches on `doneAt`: a done thread is never
+ *  auto-reopened (`store.reopen` stays its own explicit action) — it's opened read-only via the
+ *  Done panel instead, reusing the same imperative scroll pattern. An active thread reuses the
+ *  existing jump mechanism, then imperatively scrolls to the message via
+ *  `scrollActiveThreadIntoView` above, once its target `ThreadCard` is confirmed mounted. */
+async function focusListItemLink(conversationId: string, messageId: string): Promise<void> {
+  const thread = store.findThread(conversationId);
+  if (thread && thread.doneAt !== null) {
+    doneOpen.value = true;
+    await store.loadDetail(conversationId);
+    void nextTick(() => scrollMessageTopIntoView(document.body, messageId));
+    return;
+  }
+  targetMessageId.value = messageId;
+  threadFocus.jumpTo(conversationId);
+  scrollActiveThreadIntoView(conversationId);
+}
+
+/** `DoneThreadsPanel.vue`'s Reopen action (User Story 3): "reopening pops it out of the Done list
+ *  and re-enters the main thread list" — the thread itself already stops appearing in
+ *  `DoneThreadsPanel.vue` the moment `store.reopen` flips its `doneAt` (that panel's own
+ *  `doneThreads` computed re-filters live), so the only two things left to do here are close the
+ *  Done overlay and land the reviewer on the newly-reopened thread in the normal list. Reuses the
+ *  exact same "jump the cursor to this thread" mechanism a HUD row click/Ctrl+Alt+J/K hotkey
+ *  already drives (`threadFocus.jumpTo`, `hotkey: true` so `scrollActiveThreadIntoView` centers +
+ *  focuses its composer the same way a genuine keyboard jump does) rather than inventing a second,
+ *  parallel "focus a specific thread" path. */
+function onThreadReopened(threadId: string): void {
+  doneOpen.value = false;
+  threadFocus.jumpTo(threadId, { hotkey: true });
+  scrollActiveThreadIntoView(threadId);
+}
 
 // Ctrl+Alt+1..9 numbered-jump (bug fix, parity with canvas mode's own `focus-toggle-<N>`
 // handling in `App.vue#onGlobalKeydown`): that binding is `'Global'` scope, so it's dispatched
@@ -174,7 +189,22 @@ watch(threadFocus.activeThreadId, (threadId) => {
 // focus concept is this same single `activeThreadId` cursor Ctrl+Alt+J/K already moves via
 // `cycleByOffset` — so exposing that same method here lets App.vue reuse it for H/L too, exactly
 // mirroring `jumpToIndex` just above rather than inventing a second, parallel focus model.
-defineExpose({ jumpToIndex: threadFocus.jumpToIndex, cycleByOffset: threadFocus.cycleByOffset });
+//
+// Both wrapped (not exposing `threadFocus.jumpToIndex`/`cycleByOffset` directly) so App.vue's
+// keyboard dispatch also gets `scrollActiveThreadIntoView`'s own re-focus-even-if-unchanged fix
+// above — the composable itself deliberately owns no DOM behavior (`threadFocusState.ts`'s own doc
+// comment), so exposing its raw functions here would silently drop that fix for every hotkey path.
+function jumpToIndex(index: number): void {
+  threadFocus.jumpToIndex(index);
+  if (threadFocus.activeThreadId.value)
+    scrollActiveThreadIntoView(threadFocus.activeThreadId.value);
+}
+function cycleByOffset(offset: number): void {
+  threadFocus.cycleByOffset(offset);
+  if (threadFocus.activeThreadId.value)
+    scrollActiveThreadIntoView(threadFocus.activeThreadId.value);
+}
+defineExpose({ jumpToIndex, cycleByOffset });
 
 /** Document-wide "Expand all"/"Collapse all" (`stores/thread.ts`'s own doc comment explains why
  *  this is document-wide rather than per-Thread, unlike canvas mode's `useBulkToggleAction`).
