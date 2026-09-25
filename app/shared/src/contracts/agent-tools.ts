@@ -63,9 +63,7 @@ export const webFetchParams = z.object({
 const listItemList = z
   .enum(['todo', 'parking_lot'])
   .describe(
-    "Which list. Must be exactly one of these two literal strings: 'todo' or 'parking_lot' " +
-      "(snake_case, lowercase, exactly as spelled here — not 'parking-lot', 'Parking Lot', or " +
-      'any other variant).',
+    "Which list. Must be exactly one of these two literal strings: 'todo' or 'parking_lot' ",
   );
 
 export const listItemsParams = z.object({});
