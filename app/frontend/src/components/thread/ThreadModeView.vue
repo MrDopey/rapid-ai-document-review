@@ -339,10 +339,10 @@ async function onExportDocument(): Promise<void> {
   color: var(--danger-color, #b91c1c);
   font-size: 0.8rem;
 }
-/* `align-items: flex-start` + `overflow-x: auto`: each `ThreadCard.vue`'s root `.thread-node` sizes
-   itself to its own content width (trunk box, plus a further-right column per branch depth — see
-   that file's own doc comment), rather than stretching to fill this list's width. A tree with
-   several branch levels/many siblings can end up wider than the viewport; scrolling it horizontally
+/* `align-items: flex-start` + `overflow-x: auto`: each `ThreadCard.vue`'s root `.thread-node` is a
+   flat, fixed `CARD_WIDTH_PX` (420px) regardless of depth (see that file's own doc comment), rather
+   than stretching to fill this list's width. A tree with several branch levels/many siblings can
+   end up wider than the viewport; scrolling it horizontally
    here (rather than clipping it, or forcing every ancestor to stretch to match it) is what keeps a
    plain, branch-free thread's narrow-viewport layout exactly as before while still letting a wide
    tree grow rightward without breaking the page. */
