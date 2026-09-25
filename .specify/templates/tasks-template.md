@@ -159,6 +159,20 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Review comments added/changed in this feature's diff for constitution compliance
 - [ ] TXXX Run quickstart.md validation
 - [ ] TXXX Run `./scripts/verify.sh` and fix any failures until it exits green
+- [ ] TXXX [P] If this feature changed layout/stacking/keyboard/focus behavior, verify visually with Playwright (see below)
+
+### Visual verification (layout/stacking/keyboard/focus changes only)
+
+vitest/jsdom does not catch real layout bugs (focus-trap, z-index, hotkey dispatch) — verify
+affected screens with Playwright instead of trusting unit/component tests alone:
+
+- [ ] TXXX [P] Write/update a Playwright spec covering the changed screen(s) and interaction(s) in
+      `tests/e2e/` (or feature-appropriate location); assert on the actual visual/behavioral
+      regression this feature fixes or introduces, not just DOM presence
+- [ ] TXXX Run the Playwright spec against the dev server and attach/report screenshots for the
+      before/after or golden-path + edge-case states
+- [ ] TXXX Fix any visual regressions found (layout shift, incorrect stacking order, broken focus
+      trap, hotkey not dispatching) before marking this phase complete
 
 ---
 
