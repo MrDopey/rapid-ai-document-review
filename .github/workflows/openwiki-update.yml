@@ -46,12 +46,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: git checkout -- .github/workflows/openwiki-update.yml
 
-      # Safety net: never let the bot commit changes to CLAUDE.md, even though
-      # staging below is already scoped to doc paths only.
-      - name: Exclude CLAUDE.md changes
-        if: ${{ !cancelled() }}
-        run: git checkout -- CLAUDE.md
-
       - name: Remove transient OpenWiki run state
         if: ${{ !cancelled() }}
         run: rm -f -- openwiki/.run.json
