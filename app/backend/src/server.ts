@@ -24,11 +24,13 @@ import { TurnRunner } from './pi/turn-runner.ts';
 import { RunBuffer } from './events/run-buffer.ts';
 import { ConflictService } from './edit/conflict-service.ts';
 import { EditService } from './edit/edit-service.ts';
+import { ListItemService } from './list-items/list-item-service.ts';
 import { registerDocumentRoutes } from './api/http/document.ts';
 import { registerRevisionRoutes } from './api/http/revisions.ts';
 import { registerConversationRoutes } from './api/http/conversations.ts';
 import { registerThreadRoutes } from './api/http/threads.ts';
 import { registerEditRoutes } from './api/http/edits.ts';
+import { registerListItemRoutes } from './api/http/list-items.ts';
 import { registerSettingsRoutes } from './api/http/settings.ts';
 import { registerSystemPromptRoutes } from './api/http/system-prompt.ts';
 import { registerStaticRoutes } from './api/http/static.ts';
@@ -107,8 +109,10 @@ export function buildApp() {
   // conversations are recovered further below, once ConversationService exists.
   documentService.loadAllExisting();
 
+  const listItemService = new ListItemService(storage, eventService, eventHub);
+
   const runBuffer = new RunBuffer();
-  const piService = new PiService(storage, automergeHolder, primaryMutex);
+  const piService = new PiService(storage, automergeHolder, primaryMutex, listItemService);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
   // Shared turn-starting wiring (EventBridge + ConcurrencyLimiter admission), depended on by both
   // EditService (requestReplacement) and ConversationService (send) instead of each independently
@@ -233,6 +237,7 @@ export function buildApp() {
     registerConversationRoutes(instance, { conversationService, primaryService, storage });
     registerThreadRoutes(instance, { threadService, conversationService, storage });
     registerEditRoutes(instance, { editService, storage });
+    registerListItemRoutes(instance, { listItemService, storage });
     registerSettingsRoutes(instance, { storage, eventService, eventHub });
     registerSystemPromptRoutes(instance);
     registerWsRoutes(instance, { eventHub, storage });
@@ -244,12 +249,13 @@ export function buildApp() {
     registerStaticRoutes(instance, { logger });
   });
 
-  // `piService` is returned alongside `app`/`storage` solely for black-box contract tests
-  // (test-app.ts's `TestApp`) that need to reach into a conversation's underlying (fake, under
-  // `RADR_BE_PI_FAKE_SESSIONS=1`) Pi session for introspection — e.g. asserting a branch's seed
-  // message actually reached the session's own context, not just the application's event log
-  // (branch-continuity.test.ts). Production code (`main()` below) only ever destructures `app`.
-  return { app, storage, piService };
+  // `piService`/`listItemService` are returned alongside `app`/`storage` solely for black-box
+  // contract tests (test-app.ts's `TestApp`) that need to reach into a conversation's underlying
+  // (fake, under `RADR_BE_PI_FAKE_SESSIONS=1`) Pi session for introspection — e.g. asserting a
+  // branch's seed message actually reached the session's own context, not just the application's
+  // event log (branch-continuity.test.ts) — or to drive `list_item` state directly instead of
+  // through the HTTP surface. Production code (`main()` below) only ever destructures `app`.
+  return { app, storage, piService, listItemService };
 }
 
 async function main() {

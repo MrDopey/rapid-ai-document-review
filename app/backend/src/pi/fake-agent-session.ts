@@ -98,6 +98,39 @@ function parseErrorDirective(text: string): { message?: string } | null {
 }
 
 /**
+ * Same protocol family as the directives above, generalized across all four Todo/Parking Lot list
+ * tools (012-todo-parking-lists) instead of one directive per tool — a message beginning with this
+ * prefix, followed by JSON `{ tool: 'list_items' | 'add_list_item' | 'update_list_item' |
+ * 'remove_list_item', params }`, invokes that real tool object with `params` and echoes its text
+ * result back as the assistant's answer.
+ */
+export const LIST_ITEM_TOOL_DIRECTIVE = '__CALL_LIST_ITEM_TOOL__';
+
+const LIST_ITEM_TOOL_NAMES = [
+  'list_items',
+  'add_list_item',
+  'update_list_item',
+  'remove_list_item',
+] as const;
+type ListItemToolName = (typeof LIST_ITEM_TOOL_NAMES)[number];
+
+function parseListItemToolDirective(
+  text: string,
+): { tool: ListItemToolName; params: Record<string, unknown> } | null {
+  if (!text.startsWith(LIST_ITEM_TOOL_DIRECTIVE)) return null;
+  try {
+    const parsed = JSON.parse(text.slice(LIST_ITEM_TOOL_DIRECTIVE.length)) as {
+      tool: string;
+      params?: Record<string, unknown>;
+    };
+    if (!(LIST_ITEM_TOOL_NAMES as readonly string[]).includes(parsed.tool)) return null;
+    return { tool: parsed.tool as ListItemToolName, params: parsed.params ?? {} };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A message beginning with this prefix causes the fake session to simulate a stuck tool call/turn:
  * `runScript` never resolves on its own for it. Exercises the case where a hung tool call would
  * otherwise leave `streaming` stuck `true` forever — `prompt()` fires-and-forgets `runScript()`, so
@@ -331,12 +364,18 @@ export class FakeAgentSession implements AgentSessionLike {
     const readDirective = proposeDirective ? null : parseReadDirective(userText);
     const webSearchDirective =
       proposeDirective || readDirective ? null : parseWebSearchDirective(userText);
+    const listItemDirective =
+      proposeDirective || readDirective || webSearchDirective
+        ? null
+        : parseListItemToolDirective(userText);
     if (proposeDirective) {
       await this.runProposeEditDirective(proposeDirective);
     } else if (readDirective) {
       await this.runReadDocumentDirective(readDirective);
     } else if (webSearchDirective) {
       await this.runWebSearchDirective(webSearchDirective);
+    } else if (listItemDirective) {
+      await this.runListItemToolDirective(listItemDirective);
     } else {
       await this.runPlainAnswer(userText);
     }
@@ -494,6 +533,60 @@ export class FakeAgentSession implements AgentSessionLike {
     });
 
     const text = result.content?.[0]?.text ?? 'No results.';
+    const messageId = `fake_msg_${randomUUID()}`;
+    this.emit({ type: 'message_start', messageId, role: 'assistant' });
+    for (const delta of chunk(text, 12)) {
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta } });
+      await sleep(this.chunkDelayMs);
+    }
+    this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+    return text;
+  }
+
+  /** Actually invokes one of the four real Todo/Parking Lot list tool objects
+   *  (tools/list-items.ts) and echoes its text result as the assistant's answer — see
+   *  `LIST_ITEM_TOOL_DIRECTIVE` above. */
+  private async runListItemToolDirective(directive: {
+    tool: ListItemToolName;
+    params: Record<string, unknown>;
+  }): Promise<string> {
+    const toolCallId = `fake_tool_${randomUUID()}`;
+    const tool = this.tools.find((t) => t.name === directive.tool);
+
+    if (!tool) {
+      const text = `${directive.tool} is not available in this conversation.`;
+      const messageId = `fake_msg_${randomUUID()}`;
+      this.emit({ type: 'message_start', messageId, role: 'assistant' });
+      this.emit({ type: 'message_update', messageId, update: { type: 'text_delta', delta: text } });
+      this.emit({ type: 'message_end', messageId, role: 'assistant', text, reasoning: undefined });
+      return text;
+    }
+
+    this.emitToolCallCarrier();
+    this.emit({
+      type: 'tool_execution_start',
+      toolCallId,
+      toolName: directive.tool,
+      args: directive.params,
+    });
+    const result = (await tool.execute(
+      toolCallId,
+      directive.params,
+      undefined,
+      undefined,
+      undefined,
+    )) as {
+      content?: { type: string; text?: string }[];
+    };
+    this.emit({
+      type: 'tool_execution_end',
+      toolCallId,
+      toolName: directive.tool,
+      isError: false,
+      result,
+    });
+
+    const text = result.content?.[0]?.text ?? 'Done.';
     const messageId = `fake_msg_${randomUUID()}`;
     this.emit({ type: 'message_start', messageId, role: 'assistant' });
     for (const delta of chunk(text, 12)) {

@@ -2056,6 +2056,138 @@ describe('Contract: HTTP API (http-api.md)', () => {
     });
   });
 
+  // ---- Todo & Parking Lot lists (012-todo-parking-lists) ----
+
+  describe('/api/documents/:documentId/list-items', () => {
+    it('GET returns both lists, empty by default', async () => {
+      const created = await createDoc(ctx);
+      const res = await call(ctx.app, 'GET', `/api/documents/${created.document.id}/list-items`);
+      expect(res.status).toBe(200);
+      expect(res.json).toEqual({ todo: [], parkingLot: [] });
+    });
+
+    it('POST adds an item to the requested list, and GET reflects it under the right bucket', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+
+      const postRes = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'todo',
+        text: 'fix the intro paragraph',
+      });
+      expect(postRes.status).toBe(201);
+      const posted = postRes.json as { id: string; text: string; contentHash: string };
+      expect(posted.text).toBe('fix the intro paragraph');
+      expect(posted.contentHash).toBeTruthy();
+
+      const getRes = await call(ctx.app, 'GET', `/api/documents/${documentId}/list-items`);
+      const parsed = getRes.json as {
+        todo: { id: string; text: string }[];
+        parkingLot: { id: string; text: string }[];
+      };
+      expect(parsed.todo).toEqual([
+        { id: posted.id, text: posted.text, contentHash: posted.contentHash },
+      ]);
+      expect(parsed.parkingLot).toEqual([]);
+    });
+
+    it('POST rejects empty/whitespace-only text with 400 VALIDATION_FAILED, creating nothing', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+
+      const res = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'todo',
+        text: '   ',
+      });
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+
+      const getRes = await call(ctx.app, 'GET', `/api/documents/${documentId}/list-items`);
+      expect(getRes.json).toEqual({ todo: [], parkingLot: [] });
+    });
+
+    it('PATCH updates an item immediately, with no hash required, and bumps its contentHash', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+      const postRes = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'parking_lot',
+        text: 'original text',
+      });
+      const posted = postRes.json as { id: string; contentHash: string };
+
+      const patchRes = await call(
+        ctx.app,
+        'PATCH',
+        `/api/documents/${documentId}/list-items/${posted.id}`,
+        { text: 'edited text' },
+      );
+      expect(patchRes.status).toBe(200);
+      const patched = patchRes.json as { id: string; text: string; contentHash: string };
+      expect(patched.text).toBe('edited text');
+      expect(patched.contentHash).not.toBe(posted.contentHash);
+    });
+
+    it('PATCH rejects empty/whitespace-only text with 400 VALIDATION_FAILED', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+      const postRes = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'todo',
+        text: 'original text',
+      });
+      const posted = postRes.json as { id: string };
+
+      const res = await call(
+        ctx.app,
+        'PATCH',
+        `/api/documents/${documentId}/list-items/${posted.id}`,
+        { text: '   ' },
+      );
+      expect(res.status).toBe(400);
+      expect(ErrorEnvelope.parse(res.json).error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('PATCH/DELETE on an unknown itemId return 404 LIST_ITEM_NOT_FOUND', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+
+      const patchRes = await call(
+        ctx.app,
+        'PATCH',
+        `/api/documents/${documentId}/list-items/li_does_not_exist`,
+        { text: 'new text' },
+      );
+      expect(patchRes.status).toBe(404);
+      expect(ErrorEnvelope.parse(patchRes.json).error.code).toBe('LIST_ITEM_NOT_FOUND');
+
+      const deleteRes = await call(
+        ctx.app,
+        'DELETE',
+        `/api/documents/${documentId}/list-items/li_does_not_exist`,
+      );
+      expect(deleteRes.status).toBe(404);
+      expect(ErrorEnvelope.parse(deleteRes.json).error.code).toBe('LIST_ITEM_NOT_FOUND');
+    });
+
+    it('DELETE removes the item immediately, with no hash required', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+      const postRes = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'todo',
+        text: 'to be removed',
+      });
+      const posted = postRes.json as { id: string };
+
+      const deleteRes = await call(
+        ctx.app,
+        'DELETE',
+        `/api/documents/${documentId}/list-items/${posted.id}`,
+      );
+      expect(deleteRes.status).toBe(204);
+
+      const getRes = await call(ctx.app, 'GET', `/api/documents/${documentId}/list-items`);
+      expect(getRes.json).toEqual({ todo: [], parkingLot: [] });
+    });
+  });
+
   // ---- System prompt ----
 
   describe('GET /api/system-prompt', () => {

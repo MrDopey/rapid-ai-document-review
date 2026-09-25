@@ -6,10 +6,12 @@ import { useConversationsStore } from './stores/conversations.js';
 import { useThreadStore } from './stores/thread.js';
 import { useSettingsStore } from './stores/settings.js';
 import { useEditsStore } from './stores/edits.js';
+import { useListItemsStore } from './stores/listItems.js';
 import { WsClient } from './transport/ws-client.js';
 import { mountLiveRegions } from './a11y/live-regions.js';
 import DocumentCanvas from './components/canvas/DocumentCanvas.vue';
 import ThreadModeView from './components/thread/ThreadModeView.vue';
+import TodoParkingListsPanel from './components/TodoParkingListsPanel.vue';
 import DocumentSwitcherDropdown from './components/header/DocumentSwitcherDropdown.vue';
 import PreviewComponent from './components/preview/PreviewComponent.vue';
 import HistoryPanel from './components/history/HistoryPanel.vue';
@@ -47,9 +49,13 @@ const conversationsStore = useConversationsStore();
 const threadStore = useThreadStore();
 const settingsStore = useSettingsStore();
 const editsStore = useEditsStore();
+const listItemsStore = useListItemsStore();
 
 const pasteText = ref('');
 const historyOpen = ref(false);
+// 012-todo-parking-lists: disabled until a conversation is focused (FR-021) — see the
+// `.hud-bar-right` button and `.conversation-detail-overlay` rail below.
+const listsOpen = ref(false);
 const shortcutsOpen = ref(false);
 const helpOpen = ref(false);
 const systemPromptOpen = ref(false);
@@ -622,6 +628,11 @@ async function loadActiveDocumentThreadOrConversations(): Promise<void> {
   } else {
     await conversationsStore.load();
   }
+  // 012-todo-parking-lists: list items are document-scoped, not conversation-scoped, so this
+  // reloads regardless of mode — otherwise the `[Lists (n)]` button's own count (read directly off
+  // this store, whether or not the panel/rail has ever been opened) would keep showing the
+  // previously active document's count until something happened to open the panel for this one.
+  await listItemsStore.fetchListItems(store.activeDocumentId!);
 }
 
 /** The initial document load, wrapped so it can be re-run verbatim by the Retry button below —
@@ -681,6 +692,7 @@ function connectWs(): void {
     threadStore,
     settingsStore,
     editsStore,
+    listItemsStore,
   ]) {
     frameSubscriber.subscribeToFrames(client);
   }
@@ -761,7 +773,11 @@ async function onCreateDocument(): Promise<void> {
   if (!pasteText.value.trim()) return;
   await store.create(pasteText.value);
   connectWs();
-  await Promise.all([conversationsStore.load(), settingsStore.load()]);
+  await Promise.all([
+    conversationsStore.load(),
+    settingsStore.load(),
+    listItemsStore.fetchListItems(store.activeDocumentId!),
+  ]);
 }
 
 function onEditorChange(changes: { from: number; to: number; insert: string }[]): void {
@@ -1221,6 +1237,20 @@ async function onToggleReasoning(event: Event): Promise<void> {
               >
                 {{ editorVisible ? 'Hide editor' : 'Show editor' }}
               </button>
+              <button
+                type="button"
+                :disabled="orderedFocusedConversations.length === 0"
+                :title="
+                  orderedFocusedConversations.length === 0
+                    ? 'Focus a conversation to show the Todo/Parking Lot lists'
+                    : listsOpen
+                      ? 'Hide the Todo/Parking Lot lists'
+                      : 'Show the Todo/Parking Lot lists'
+                "
+                @click="listsOpen = !listsOpen"
+              >
+                Lists ({{ listItemsStore.todo.length + listItemsStore.parkingLot.length }})
+              </button>
             </div>
           </div>
         </div>
@@ -1329,6 +1359,9 @@ async function onToggleReasoning(event: Event): Promise<void> {
           @select="replaceFocus(conv.id, $event)"
           @branch-created="onBranchCreated"
         />
+        <!-- 012-todo-parking-lists (US3): one shared rail attached to the overlay, never one per
+             focused conversation regardless of how many are simultaneously focused (FR-022). -->
+        <TodoParkingListsPanel v-if="listsOpen" class="todo-parking-lists-rail" />
       </div>
     </div>
   </div>
@@ -1528,6 +1561,16 @@ async function onToggleReasoning(event: Event): Promise<void> {
   gap: 1rem;
   padding: 1rem;
   overflow-x: auto;
+}
+
+/* 012-todo-parking-lists: one shared rail attached to the overlay (never one per focused
+   conversation) — a fixed-width flex sibling of the ConversationDetailPanel(s) above, not another
+   full-bleed panel, so it reads as a narrow companion rail rather than a second detail view. */
+.todo-parking-lists-rail {
+  flex: 0 0 280px;
+  background: var(--surface-color, #fff);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 @media (max-width: 960px) {

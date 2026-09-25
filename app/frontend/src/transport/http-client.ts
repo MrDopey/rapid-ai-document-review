@@ -9,6 +9,7 @@ import {
   CreateConversationRequest,
   CreateDocumentRequest,
   CreateDocumentResponse,
+  CreateListItemRequest,
   DeleteDocumentResponse,
   DesignatePrimaryRequest,
   DesignatePrimaryResponse,
@@ -23,6 +24,8 @@ import {
   ListConversationsResponse,
   ListDocumentsResponse,
   ListEditsResponse,
+  ListItemDto,
+  ListItemsResponse,
   ListRevisionsResponse,
   MarkThreadDoneResponse,
   PatchDocumentRequest,
@@ -39,6 +42,7 @@ import {
   SendMessageRequest,
   SendMessageResponse,
   SystemPromptDto,
+  UpdateListItemRequest,
   UserSettingsDto,
   UserSettingsPatch,
 } from '@rapid-ai-document-review/shared/contracts/http';
@@ -439,5 +443,36 @@ export const httpClient = {
   async getSystemPrompt(mode: 'canvas' | 'thread' = 'canvas') {
     const qs = mode === 'thread' ? '?mode=thread' : '';
     return request(`/api/system-prompt${qs}`, undefined, (j) => SystemPromptDto.parse(j));
+  },
+
+  async listListItems(documentId: string) {
+    return request(`/api/documents/${documentId}/list-items`, undefined, (j) =>
+      ListItemsResponse.parse(j),
+    );
+  },
+
+  async createListItem(documentId: string, input: CreateListItemRequest) {
+    return request(
+      `/api/documents/${documentId}/list-items`,
+      { method: 'POST', body: JSON.stringify(input) },
+      (j) => ListItemDto.parse(j),
+    );
+  },
+
+  async updateListItem(documentId: string, itemId: string, text: string) {
+    const body: UpdateListItemRequest = { text };
+    return request(
+      `/api/documents/${documentId}/list-items/${itemId}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+      (j) => ListItemDto.parse(j),
+    );
+  },
+
+  async deleteListItem(documentId: string, itemId: string) {
+    return request(
+      `/api/documents/${documentId}/list-items/${itemId}`,
+      { method: 'DELETE' },
+      () => undefined,
+    );
   },
 };

@@ -16,9 +16,14 @@ import { buildConversationMessages } from '../conversation/message-log.ts';
 import type { EditService } from '../edit/edit-service.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionLike } from './agent-session-port.ts';
+import type { ListItemService } from '../list-items/list-item-service.ts';
 import {
+  createAddListItemTool,
+  createListItemsTool,
   createProposeDocumentEditTool,
   createReadDocumentTool,
+  createRemoveListItemTool,
+  createUpdateListItemTool,
   createWebFetchTool,
   createWebSearchTool,
 } from './tools/index.ts';
@@ -120,15 +125,18 @@ export class PiService {
   private readonly storage: StorageAdapter;
   private readonly automerge: AutomergeStoreHolder;
   private readonly primaryMutex: PrimaryMutex;
+  private readonly listItemService: ListItemService;
 
   constructor(
     storage: StorageAdapter,
     automerge: AutomergeStoreHolder,
     primaryMutex: PrimaryMutex,
+    listItemService: ListItemService,
   ) {
     this.storage = storage;
     this.automerge = automerge;
     this.primaryMutex = primaryMutex;
+    this.listItemService = listItemService;
   }
 
   setEditService(editService: EditService): void {
@@ -200,7 +208,10 @@ export class PiService {
    * for a too-deep conversation (FR-026's primary defense layer — see tools/propose-document-edit.ts
    * for the execution-time backstop). `web_search`/`web_fetch` are read-only and registered
    * unconditionally, regardless of branch/editing depth (Principle III N/A — neither can touch the
-   * document, specs/008-searxng-web-search). 011-linear-thread-mode: a Thread has no document-offset
+   * document, specs/008-searxng-web-search). The four Todo/Parking Lot list tools (012-todo-
+   * parking-lists) are likewise registered unconditionally — they mutate a separate sidecar entity,
+   * never document content, so neither editing depth nor Thread-vs-Canvas mode gates them.
+   * 011-linear-thread-mode: a Thread has no document-offset
    * context to read/edit (it never carries a `seedSelection`/document revision the way a canvas
    * branch does) — `read_document` and `propose_document_edit` are both omitted for
    * `thread-root`/`thread-branch` conversations. Shared by both the real SDK path and
@@ -221,6 +232,29 @@ export class PiService {
           ]),
       createWebSearchTool({ searxngUrl: config.searxngUrl }),
       createWebFetchTool({}),
+      // 012-todo-parking-lists: available regardless of conversation kind or branch/editing depth
+      // (research.md R4/contracts/agent-tools-list-items.md) — these tools never touch document
+      // content, so none of Principle III's editing-depth gating applies to them.
+      createListItemsTool({
+        storage: this.storage,
+        listItemService: this.listItemService,
+        conversationId: conversation.id,
+      }),
+      createAddListItemTool({
+        storage: this.storage,
+        listItemService: this.listItemService,
+        conversationId: conversation.id,
+      }),
+      createUpdateListItemTool({
+        storage: this.storage,
+        listItemService: this.listItemService,
+        conversationId: conversation.id,
+      }),
+      createRemoveListItemTool({
+        storage: this.storage,
+        listItemService: this.listItemService,
+        conversationId: conversation.id,
+      }),
     ];
 
     const settings = this.storage.getSettings();

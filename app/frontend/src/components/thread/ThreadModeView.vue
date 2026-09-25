@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
+import { useListItemsStore } from '../../stores/listItems.js';
 import { useThreadFocusState } from '../../composables/threadFocusState.js';
 import { ApiError } from '../../transport/http-client.js';
 import ThreadCard from './ThreadCard.vue';
 import DoneThreadsPanel from './DoneThreadsPanel.vue';
 import HudPanel, { type HudItem } from '../hud/HudPanel.vue';
+import TodoParkingListsPanel from '../TodoParkingListsPanel.vue';
 
 /**
  * 011-linear-thread-mode (FR-002/FR-003/FR-008): the top-level view App.vue mounts in
@@ -16,7 +18,11 @@ import HudPanel, { type HudItem } from '../hud/HudPanel.vue';
  * current tip segment (`ThreadCard.vue`).
  */
 const store = useThreadStore();
+const listItemsStore = useListItemsStore();
 const doneOpen = ref(false);
+// 012-todo-parking-lists (FR-023): always enabled in Thread mode, unlike Canvas mode's
+// focus-gated equivalent (App.vue) — Thread mode has no conversation-focus concept to gate on.
+const listsOpen = ref(false);
 
 onMounted(() => {
   if (!store.loaded) void store.load();
@@ -266,6 +272,16 @@ async function onExportDocument(): Promise<void> {
               <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
                 Done ({{ doneCount }})
               </button>
+              <button
+                type="button"
+                class="thread-mode-lists-toggle"
+                :title="
+                  listsOpen ? 'Hide the Todo/Parking Lot lists' : 'Show the Todo/Parking Lot lists'
+                "
+                @click="listsOpen = !listsOpen"
+              >
+                Lists ({{ listItemsStore.todo.length + listItemsStore.parkingLot.length }})
+              </button>
             </div>
           </div>
         </div>
@@ -275,19 +291,26 @@ async function onExportDocument(): Promise<void> {
       </p>
     </div>
 
-    <div class="thread-mode-content">
-      <p v-if="store.loaded && topLevelThreadIds.length === 0" class="thread-mode-empty">
-        No active threads.
-      </p>
+    <div class="thread-mode-row">
+      <div class="thread-mode-content">
+        <p v-if="store.loaded && topLevelThreadIds.length === 0" class="thread-mode-empty">
+          No active threads.
+        </p>
 
-      <div class="thread-mode-list">
-        <ThreadCard
-          v-for="id in topLevelThreadIds"
-          :key="id"
-          :thread-id="id"
-          :active-thread-id="threadFocus.activeThreadId.value"
-        />
+        <div class="thread-mode-list">
+          <ThreadCard
+            v-for="id in topLevelThreadIds"
+            :key="id"
+            :thread-id="id"
+            :active-thread-id="threadFocus.activeThreadId.value"
+          />
+        </div>
       </div>
+
+      <!-- 012-todo-parking-lists (US3, FR-023/FR-024): a fixed rail hugging the right edge,
+           outside `.thread-mode-content` — narrows it via this row's flex layout rather than
+           covering it. -->
+      <TodoParkingListsPanel v-if="listsOpen" class="thread-mode-lists-rail" />
     </div>
 
     <Transition name="modal">
@@ -336,12 +359,29 @@ async function onExportDocument(): Promise<void> {
    HUD bar above and the thread tree below now share the same left edge/full-width relationship with
    no separate centering formula to keep in sync (see the template's own doc comment above for the
    full two-complaint history this replaces). */
+/* 012-todo-parking-lists: horizontal row so `.thread-mode-lists-rail` can sit alongside
+   `.thread-mode-content` (narrowing it via `flex: 1 1 auto` + `min-width: 0` below) instead of
+   overlapping it. A plain flex row, not `.thread-mode-view`'s own scroll container — the rail
+   scrolls its own contents internally (TodoParkingListsPanel.vue's `overflow-y: auto`). */
+.thread-mode-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  width: 100%;
+}
 .thread-mode-content {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 1rem;
+}
+.thread-mode-lists-rail {
+  flex: 0 0 280px;
+  align-self: stretch;
+  border-left: 1px solid var(--border-color, #ddd);
+  background: var(--panel-bg, #f7f7f8);
 }
 .thread-mode-empty {
   color: var(--neutral-muted-color, #4b5563);

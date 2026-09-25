@@ -51,3 +51,41 @@ export const webSearchParams = z.object({
 export const webFetchParams = z.object({
   url: z.string().min(1).describe('The URL to fetch.'),
 });
+
+// ---- Todo & Parking Lot lists (012-todo-parking-lists) ----
+
+const listItemList = z.enum(['todo', 'parking_lot']).describe('Which list: Todo or Parking Lot.');
+
+export const listItemsParams = z.object({});
+
+export const addListItemParams = z.object({
+  list: listItemList,
+  text: z.string().min(1).describe('The item text. Must not be empty or whitespace-only.'),
+});
+
+export const updateListItemParams = z.object({
+  list: listItemList,
+  id: z.string().describe('The item id.'),
+  expected_content_hash: z
+    .string()
+    .describe(
+      "The hash of the item's CURRENT text, as last told to you by add_list_item, a prior " +
+        'update_list_item, or list_items — never a hash of the new text below.',
+    ),
+  text: z.string().min(1).describe('The new item text. Must not be empty or whitespace-only.'),
+});
+
+export const removeListItemParams = z.object({
+  list: listItemList,
+  id: z.string().describe('The item id.'),
+  expected_content_hash: z
+    .string()
+    .describe("The hash of the item's current text, as last told to you."),
+});
+
+export const listItemToolResult = z.object({
+  id: z.string(),
+  list: z.enum(['todo', 'parking_lot']),
+  contentHash: z.string().optional(), // absent on remove_list_item success
+});
+export type ListItemToolResult = z.infer<typeof listItemToolResult>;

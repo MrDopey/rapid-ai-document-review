@@ -156,6 +156,15 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
+export interface ListItemRow {
+  id: string;
+  documentId: string;
+  list: 'todo' | 'parking_lot';
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * Thrown by an adapter's cursor-based `list*` methods (e.g. `SqliteStorageAdapter.decodeCursor`)
  * when a caller-supplied `cursor` string doesn't decode to the expected shape — a malformed or
@@ -253,6 +262,13 @@ export interface StorageAdapter {
     patch: Partial<Omit<UserSettingsRow, 'updatedAt'>>,
     updatedAt: string,
   ): UserSettingsRow;
+
+  // list_item
+  createListItem(row: ListItemRow): ListItemRow;
+  getListItem(documentId: string, id: string): ListItemRow | null;
+  listListItems(documentId: string): ListItemRow[]; // both lists, ordered by list, then createdAt/id
+  updateListItemText(id: string, text: string, updatedAt: string): ListItemRow;
+  deleteListItem(id: string): void;
 
   /**
    * Runs `fn` inside a single SQL transaction: commits if `fn` returns normally, rolls back and

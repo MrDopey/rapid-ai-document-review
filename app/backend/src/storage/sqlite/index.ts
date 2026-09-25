@@ -9,6 +9,7 @@ import {
   type DocumentChangeRow,
   type DocumentRow,
   type DocumentSnapshotRow,
+  type ListItemRow,
   type Page,
   type RevisionListOptions,
   type RevisionRow,
@@ -34,6 +35,26 @@ function decodeCursor<T>(cursor: string): T {
 
 function toBool(value: number | boolean | null | undefined): boolean {
   return Boolean(value);
+}
+
+interface ListItemDbRow {
+  id: string;
+  document_id: string;
+  list: 'todo' | 'parking_lot';
+  text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapListItem(row: ListItemDbRow): ListItemRow {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    list: row.list,
+    text: row.text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 interface DocumentDbRow {
@@ -783,6 +804,50 @@ export class SqliteStorageAdapter implements StorageAdapter {
         updatedAt,
       );
     return { ...merged, updatedAt };
+  }
+
+  // ---- list_item ----
+
+  createListItem(row: ListItemRow): ListItemRow {
+    this.db
+      .prepare(
+        `INSERT INTO list_item (id, document_id, list, text, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.documentId, row.list, row.text, row.createdAt, row.updatedAt);
+    return row;
+  }
+
+  getListItem(documentId: string, id: string): ListItemRow | null {
+    const row = this.db
+      .prepare(`SELECT * FROM list_item WHERE document_id = ? AND id = ?`)
+      .get(documentId, id) as ListItemDbRow | undefined;
+    return row ? mapListItem(row) : null;
+  }
+
+  listListItems(documentId: string): ListItemRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM list_item WHERE document_id = ? ORDER BY list ASC, created_at ASC, id ASC`,
+      )
+      .all(documentId) as unknown as ListItemDbRow[];
+    return rows.map(mapListItem);
+  }
+
+  updateListItemText(id: string, text: string, updatedAt: string): ListItemRow {
+    const row = this.db.prepare(`SELECT * FROM list_item WHERE id = ?`).get(id) as
+      ListItemDbRow | undefined;
+    if (!row) {
+      throw new Error(`List item not found: ${id}`);
+    }
+    this.db
+      .prepare(`UPDATE list_item SET text = ?, updated_at = ? WHERE id = ?`)
+      .run(text, updatedAt, id);
+    return mapListItem({ ...row, text, updated_at: updatedAt });
+  }
+
+  deleteListItem(id: string): void {
+    this.db.prepare(`DELETE FROM list_item WHERE id = ?`).run(id);
   }
 
   // ---- transaction ----

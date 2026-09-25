@@ -2,6 +2,7 @@ import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { StorageAdapter } from '../../src/storage/storage-adapter.js';
 import type { PiService } from '../../src/pi/pi-service.js';
+import type { ListItemService } from '../../src/list-items/list-item-service.js';
 
 export interface TestApp {
   app: FastifyInstance;
@@ -10,6 +11,7 @@ export interface TestApp {
    *  assert against a conversation's underlying (fake, under `RADR_BE_PI_FAKE_SESSIONS=1`) Pi
    *  session directly, e.g. `branch-continuity.test.ts`'s seed-reaches-session-context coverage. */
   piService: PiService;
+  listItemService: ListItemService;
 }
 
 /**

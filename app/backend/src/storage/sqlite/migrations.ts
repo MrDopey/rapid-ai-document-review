@@ -151,6 +151,22 @@ const STATEMENTS: string[] = [
 
     updated_at               TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS list_item (
+    id            TEXT PRIMARY KEY,
+    document_id   TEXT NOT NULL,
+    list          TEXT NOT NULL
+                    CHECK (list IN ('todo', 'parking_lot')),
+    text          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+
+    FOREIGN KEY (document_id) REFERENCES document(id)
+  )`,
+  // No content_hash column: it is a pure function of `text` (computeContentHash), computed on
+  // demand by ListItemService rather than stored, so it can never drift from the text it hashes
+  // (data-model.md).
+  `CREATE INDEX IF NOT EXISTS list_item_document_list
+    ON list_item (document_id, list, created_at)`,
 ];
 
 // ---- Versioned incremental migrations (existing-database upgrade path) ----

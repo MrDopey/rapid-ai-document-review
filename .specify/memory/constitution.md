@@ -1,24 +1,23 @@
 <!--
 Sync Impact Report
-Version change: 2.5.0 → 2.6.0
-Rationale: MINOR — adds a new, narrowly-scoped carve-out to the same "Explicit v1 non-goals" list in
-Technology & Platform Constraints, permitting the specific agent tool calls required by
-specs/012-todo-parking-lists: add/remove/update of simple string items, by id, on a document's Todo
-list and Parking Lot list, with server-issued short-hash optimistic-concurrency checks (that spec's
-FR-003 through FR-009). This does not redefine any Core Principle: these two lists are simple,
-document-attached application state analogous to the "conversation metadata"/"UI state" the
-application backend already solely owns under Principle I, not "document state" in the
-Markdown/Automerge-CRDT sense that Principle III's staged-edit pipeline governs, so no exception to
-Principle III is needed. The carve-out is deliberately narrow — it authorizes exactly those three
-operations on those two lists, not a general "agent may maintain arbitrary structured state"
-capability — so it does not make any other new agent tool compliant; any such tool remains excluded
-until it earns its own carve-out the same way. This is the same kind of narrow, additive loosening of
-an existing non-goals list as the prior web_search/web_fetch, multi-document-support, and Pi-export-
-viewing carve-outs (2.2.0 → 2.3.0, 2.3.0 → 2.4.0, 2.4.0 → 2.5.0), hence MINOR.
+Version change: 2.6.0 → 2.7.0
+Rationale: MINOR — extends the 2.6.0 todo/parking-lot carve-out (Technology & Platform Constraints)
+to also cover the read-only `list_items` tool call added to specs/012-todo-parking-lists during
+planning (that spec's FR-010): the agent needs a way to learn a pre-existing item's id/content-hash
+before it can call `update_list_item`/`remove_list_item` on an item it did not itself just create in
+the current conversation — the same bootstrap problem `read_document` solves for
+`propose_document_edit`. The 2.6.0 amendment's rationale explicitly authorized only three operations
+(add/remove/update) and explicitly disclaimed a general capability; this amendment adds exactly the
+one additional read-only operation needed, on the same narrow, per-tool basis as the rest of this
+carve-out and as the existing web_search/web_fetch precedent (both already read-only tools carved out
+the same way). It does not otherwise widen the carve-out: still only these two lists, still no
+general "agent may maintain arbitrary structured state" capability, and still not a redefinition of
+any Core Principle (Principle III is unaffected for the same reason given in 2.6.0 — these lists are
+application state, not document content).
 Modified principles: n/a (no existing Core Principle redefined)
-Modified sections: Technology & Platform Constraints → v1 non-goals bullet (new carve-out added for
-the specs/012-todo-parking-lists agent tool calls, alongside the existing web_search/web_fetch and
-Pi-export-viewing carve-outs)
+Modified sections: Technology & Platform Constraints → v1 non-goals bullet (2.6.0's todo/parking-lot
+carve-out extended to name the read-only `list_items` tool alongside add/remove/update, and the FR
+range updated from FR-003–FR-009 to FR-003–FR-010)
 Added sections: none
 Removed sections: none
 Deferred items: none
@@ -129,14 +128,16 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
   `customTools` — the same mechanism as `read_document` — so they neither require a Pi extension
   (Principle VII stays satisfied) nor touch the edit-proposal pipeline (Principle III stays
   satisfied: they cannot modify the document). The todo/parking-lot list tool calls
-  (specs/012-todo-parking-lists) are carved out on the same narrow basis: they add, remove, and
-  update simple string items, by id, on two document-attached lists that are application state (like
-  the "conversation metadata"/"UI state" Principle I already assigns to the application backend), not
-  "document state" in the Markdown/Automerge-CRDT sense — so Principle III's staged-edit pipeline
-  does not apply to them, and no Pi extension is required (Principle VII stays satisfied). This
-  carve-out authorizes exactly those three operations on those two lists; it does not license any
-  other new agent tool, nor a general capability for the agent to maintain arbitrary structured
-  state. Any other new agent tool remains out of scope until it earns its own carve-out the same way.
+  (specs/012-todo-parking-lists, FR-003 through FR-010) are carved out on the same narrow basis: they
+  add, remove, update, and read (list) simple string items, by id, on two document-attached lists
+  that are application state (like the "conversation metadata"/"UI state" Principle I already
+  assigns to the application backend), not "document state" in the Markdown/Automerge-CRDT sense —
+  so Principle III's staged-edit pipeline does not apply to them, and no Pi extension is required
+  (Principle VII stays satisfied). The read-only listing tool is carved out on the same
+  read-only-information-gathering basis as `web_search`/`web_fetch` themselves. This carve-out
+  authorizes exactly those four operations on those two lists; it does not license any other new
+  agent tool, nor a general capability for the agent to maintain arbitrary structured state. Any
+  other new agent tool remains out of scope until it earns its own carve-out the same way.
   "Multiple documents" is removed from this list entirely,
   rather than merely narrowed, because specs/010-multi-document-support implements it for the
   single local user; multi-user/multi-account support remains a distinct, still-excluded non-goal.
@@ -241,4 +242,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.6.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-25
+**Version**: 2.7.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-25

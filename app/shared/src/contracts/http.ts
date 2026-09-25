@@ -24,6 +24,10 @@ export type ConversationStatus = z.infer<typeof ConversationStatus>;
 export const StagedEditStatus = z.enum(['pending', 'applied', 'dropped', 'superseded']);
 export type StagedEditStatus = z.infer<typeof StagedEditStatus>;
 
+// 012-todo-parking-lists
+export const ListName = z.enum(['todo', 'parking_lot']);
+export type ListName = z.infer<typeof ListName>;
+
 export const ConflictReason = z.enum(['not_found', 'ambiguous', 'overlapping']);
 export type ConflictReason = z.infer<typeof ConflictReason>;
 
@@ -64,6 +68,8 @@ export const ErrorCode = z.enum([
   'ROOT_THREAD_UNDELETABLE',
   'DOCUMENT_WRONG_TYPE',
   'EMPTY_DOCUMENT_EXPORT',
+  // 012-todo-parking-lists
+  'LIST_ITEM_NOT_FOUND',
   // Global error handler (server.ts's `setErrorHandler`): any uncaught/unmapped error, normalized
   // into the standard envelope rather than leaking a raw stack trace to the client.
   'INTERNAL_ERROR',
@@ -581,3 +587,32 @@ export const ExportDocumentSessionQuery = z.object({
   download: z.coerce.boolean().optional(),
 });
 export type ExportDocumentSessionQuery = z.infer<typeof ExportDocumentSessionQuery>;
+
+// ---- Todo & Parking Lot lists (012-todo-parking-lists) ----
+
+// `contentHash` is computed on the fly from `text` at serialization time (data-model.md) — no
+// `list`/`documentId`/`createdAt`/`updatedAt` fields; every surface delivering this DTO already
+// establishes which list/document it belongs to some other way (data-model.md's ListItemDto note).
+export const ListItemDto = z.object({
+  id: z.string(),
+  text: z.string(),
+  contentHash: z.string(),
+});
+export type ListItemDto = z.infer<typeof ListItemDto>;
+
+export const ListItemsResponse = z.object({
+  todo: z.array(ListItemDto),
+  parkingLot: z.array(ListItemDto),
+});
+export type ListItemsResponse = z.infer<typeof ListItemsResponse>;
+
+export const CreateListItemRequest = z.object({
+  list: ListName,
+  text: z.string(),
+});
+export type CreateListItemRequest = z.infer<typeof CreateListItemRequest>;
+
+export const UpdateListItemRequest = z.object({
+  text: z.string(),
+});
+export type UpdateListItemRequest = z.infer<typeof UpdateListItemRequest>;

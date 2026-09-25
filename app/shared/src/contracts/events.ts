@@ -5,6 +5,8 @@ import {
   ConversationKind,
   ConversationStatus,
   DocumentDto,
+  ListItemDto,
+  ListName,
   RevisionOrigin,
   RevisionSource,
 } from './http.js';
@@ -292,6 +294,23 @@ export const StagedEditReplacementExhaustedEvent = base(
   }),
 );
 
+// ---- Todo & Parking Lot lists (012-todo-parking-lists) ----
+
+export const ListItemAddedEvent = base(
+  'list_item_added',
+  z.object({ list: ListName, item: ListItemDto }),
+);
+
+export const ListItemUpdatedEvent = base(
+  'list_item_updated',
+  z.object({ list: ListName, item: ListItemDto }),
+);
+
+export const ListItemRemovedEvent = base(
+  'list_item_removed',
+  z.object({ list: ListName, itemId: z.string() }),
+);
+
 export const ApplicationEvent = z.discriminatedUnion('type', [
   DocumentCreatedEvent,
   DocumentContentChangedEvent,
@@ -325,6 +344,9 @@ export const ApplicationEvent = z.discriminatedUnion('type', [
   StagedEditSupersededEvent,
   StagedEditReplacementCreatedEvent,
   StagedEditReplacementExhaustedEvent,
+  ListItemAddedEvent,
+  ListItemUpdatedEvent,
+  ListItemRemovedEvent,
 ]);
 export type ApplicationEvent = z.infer<typeof ApplicationEvent>;
 
