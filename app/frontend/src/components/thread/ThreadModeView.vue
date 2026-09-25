@@ -77,6 +77,20 @@ function onThreadHudSelect(threadId: string, isHotkey = false): void {
   threadFocus.jumpTo(threadId, { hotkey: isHotkey });
 }
 
+/** `DoneThreadsPanel.vue`'s Reopen action (User Story 3): "reopening pops it out of the Done list
+ *  and re-enters the main thread list" — the thread itself already stops appearing in
+ *  `DoneThreadsPanel.vue` the moment `store.reopen` flips its `doneAt` (that panel's own
+ *  `doneThreads` computed re-filters live), so the only two things left to do here are close the
+ *  Done overlay and land the reviewer on the newly-reopened thread in the normal list. Reuses the
+ *  exact same "jump the cursor to this thread" mechanism a HUD row click/Ctrl+Alt+J/K hotkey
+ *  already drives (`threadFocus.jumpTo`, `hotkey: true` so the `activeThreadId` watcher below
+ *  centers + focuses its composer the same way a genuine keyboard jump does) rather than inventing
+ *  a second, parallel "focus a specific thread" path. */
+function onThreadReopened(threadId: string): void {
+  doneOpen.value = false;
+  threadFocus.jumpTo(threadId, { hotkey: true });
+}
+
 // Bug fix (parity with canvas mode): activating a thread — via a HUD row click OR either of the
 // Ctrl+Alt+J/K/1..9 hotkeys, all three of which land here through `threadFocus.jumpTo`/
 // `cycleByOffset`/`jumpToIndex` — used to only scroll/highlight the target `ThreadCard`, never
@@ -282,7 +296,7 @@ async function onExportDocument(): Promise<void> {
         class="modal-overlay done-threads-overlay"
         @click.self="doneOpen = false"
       >
-        <DoneThreadsPanel @close="doneOpen = false" />
+        <DoneThreadsPanel @close="doneOpen = false" @reopened="onThreadReopened" />
       </div>
     </Transition>
   </div>

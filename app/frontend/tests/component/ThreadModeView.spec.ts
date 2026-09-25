@@ -388,4 +388,55 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
 
     expect(wrapper.find('.thread-card--active').exists()).toBe(false);
   });
+
+  // User Story 3: reopening a thread from DoneThreadsPanel.vue's column layout must both close the
+  // Done overlay and land the reviewer on that thread in the normal list (this view's own
+  // `onThreadReopened`, wired to `DoneThreadsPanel`'s `@reopened` emit) — reusing the exact same
+  // "jump the cursor to this thread" mechanism a HUD row click/hotkey already drives.
+  describe('reopening a thread from the Done overlay', () => {
+    function seedWithOneDone(): void {
+      const store = useThreadStore();
+      store.loaded = true;
+      store.threads = [
+        threadFixture({ id: 'root-1', name: 'Root Thread', createdAt: '2026-01-01T00:00:00.000Z' }),
+        threadFixture({
+          id: 'done-1',
+          name: 'Done Thread',
+          parentId: 'root-1',
+          kind: 'thread-branch',
+          forkedFromMessageId: 'r0',
+          doneAt: '2026-01-02T00:00:00.000Z',
+          createdAt: '2026-01-01T00:02:00.000Z',
+        }),
+      ];
+      store.messagesByThread['root-1'] = [makeMessage('r0')];
+      store.messagesByThread['done-1'] = [makeMessage('d0')];
+    }
+
+    it('closes the Done overlay and focuses the reopened thread in the main list', async () => {
+      vi.mocked(httpClient.reopenThread).mockResolvedValue(undefined as never);
+      seedWithOneDone();
+      const wrapper = mountView();
+
+      await wrapper.find('.thread-mode-done-toggle').trigger('click');
+      await wrapper.vm.$nextTick();
+      expect(wrapper.find('.done-threads-overlay').exists()).toBe(true);
+      expect(wrapper.find('.done-thread-column[data-thread-id="done-1"]').exists()).toBe(true);
+
+      const reopenButton = wrapper
+        .findAll('.done-thread-column-actions button')
+        .find((b) => b.text() === 'Reopen')!;
+      await reopenButton.trigger('click');
+      await flushPromises();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.done-threads-overlay').exists()).toBe(false);
+      expect(wrapper.find('.thread-card[data-thread-id="done-1"]').classes()).toContain(
+        'thread-card--active',
+      );
+      expect(document.activeElement?.id).toBe('thread-composer-done-1');
+    });
+  });
 });
