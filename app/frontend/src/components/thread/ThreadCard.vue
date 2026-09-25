@@ -685,7 +685,15 @@ const CARD_WIDTH_PX = 420;
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border-color, #ccc);
+  /* Must use `--neutral-muted-color`, not `--border-color` — exact same fix, same reasoning, as
+     canvas mode's `ConversationThreadBox.vue` own base rule: `--border-color` is documented in
+     style.css as a "decorative divider only" (~1.5-1.7:1 contrast against --panel-bg, below WCAG
+     1.4.11's 3:1 non-text minimum) — insufficient for this box's own outer edge, which is a real
+     UI-boundary cue (how one thread's card reads as visually separate from the page/other cards).
+     Canvas mode's own box always uses the higher-contrast token for exactly this reason; this
+     "not-active" thread card was the one place in Thread mode that didn't match it. The `--active`
+     ring below is unaffected — this only fixes the DEFAULT (not-currently-selected) border. */
+  border: 1px solid var(--neutral-muted-color, #4b5563);
   border-radius: 8px;
   background: var(--panel-bg, #f7f7f8);
   /* Thread mode's HUD cursor highlight (011-linear-thread-mode): the active `ThreadCard`, set by
@@ -749,7 +757,11 @@ const CARD_WIDTH_PX = 420;
      margin overshoot and pull the box below up into this header's own title/actions row, cutting
      it off abruptly once the header engages `position: sticky`. */
   padding: 0.55rem 0.75rem 0.4rem;
-  border: 1px solid var(--border-color, #ccc);
+  /* `--neutral-muted-color`, not `--border-color` — matches `.thread-card`'s own base rule above
+     and canvas mode's `ConversationThreadBox.vue` (see that rule's own doc comment for the full
+     contrast-token rationale); this header is `.thread-card`'s own lid, so its default border must
+     read as the same UI boundary, not a lower-contrast one. */
+  border: 1px solid var(--neutral-muted-color, #4b5563);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   position: sticky;
