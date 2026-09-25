@@ -46,6 +46,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: git checkout -- .github/workflows/openwiki-update.yml
 
+      # Safety net: never let the bot commit changes to CLAUDE.md, even though
+      # staging below is already scoped to doc paths only.
+      - name: Exclude CLAUDE.md changes
+        if: ${{ !cancelled() }}
+        run: git checkout -- CLAUDE.md
+
       - name: Remove transient OpenWiki run state
         if: ${{ !cancelled() }}
         run: rm -f -- openwiki/.run.json
@@ -54,13 +60,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          if [[ -z "$(git status --porcelain -- openwiki AGENTS.md CLAUDE.md)" ]]; then
+          if [[ -z "$(git status --porcelain -- openwiki AGENTS.md)" ]]; then
             echo "No OpenWiki changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add openwiki AGENTS.md CLAUDE.md
+          git add openwiki AGENTS.md
           git commit -m "docs: update OpenWiki"
           git push origin HEAD:${{ github.ref_name }}
 
