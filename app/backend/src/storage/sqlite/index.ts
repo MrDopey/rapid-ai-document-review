@@ -44,6 +44,8 @@ interface ListItemDbRow {
   text: string;
   created_at: string;
   updated_at: string;
+  conversation_id: string | null;
+  message_id: string | null;
 }
 
 function mapListItem(row: ListItemDbRow): ListItemRow {
@@ -54,6 +56,8 @@ function mapListItem(row: ListItemDbRow): ListItemRow {
     text: row.text,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    conversationId: row.conversation_id,
+    messageId: row.message_id,
   };
 }
 
@@ -811,10 +815,20 @@ export class SqliteStorageAdapter implements StorageAdapter {
   createListItem(row: ListItemRow): ListItemRow {
     this.db
       .prepare(
-        `INSERT INTO list_item (id, document_id, list, text, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO list_item
+           (id, document_id, list, text, created_at, updated_at, conversation_id, message_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.id, row.documentId, row.list, row.text, row.createdAt, row.updatedAt);
+      .run(
+        row.id,
+        row.documentId,
+        row.list,
+        row.text,
+        row.createdAt,
+        row.updatedAt,
+        row.conversationId,
+        row.messageId,
+      );
     return row;
   }
 
@@ -834,16 +848,45 @@ export class SqliteStorageAdapter implements StorageAdapter {
     return rows.map(mapListItem);
   }
 
-  updateListItemText(id: string, text: string, updatedAt: string): ListItemRow {
+  updateListItem(
+    id: string,
+    patch: {
+      text: string;
+      updatedAt: string;
+      conversationId?: string | null;
+      messageId?: string | null;
+    },
+  ): ListItemRow {
     const row = this.db.prepare(`SELECT * FROM list_item WHERE id = ?`).get(id) as
       ListItemDbRow | undefined;
     if (!row) {
       throw new Error(`List item not found: ${id}`);
     }
-    this.db
-      .prepare(`UPDATE list_item SET text = ?, updated_at = ? WHERE id = ?`)
-      .run(text, updatedAt, id);
-    return mapListItem({ ...row, text, updated_at: updatedAt });
+
+    // `conversation_id`/`message_id` are only appended to the SET clause when the caller actually
+    // supplied that key (even as an explicit `null`) — column names are hardcoded here, never
+    // interpolated from external input, so this stays injection-safe.
+    const setClauses = ['text = ?', 'updated_at = ?'];
+    const params: (string | null)[] = [patch.text, patch.updatedAt];
+    if ('conversationId' in patch) {
+      setClauses.push('conversation_id = ?');
+      params.push(patch.conversationId ?? null);
+    }
+    if ('messageId' in patch) {
+      setClauses.push('message_id = ?');
+      params.push(patch.messageId ?? null);
+    }
+    params.push(id);
+    this.db.prepare(`UPDATE list_item SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
+
+    return mapListItem({
+      ...row,
+      text: patch.text,
+      updated_at: patch.updatedAt,
+      conversation_id:
+        'conversationId' in patch ? (patch.conversationId ?? null) : row.conversation_id,
+      message_id: 'messageId' in patch ? (patch.messageId ?? null) : row.message_id,
+    });
   }
 
   deleteListItem(id: string): void {

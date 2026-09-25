@@ -2075,17 +2075,39 @@ describe('Contract: HTTP API (http-api.md)', () => {
         text: 'fix the intro paragraph',
       });
       expect(postRes.status).toBe(201);
-      const posted = postRes.json as { id: string; text: string; contentHash: string };
+      const posted = postRes.json as {
+        id: string;
+        text: string;
+        contentHash: string;
+        conversationId: string | null;
+        messageId: string | null;
+      };
       expect(posted.text).toBe('fix the intro paragraph');
       expect(posted.contentHash).toBeTruthy();
+      // The HTTP path never carries provenance (012-todo-parking-lists follow-up) — only an agent
+      // tool call ever sets these.
+      expect(posted.conversationId).toBeNull();
+      expect(posted.messageId).toBeNull();
 
       const getRes = await call(ctx.app, 'GET', `/api/documents/${documentId}/list-items`);
       const parsed = getRes.json as {
-        todo: { id: string; text: string }[];
+        todo: {
+          id: string;
+          text: string;
+          contentHash: string;
+          conversationId: string | null;
+          messageId: string | null;
+        }[];
         parkingLot: { id: string; text: string }[];
       };
       expect(parsed.todo).toEqual([
-        { id: posted.id, text: posted.text, contentHash: posted.contentHash },
+        {
+          id: posted.id,
+          text: posted.text,
+          contentHash: posted.contentHash,
+          conversationId: null,
+          messageId: null,
+        },
       ]);
       expect(parsed.parkingLot).toEqual([]);
     });
@@ -2124,6 +2146,42 @@ describe('Contract: HTTP API (http-api.md)', () => {
       const patched = patchRes.json as { id: string; text: string; contentHash: string };
       expect(patched.text).toBe('edited text');
       expect(patched.contentHash).not.toBe(posted.contentHash);
+    });
+
+    it('PATCH never nulls out a previously agent-set conversationId/messageId provenance link', async () => {
+      const created = await createDoc(ctx);
+      const documentId = created.document.id;
+      const postRes = await call(ctx.app, 'POST', `/api/documents/${documentId}/list-items`, {
+        list: 'todo',
+        text: 'from the agent',
+      });
+      const posted = postRes.json as { id: string };
+
+      // The HTTP POST path itself never carries provenance (it always passes `null, null`) — this
+      // simulates the agent path having set a real link on the same row, the way `add_list_item`'s
+      // own `execute()` does, so the PATCH below has something to (not) destroy.
+      ctx.storage.updateListItem(posted.id, {
+        text: 'from the agent',
+        updatedAt: new Date().toISOString(),
+        conversationId: created.mainConversation.id,
+        messageId: 'msg_agent_set',
+      });
+
+      const patchRes = await call(
+        ctx.app,
+        'PATCH',
+        `/api/documents/${documentId}/list-items/${posted.id}`,
+        { text: 'edited via the panel' },
+      );
+      expect(patchRes.status).toBe(200);
+      const patched = patchRes.json as {
+        text: string;
+        conversationId: string | null;
+        messageId: string | null;
+      };
+      expect(patched.text).toBe('edited via the panel');
+      expect(patched.conversationId).toBe(created.mainConversation.id);
+      expect(patched.messageId).toBe('msg_agent_set');
     });
 
     it('PATCH rejects empty/whitespace-only text with 400 VALIDATION_FAILED', async () => {

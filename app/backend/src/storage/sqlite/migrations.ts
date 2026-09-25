@@ -159,6 +159,8 @@ const STATEMENTS: string[] = [
     text          TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
+    conversation_id TEXT,
+    message_id    TEXT,
 
     FOREIGN KEY (document_id) REFERENCES document(id)
   )`,
@@ -294,6 +296,13 @@ const MIGRATIONS: Migration[] = [
           db.exec('PRAGMA foreign_keys = ON;');
         }
       }
+    },
+  },
+  {
+    version: 5,
+    apply: (db) => {
+      addColumnIfMissing(db, 'list_item', 'conversation_id', 'TEXT');
+      addColumnIfMissing(db, 'list_item', 'message_id', 'TEXT');
     },
   },
 ];

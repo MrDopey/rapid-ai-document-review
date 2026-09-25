@@ -163,6 +163,13 @@ export interface ListItemRow {
   text: string;
   createdAt: string;
   updatedAt: string;
+  /** The (conversation, message) that most recently created/updated this item via an agent tool
+   *  call — only the latest link is kept, overwritten on each agent update, never accumulated.
+   *  `null` for a manually-added item, or one whose link has never been set. No FK constraint
+   *  (matches `conversation.forked_from_message_id`'s precedent) — a closed/deleted conversation
+   *  must never invalidate an old item's link. */
+  conversationId: string | null;
+  messageId: string | null;
 }
 
 /**
@@ -267,7 +274,21 @@ export interface StorageAdapter {
   createListItem(row: ListItemRow): ListItemRow;
   getListItem(documentId: string, id: string): ListItemRow | null;
   listListItems(documentId: string): ListItemRow[]; // both lists, ordered by list, then createdAt/id
-  updateListItemText(id: string, text: string, updatedAt: string): ListItemRow;
+  /**
+   * `conversationId`/`messageId` absent (`undefined`) means "leave that column untouched";
+   * present (including explicit `null`) means "set it." Lets the HTTP path (which never supplies
+   * either) update `text`/`updated_at` alone without severing an existing agent-set link, while
+   * the agent path always supplies both explicitly.
+   */
+  updateListItem(
+    id: string,
+    patch: {
+      text: string;
+      updatedAt: string;
+      conversationId?: string | null;
+      messageId?: string | null;
+    },
+  ): ListItemRow;
   deleteListItem(id: string): void;
 
   /**

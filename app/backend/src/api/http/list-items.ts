@@ -13,7 +13,13 @@ import type { ListItemRow, StorageAdapter } from '../../storage/storage-adapter.
 import { parseOrFail, sendError } from './errors.ts';
 
 function toDto(row: ListItemRow) {
-  return { id: row.id, text: row.text, contentHash: computeContentHash(row.text) };
+  return {
+    id: row.id,
+    text: row.text,
+    contentHash: computeContentHash(row.text),
+    conversationId: row.conversationId,
+    messageId: row.messageId,
+  };
 }
 
 /**
@@ -54,7 +60,7 @@ export function registerListItemRoutes(
       if (!data) return;
 
       try {
-        const row = listItemService.addItem(documentId, data.list, data.text, null);
+        const row = listItemService.addItem(documentId, data.list, data.text, null, null);
         return reply.status(201).send(toDto(row));
       } catch (err) {
         if (err instanceof EmptyListItemTextError) {

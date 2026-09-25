@@ -111,6 +111,7 @@ import DocumentCanvas from '../../src/components/canvas/DocumentCanvas.vue';
 import PreviewComponent from '../../src/components/preview/PreviewComponent.vue';
 import ConversationDetailPanel from '../../src/components/conversation/ConversationDetailPanel.vue';
 import HudPanel from '../../src/components/hud/HudPanel.vue';
+import TodoParkingListsPanel from '../../src/components/TodoParkingListsPanel.vue';
 
 vi.mock('../../src/transport/ws-client.js', async () => {
   const { ref } = await import('vue');
@@ -2157,5 +2158,159 @@ describe('App.vue — Ctrl+Alt+1..9 numbered-jump, and Ctrl+Alt+H/L/Arrow cyclin
     expect(wrapper.find('.thread-card[data-thread-id="root-1"]').classes()).toContain(
       'thread-card--active',
     );
+  });
+});
+
+// 012-todo-parking-lists follow-up: a linked Todo/Parking Lot item's `focus-link` emit
+// (`TodoParkingListsPanel.vue`) drives `App.vue`'s own `focusListItemLink` — focus/open the
+// (conversation, message) an agent tool call recorded, then scroll that message's own top edge
+// into view. `TodoParkingListsPanel` is deliberately left out of every `stubs` set above, so it
+// renders for real here too.
+describe('App.vue — Todo/Parking Lot list-item link click-to-focus', () => {
+  let pinia: Pinia;
+  let currentWrapper: VueWrapper | null = null;
+
+  // jsdom implements no `Element.scrollIntoView` — same pre-existing gap/workaround used
+  // elsewhere in this file.
+  Element.prototype.scrollIntoView = vi.fn();
+  // jsdom also implements no `Element.scrollTo` — a real `ConversationView.vue` (rendered here,
+  // unlike every `stubs`-only suite above) calls it on its own sticky-auto-scroll effect,
+  // unrelated to this feature (same fix as `ConversationView.spec.ts`/`MessageBubble.spec.ts`).
+  if (typeof Element.prototype.scrollTo !== 'function') {
+    Element.prototype.scrollTo = () => {};
+  }
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    vi.stubGlobal('ResizeObserver', WideResizeObserverStub);
+    stubMatchMedia(true);
+    localStorage.clear();
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    // The Thread-mode suites further up this file leave `getDocument`/`listDocuments` resolved to
+    // a `documentType: 'thread'` fixture via `mockResolvedValue` (which — unlike `mockReset` —
+    // outlives their own `vi.clearAllMocks()`) — restored here to this file's default canvas-mode
+    // fixtures so `App.vue` mounts `DocumentCanvas`, not `ThreadModeView`, in this suite.
+    vi.mocked(httpClient.getDocument).mockResolvedValue(getDocumentResponse);
+    vi.mocked(httpClient.listDocuments).mockResolvedValue(listDocumentsResponse);
+    vi.mocked(httpClient.listConversations).mockResolvedValue(listConversationsResponse);
+  });
+
+  afterEach(() => {
+    currentWrapper?.unmount();
+    currentWrapper = null;
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  /** Mounts `App.vue` for real, attached to `document.body` (required for
+   *  `scrollMessageTopIntoView(document.body, messageId)`'s own `querySelector` to ever find
+   *  anything), seeds `conversationsStore.conversations` plus one message per conversation (so a
+   *  real message bubble carrying `data-message-id` actually renders once that conversation is
+   *  focused), and pre-focuses `preFocusedId` via the same `toggle-focus` emit
+   *  `DocumentCanvas`'s real `ConversationThreadBox` boxes fire — this is also what makes the
+   *  rail (`TodoParkingListsPanel`, mounted only inside the multi-focus overlay) visible at all. */
+  async function mountWithLinkableConversations(
+    conversations: ConversationDto[],
+    preFocusedId: string,
+  ): Promise<VueWrapper> {
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [pinia], stubs: FOCUS_PANEL_STUBS },
+    });
+    currentWrapper = wrapper;
+    await flushPromises();
+
+    const conversationsStore = useConversationsStore();
+    conversationsStore.conversations = conversations;
+    vi.spyOn(conversationsStore, 'loadDetail').mockResolvedValue(undefined);
+    for (const conv of conversations) {
+      conversationsStore.messagesByConversation[conv.id] = [
+        {
+          id: `${conv.id}-msg`,
+          role: 'assistant',
+          text: `Reply in ${conv.id}`,
+          reasoning: null,
+          isToolCallCarrier: false,
+          toolCalls: [],
+          streaming: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ];
+    }
+
+    const canvas = wrapper.findComponent(DocumentCanvas);
+    canvas.vm.$emit('toggle-focus', preFocusedId);
+    await flushPromises();
+
+    return wrapper;
+  }
+
+  function focusedIds(wrapper: VueWrapper): string[] {
+    return wrapper.findAllComponents(ConversationDetailPanel).map((p) => p.props('conversationId'));
+  }
+
+  it('scrolls the linked message into view for an already-focused conversation', async () => {
+    const conversations = [conversationFixture({ id: 'c1' })];
+    const wrapper = await mountWithLinkableConversations(conversations, 'c1');
+    expect(focusedIds(wrapper)).toEqual(['c1']);
+
+    const rail = wrapper.findComponent(TodoParkingListsPanel);
+    rail.vm.$emit('focus-link', 'c1', 'c1-msg');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const conversationsStore = useConversationsStore();
+    expect(conversationsStore.loadDetail).toHaveBeenCalledWith('c1');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('focuses and loads a not-yet-focused closed conversation before scrolling to its message', async () => {
+    const conversations = [
+      conversationFixture({ id: 'c1' }),
+      conversationFixture({ id: 'c2', status: 'closed', closedAt: '2026-01-02T00:00:00.000Z' }),
+    ];
+    const wrapper = await mountWithLinkableConversations(conversations, 'c1');
+    expect(focusedIds(wrapper)).toEqual(['c1']);
+
+    const rail = wrapper.findComponent(TodoParkingListsPanel);
+    rail.vm.$emit('focus-link', 'c2', 'c2-msg');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    expect(focusedIds(wrapper).sort()).toEqual(['c1', 'c2']);
+    const conversationsStore = useConversationsStore();
+    expect(conversationsStore.loadDetail).toHaveBeenCalledWith('c2');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('scrolls to a second linked message on a second click in the same already-open conversation', async () => {
+    const conversations = [conversationFixture({ id: 'c1' })];
+    const wrapper = await mountWithLinkableConversations(conversations, 'c1');
+    const conversationsStore = useConversationsStore();
+    conversationsStore.messagesByConversation['c1']!.push({
+      id: 'c1-msg-2',
+      role: 'assistant',
+      text: 'Second reply',
+      reasoning: null,
+      isToolCallCarrier: false,
+      toolCalls: [],
+      streaming: false,
+      createdAt: '2026-01-01T00:01:00.000Z',
+    });
+    await wrapper.vm.$nextTick();
+
+    const rail = wrapper.findComponent(TodoParkingListsPanel);
+    rail.vm.$emit('focus-link', 'c1', 'c1-msg');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+
+    rail.vm.$emit('focus-link', 'c1', 'c1-msg-2');
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    expect(conversationsStore.loadDetail).toHaveBeenCalledWith('c1');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });

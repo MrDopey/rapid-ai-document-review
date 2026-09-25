@@ -4,6 +4,7 @@ import { SqliteStorageAdapter } from '../../src/storage/sqlite/index.js';
 import { EventService } from '../../src/events/event-service.js';
 import { EventHub, type DocumentSnapshot } from '../../src/events/event-hub.js';
 import { RunBuffer } from '../../src/events/run-buffer.js';
+import { ToolCallMessageIdCache } from '../../src/events/tool-call-message-id-cache.js';
 import { newId } from '../../src/ids.js';
 import type { AgentSessionEventLike } from '../../src/pi/agent-session-port.js';
 import type { ConversationEventRow } from '../../src/storage/storage-adapter.js';
@@ -79,11 +80,18 @@ function buildHarness(): Harness {
     closedAt: null,
   });
 
-  const bridge = new EventBridge(storage, eventService, eventHub, runBuffer, {
-    documentId,
-    conversationId,
-    turnId: newId('turn'),
-  });
+  const bridge = new EventBridge(
+    storage,
+    eventService,
+    eventHub,
+    runBuffer,
+    new ToolCallMessageIdCache(),
+    {
+      documentId,
+      conversationId,
+      turnId: newId('turn'),
+    },
+  );
 
   return { storage, eventService, eventHub, bridge, documentId, conversationId };
 }

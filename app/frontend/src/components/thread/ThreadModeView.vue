@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 import { useListItemsStore } from '../../stores/listItems.js';
 import { useThreadFocusState } from '../../composables/threadFocusState.js';
+import { scrollMessageTopIntoView } from '../../composables/messageScroll.js';
 import { ApiError } from '../../transport/http-client.js';
 import ThreadCard from './ThreadCard.vue';
 import DoneThreadsPanel from './DoneThreadsPanel.vue';
@@ -80,6 +81,29 @@ function onThreadHudSelect(threadId: string, isHotkey = false): void {
   threadFocus.jumpTo(threadId, { hotkey: isHotkey });
 }
 
+/** 012-todo-parking-lists follow-up: pending message target for `focusListItemLink` below, kept
+ *  as a sibling of `threadFocus.activeThreadId` (not reusing that ref itself) since the
+ *  `activeThreadId` watcher also fires for a plain HUD/hotkey jump with no message target. */
+const targetMessageId = ref<string | null>(null);
+
+/** `TodoParkingListsPanel.vue`'s `focus-link` emit for a linked item, Thread mode's counterpart to
+ *  `App.vue`'s own `focusListItemLink` (Canvas mode). Branches on `doneAt`: a done thread is never
+ *  auto-reopened (`store.reopen` stays its own explicit action) — it's opened read-only via the
+ *  Done panel instead, reusing the same imperative scroll pattern. An active thread reuses the
+ *  existing jump mechanism, deferring the actual scroll-to-message to the `activeThreadId` watcher
+ *  below once its target `ThreadCard` is confirmed mounted. */
+async function focusListItemLink(conversationId: string, messageId: string): Promise<void> {
+  const thread = store.findThread(conversationId);
+  if (thread && thread.doneAt !== null) {
+    doneOpen.value = true;
+    await store.loadDetail(conversationId);
+    void nextTick(() => scrollMessageTopIntoView(document.body, messageId));
+    return;
+  }
+  targetMessageId.value = messageId;
+  threadFocus.jumpTo(conversationId);
+}
+
 /** `DoneThreadsPanel.vue`'s Reopen action (User Story 3): "reopening pops it out of the Done list
  *  and re-enters the main thread list" — the thread itself already stops appearing in
  *  `DoneThreadsPanel.vue` the moment `store.reopen` flips its `doneAt` (that panel's own
@@ -117,7 +141,18 @@ watch(threadFocus.activeThreadId, (threadId) => {
     document
       .querySelector(`.thread-card[data-thread-id="${threadId}"]`)
       ?.scrollIntoView({ behavior: 'smooth', block });
-    document.querySelector<HTMLTextAreaElement>(`#thread-composer-${threadId}`)?.focus();
+    // 012-todo-parking-lists follow-up: a pending `focusListItemLink` message target takes over
+    // this jump's own scroll — the message itself, inside the correct `.thread-card`, rather than
+    // focusing the composer the way a plain HUD/hotkey jump does.
+    if (targetMessageId.value) {
+      const container = document.querySelector<HTMLElement>(
+        `.thread-card[data-thread-id="${threadId}"]`,
+      );
+      scrollMessageTopIntoView(container, targetMessageId.value);
+      targetMessageId.value = null;
+    } else {
+      document.querySelector<HTMLTextAreaElement>(`#thread-composer-${threadId}`)?.focus();
+    }
   });
 });
 
@@ -326,6 +361,7 @@ async function onExportDocument(): Promise<void> {
       <TodoParkingListsPanel
         v-if="listItemsStore.todoVisible || listItemsStore.parkingLotVisible"
         class="thread-mode-lists-rail"
+        @focus-link="focusListItemLink"
       />
     </div>
 

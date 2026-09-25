@@ -597,6 +597,8 @@ export const ListItemDto = z.object({
   id: z.string(),
   text: z.string(),
   contentHash: z.string(),
+  conversationId: z.string().nullable(),
+  messageId: z.string().nullable(),
 });
 export type ListItemDto = z.infer<typeof ListItemDto>;
 

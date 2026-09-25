@@ -75,9 +75,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
 
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/011-linear-thread-mode (widens conversation.kind and adds document_type).
+    // Latest migration version as of 012-todo-parking-lists (adds list_item.conversation_id/message_id).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      4,
+      5,
     );
 
     // The pre-existing row survived the upgrade untouched, and the newly-added column on it reads
@@ -129,9 +129,9 @@ describe('versioned ALTER-based schema migrations (cce9749)', () => {
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('forked_from_message_id');
     expect(tableColumns(db, 'user_settings')).toContain('soft_word_count_threshold');
-    // Latest migration version as of specs/011-linear-thread-mode (widens conversation.kind and adds document_type).
+    // Latest migration version as of 012-todo-parking-lists (adds list_item.conversation_id/message_id).
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      4,
+      5,
     );
     db.close();
   });
@@ -148,7 +148,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
     migrate(db);
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      4,
+      5,
     );
 
     db.prepare(
@@ -184,7 +184,7 @@ describe('migration version 2: is_current_main (specs/006-archivable-main-conver
 
     expect(tableColumns(db, 'conversation')).toContain('is_current_main');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      4,
+      5,
     );
 
     const conversation = db
@@ -233,7 +233,7 @@ describe('migration version 3: last_active_at (specs/010-multi-document-support)
     migrate(db);
     expect(tableColumns(db, 'document')).toContain('last_active_at');
     expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
-      4,
+      5,
     );
     db.close();
   });
@@ -340,6 +340,62 @@ describe('migration version 4: document_type + widened conversation.kind (011-li
         )
         .run(),
     ).not.toThrow();
+
+    db.close();
+  });
+});
+
+/**
+ * Migration version 5 (012-todo-parking-lists follow-up): `list_item.conversation_id`/
+ * `message_id`, nullable, no backfill — `addColumnIfMissing` is idempotent whether the column
+ * arrived via a fresh install's `CREATE TABLE` body or this migration.
+ */
+describe('migration version 5: list_item.conversation_id/message_id (012-todo-parking-lists)', () => {
+  it('a fresh install already has both columns via CREATE TABLE, nullable, at the latest user_version', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db);
+    expect(tableColumns(db, 'list_item')).toContain('conversation_id');
+    expect(tableColumns(db, 'list_item')).toContain('message_id');
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(
+      5,
+    );
+    db.close();
+  });
+
+  it('an existing database missing the columns gets them added, nullable, without losing existing rows', () => {
+    const db = createPreMigration1Database();
+    db.exec(`CREATE TABLE list_item (
+      id            TEXT PRIMARY KEY,
+      document_id   TEXT NOT NULL,
+      list          TEXT NOT NULL,
+      text          TEXT NOT NULL,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    )`);
+    db.prepare(
+      `INSERT INTO list_item (id, document_id, list, text, created_at, updated_at)
+       VALUES ('li_old', 'doc_old', 'todo', 'pre-existing item', 'now', 'now')`,
+    ).run();
+    expect(tableColumns(db, 'list_item')).not.toContain('conversation_id');
+    expect(tableColumns(db, 'list_item')).not.toContain('message_id');
+
+    migrate(db);
+
+    expect(tableColumns(db, 'list_item')).toContain('conversation_id');
+    expect(tableColumns(db, 'list_item')).toContain('message_id');
+    const item = db.prepare('SELECT * FROM list_item WHERE id = ?').get('li_old') as Record<
+      string,
+      unknown
+    >;
+    expect(item.text).toBe('pre-existing item');
+    expect(item.conversation_id).toBeNull();
+    expect(item.message_id).toBeNull();
+
+    // Idempotent re-application: running `migrate()` again against an already-current database
+    // does not re-add or otherwise disturb either column.
+    expect(() => migrate(db)).not.toThrow();
+    expect(tableColumns(db, 'list_item')).toContain('conversation_id');
+    expect(tableColumns(db, 'list_item')).toContain('message_id');
 
     db.close();
   });

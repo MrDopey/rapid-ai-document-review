@@ -80,6 +80,10 @@ async function commitEdit(list: ListName, itemId: string): Promise<void> {
 async function removeItem(itemId: string): Promise<void> {
   await httpClient.deleteListItem(activeDocumentId(), itemId);
 }
+
+const emit = defineEmits<{
+  (e: 'focus-link', conversationId: string, messageId: string): void;
+}>();
 </script>
 
 <template>
@@ -109,7 +113,17 @@ async function removeItem(itemId: string): Promise<void> {
               <button type="button" @click="cancelEdit(section.list)">Cancel</button>
             </template>
             <template v-else>
-              <span class="list-item-text">{{ item.text }}</span>
+              <span
+                class="list-item-text"
+                :class="{ 'list-item-text--linked': item.messageId }"
+                role="button"
+                :tabindex="item.messageId ? 0 : undefined"
+                @click="item.messageId && emit('focus-link', item.conversationId!, item.messageId)"
+                @keydown.enter="
+                  item.messageId && emit('focus-link', item.conversationId!, item.messageId)
+                "
+                >{{ item.text }}</span
+              >
               <button type="button" @click="startEdit(section.list, item)">Edit</button>
               <button type="button" @click="removeItem(item.id)">Delete</button>
             </template>
@@ -194,6 +208,15 @@ async function removeItem(itemId: string): Promise<void> {
 .list-item-text {
   flex: 1 1 auto;
   word-break: break-word;
+}
+
+/* Only visual indicator that an item carries a provenance link (012-todo-parking-lists
+   follow-up) — no icon, matching the panel's existing minimal Edit/Delete-as-plain-text-button
+   style. An item with no link renders the plain, non-bordered span above, unaffected. */
+.list-item-text--linked {
+  border-left: 3px solid var(--accent-color, #2563eb);
+  padding-left: 0.5rem;
+  cursor: pointer;
 }
 
 .list-item-edit-input {

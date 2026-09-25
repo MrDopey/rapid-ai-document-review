@@ -34,6 +34,7 @@ import {
   persistEditorVisible,
 } from './composables/panePersistence.js';
 import { attachScrollSync } from './composables/scrollSync.js';
+import { scrollMessageTopIntoView } from './composables/messageScroll.js';
 import { useFocusCap } from './composables/focusConfig.js';
 import { useFocusPanelState } from './composables/focusPanelState.js';
 import {
@@ -892,6 +893,22 @@ function scrollComposerIntoView(id: string): void {
   });
 }
 
+/** 012-todo-parking-lists follow-up: `TodoParkingListsPanel.vue`'s `focus-link` emit for a linked
+ *  item — focuses/opens the (conversation, message) an agent tool call recorded when it created or
+ *  updated that item, then scrolls the message's own top edge into view. Reuses
+ *  `scrollMessageTopIntoView` (already used by `ConversationView.vue`/`ConversationThreadBox.vue`)
+ *  directly against `document.body`, rather than retrofitting `scrollComposerIntoView` above — that
+ *  one is specifically about a conversation's composer/dialog root, a different concern from a
+ *  message bubble. */
+async function focusListItemLink(conversationId: string, messageId: string): Promise<void> {
+  focusConversation(conversationId);
+  // A closed conversation not yet focused hasn't loaded its messages yet — `loadDetail` is
+  // idempotent/dedupes concurrent calls, so awaiting it here is safe even though
+  // `ConversationView.vue`'s own `onMounted` also calls it independently.
+  await conversationsStore.loadDetail(conversationId);
+  void nextTick(() => scrollMessageTopIntoView(document.body, messageId));
+}
+
 /** US4/T033, extended for multi-focus: a HUD row click toggles that conversation's focus (add/
  *  remove, same as `ConversationThreadBox.vue`'s Focus button) and always scrolls its
  *  `ConversationThreadBox` into view regardless of direction — the box itself stays on the canvas
@@ -1403,6 +1420,7 @@ async function onToggleReasoning(event: Event): Promise<void> {
         <TodoParkingListsPanel
           v-if="listItemsStore.todoVisible || listItemsStore.parkingLotVisible"
           class="todo-parking-lists-rail"
+          @focus-link="focusListItemLink"
         />
       </div>
     </div>

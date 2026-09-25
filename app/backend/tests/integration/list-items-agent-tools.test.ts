@@ -91,6 +91,22 @@ async function lastToolCallResult(ctx: Ctx, toolName: string): Promise<string | 
   return matches.at(-1)?.resultText ?? null;
 }
 
+/** The `id` of the assistant message whose `toolCalls[]` most recently carried a call named
+ *  `toolName` — the "message that requested it" provenance link (`add_list_item`/`update_list_item`)
+ *  is expected to record onto the resulting item. */
+async function messageIdForToolCall(ctx: Ctx, toolName: string): Promise<string | null> {
+  const res = await call(
+    ctx.app,
+    'GET',
+    `/api/documents/${ctx.documentId}/conversations/${ctx.conversationId}`,
+  );
+  const parsed = GetConversationResponse.parse(res.json);
+  const matches = parsed.messages.filter((m) =>
+    (m.toolCalls ?? []).some((tc) => tc.name === toolName),
+  );
+  return matches.at(-1)?.id ?? null;
+}
+
 async function countToolCalls(ctx: Ctx, toolNames: string[]): Promise<number> {
   const res = await call(
     ctx.app,
@@ -205,6 +221,36 @@ describe.each([
     expect(rejection).toMatch(/changed since/i);
     expect(rejection).toContain('edited via the panel');
     expect(ctx.storage.listListItems(ctx.documentId)[0]?.text).toBe('edited via the panel');
+  });
+
+  it('records the (conversation, message) that requested add_list_item as the item provenance link', async () => {
+    await callTool(ctx, 'add_list_item', { list, text: 'from the agent' });
+    const [row] = ctx.storage.listListItems(ctx.documentId);
+    const messageId = await messageIdForToolCall(ctx, 'add_list_item');
+
+    expect(row?.conversationId).toBe(ctx.conversationId);
+    expect(row?.messageId).toBe(messageId);
+    expect(messageId).toBeTruthy();
+  });
+
+  it('overwrites the provenance link to the later turn on update_list_item, never accumulating it', async () => {
+    await callTool(ctx, 'add_list_item', { list, text: 'original' });
+    const [added] = ctx.storage.listListItems(ctx.documentId);
+    const addMessageId = await messageIdForToolCall(ctx, 'add_list_item');
+
+    await callTool(ctx, 'update_list_item', {
+      list,
+      id: added!.id,
+      expected_content_hash: computeContentHash('original'),
+      text: 'updated by a later turn',
+    });
+    const updateMessageId = await messageIdForToolCall(ctx, 'update_list_item');
+    const [updated] = ctx.storage.listListItems(ctx.documentId);
+
+    expect(updateMessageId).toBeTruthy();
+    expect(updateMessageId).not.toBe(addMessageId);
+    expect(updated?.conversationId).toBe(ctx.conversationId);
+    expect(updated?.messageId).toBe(updateMessageId);
   });
 
   it('makes zero list-item tool calls when the user never mentions the lists (FR-006, SC-006)', async () => {

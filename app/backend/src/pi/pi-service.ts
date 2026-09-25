@@ -17,6 +17,7 @@ import type { EditService } from '../edit/edit-service.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionLike } from './agent-session-port.ts';
 import type { ListItemService } from '../list-items/list-item-service.ts';
+import type { ToolCallMessageIdCache } from '../events/tool-call-message-id-cache.ts';
 import {
   createAddListItemTool,
   createListItemsTool,
@@ -126,17 +127,20 @@ export class PiService {
   private readonly automerge: AutomergeStoreHolder;
   private readonly primaryMutex: PrimaryMutex;
   private readonly listItemService: ListItemService;
+  private readonly toolCallMessageIds: ToolCallMessageIdCache;
 
   constructor(
     storage: StorageAdapter,
     automerge: AutomergeStoreHolder,
     primaryMutex: PrimaryMutex,
     listItemService: ListItemService,
+    toolCallMessageIds: ToolCallMessageIdCache,
   ) {
     this.storage = storage;
     this.automerge = automerge;
     this.primaryMutex = primaryMutex;
     this.listItemService = listItemService;
+    this.toolCallMessageIds = toolCallMessageIds;
   }
 
   setEditService(editService: EditService): void {
@@ -239,21 +243,25 @@ export class PiService {
         storage: this.storage,
         listItemService: this.listItemService,
         conversationId: conversation.id,
+        toolCallMessageIds: this.toolCallMessageIds,
       }),
       createAddListItemTool({
         storage: this.storage,
         listItemService: this.listItemService,
         conversationId: conversation.id,
+        toolCallMessageIds: this.toolCallMessageIds,
       }),
       createUpdateListItemTool({
         storage: this.storage,
         listItemService: this.listItemService,
         conversationId: conversation.id,
+        toolCallMessageIds: this.toolCallMessageIds,
       }),
       createRemoveListItemTool({
         storage: this.storage,
         listItemService: this.listItemService,
         conversationId: conversation.id,
+        toolCallMessageIds: this.toolCallMessageIds,
       }),
     ];
 

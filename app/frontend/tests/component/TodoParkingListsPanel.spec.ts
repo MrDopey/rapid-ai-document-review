@@ -125,4 +125,56 @@ describe('TodoParkingListsPanel', () => {
     expect(wrapper.find('.parking-lot-section .list-section-body').exists()).toBe(true);
     expect(wrapper.find('.todo-list-section').classes()).toContain('list-section--expanded');
   });
+
+  // 012-todo-parking-lists follow-up: provenance-link visual indicator + click-to-focus emit.
+  describe('provenance link (messageId)', () => {
+    async function mountWithLinks() {
+      vi.mocked(httpClient.listListItems).mockResolvedValue({
+        todo: [
+          {
+            id: 'li_1',
+            text: 'fix the intro paragraph',
+            contentHash: 'h1',
+            conversationId: 'conv_1',
+            messageId: 'msg_1',
+          },
+        ],
+        parkingLot: [
+          {
+            id: 'li_2',
+            text: 'parked idea',
+            contentHash: 'h2',
+            conversationId: null,
+            messageId: null,
+          },
+        ],
+      });
+      return mountPanel();
+    }
+
+    it('renders a linked item with the linked class and emits focus-link on click', async () => {
+      const wrapper = await mountWithLinks();
+      const linkedText = wrapper.find('.todo-list-section .list-item-text');
+      expect(linkedText.classes()).toContain('list-item-text--linked');
+
+      await linkedText.trigger('click');
+      expect(wrapper.emitted('focus-link')).toEqual([['conv_1', 'msg_1']]);
+    });
+
+    it('emits focus-link on Enter for a linked item', async () => {
+      const wrapper = await mountWithLinks();
+      const linkedText = wrapper.find('.todo-list-section .list-item-text');
+      await linkedText.trigger('keydown.enter');
+      expect(wrapper.emitted('focus-link')).toEqual([['conv_1', 'msg_1']]);
+    });
+
+    it('renders an unlinked item with neither the linked class nor a click effect', async () => {
+      const wrapper = await mountWithLinks();
+      const unlinkedText = wrapper.find('.parking-lot-section .list-item-text');
+      expect(unlinkedText.classes()).not.toContain('list-item-text--linked');
+
+      await unlinkedText.trigger('click');
+      expect(wrapper.emitted('focus-link')).toBeUndefined();
+    });
+  });
 });

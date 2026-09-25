@@ -4,6 +4,8 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import type { ConversationDto } from '@rapid-ai-document-review/shared/contracts/http';
 import ThreadModeView from '../../src/components/thread/ThreadModeView.vue';
 import { useThreadStore } from '../../src/stores/thread.js';
+import { useListItemsStore } from '../../src/stores/listItems.js';
+import TodoParkingListsPanel from '../../src/components/TodoParkingListsPanel.vue';
 import type { ConversationMessageState } from '../../src/stores/conversations.js';
 import { httpClient, ApiError } from '../../src/transport/http-client.js';
 
@@ -437,6 +439,100 @@ describe('ThreadModeView — shared HudPanel + threadFocusState wiring', () => {
         'thread-card--active',
       );
       expect(document.activeElement?.id).toBe('thread-composer-done-1');
+    });
+  });
+
+  // 012-todo-parking-lists follow-up: a linked Todo/Parking Lot item's `focus-link` emit
+  // (`TodoParkingListsPanel.vue`, rendered unstubbed here via the rail) drives this view's own
+  // `focusListItemLink` — active thread jumps via the existing cursor mechanism and scrolls to the
+  // specific message; a done thread opens the read-only Done panel instead, without reopening it.
+  describe('Todo/Parking Lot list-item link click-to-focus', () => {
+    it('scrolls to the linked message inside the correct thread-card for an active thread', async () => {
+      seedTree();
+      const wrapper = mountView();
+      useListItemsStore().todo = [
+        {
+          id: 'li_1',
+          text: 'linked item',
+          contentHash: 'h1',
+          conversationId: 'branch-1',
+          messageId: 'b0',
+        },
+      ];
+      await wrapper.vm.$nextTick();
+
+      const rail = wrapper.findComponent(TodoParkingListsPanel);
+      rail.vm.$emit('focus-link', 'branch-1', 'b0');
+      await flushPromises();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.thread-card[data-thread-id="branch-1"]').classes()).toContain(
+        'thread-card--active',
+      );
+      const target = wrapper.find('.thread-card[data-thread-id="branch-1"] [data-message-id="b0"]');
+      expect(target.exists()).toBe(true);
+      expect((target.element as HTMLElement).style.scrollMarginTop).toBe('0px');
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    });
+
+    it('opens the read-only Done panel and scrolls to the message, without reopening a done thread', async () => {
+      const store = useThreadStore();
+      const reopenSpy = vi.spyOn(store, 'reopen');
+      seedTree();
+      store.threads.push(
+        threadFixture({
+          id: 'done-1',
+          name: 'Done Thread',
+          parentId: 'root-1',
+          kind: 'thread-branch',
+          forkedFromMessageId: 'r0',
+          doneAt: '2026-01-02T00:00:00.000Z',
+          createdAt: '2026-01-01T00:02:00.000Z',
+        }),
+      );
+      store.messagesByThread['done-1'] = [makeMessage('d0')];
+      // `focusListItemLink`'s done-thread branch always awaits a real `store.loadDetail` call
+      // (011-linear-thread-mode's own lazy-load idempotency, mirrored here rather than mocking it
+      // away) — give it something to resolve to.
+      vi.mocked(httpClient.getThreadMessages).mockResolvedValue({
+        conversation: store.threads.find((t) => t.id === 'done-1')!,
+        messages: [
+          {
+            id: 'd0',
+            role: 'assistant',
+            text: 'done reply',
+            createdAt: '2026-01-01T00:02:00.000Z',
+          },
+        ],
+      });
+      const wrapper = mountView();
+      useListItemsStore().parkingLot = [
+        {
+          id: 'li_2',
+          text: 'linked to a done thread',
+          contentHash: 'h2',
+          conversationId: 'done-1',
+          messageId: 'd0',
+        },
+      ];
+      await wrapper.vm.$nextTick();
+
+      const rail = wrapper.findComponent(TodoParkingListsPanel);
+      rail.vm.$emit('focus-link', 'done-1', 'd0');
+      await flushPromises();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.done-threads-overlay').exists()).toBe(true);
+      expect(reopenSpy).not.toHaveBeenCalled();
+      const target = wrapper.find(
+        '.done-thread-column[data-thread-id="done-1"] [data-message-id="d0"]',
+      );
+      expect(target.exists()).toBe(true);
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
     });
   });
 });

@@ -4,6 +4,7 @@ import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
+import type { ToolCallMessageIdCache } from '../events/tool-call-message-id-cache.ts';
 import type { ConversationStatus, StorageAdapter } from '../storage/storage-adapter.ts';
 import type { AgentSessionEventLike } from './agent-session-port.ts';
 import { clampWithNote } from './tools/common.ts';
@@ -132,6 +133,7 @@ export class EventBridge {
   private readonly eventService: EventService;
   private readonly eventHub: EventHub;
   private readonly runBuffer: RunBuffer;
+  private readonly toolCallMessageIds: ToolCallMessageIdCache;
   private readonly ctx: EventBridgeContext;
   private readonly onSettle?: () => void;
 
@@ -140,6 +142,7 @@ export class EventBridge {
     eventService: EventService,
     eventHub: EventHub,
     runBuffer: RunBuffer,
+    toolCallMessageIds: ToolCallMessageIdCache,
     ctx: EventBridgeContext,
     onSettle?: () => void,
   ) {
@@ -147,6 +150,7 @@ export class EventBridge {
     this.eventService = eventService;
     this.eventHub = eventHub;
     this.runBuffer = runBuffer;
+    this.toolCallMessageIds = toolCallMessageIds;
     this.ctx = ctx;
     this.onSettle = onSettle;
     // There is exactly one `RunBuffer` for the app's lifetime, so re-registering it on every turn
@@ -282,6 +286,7 @@ export class EventBridge {
       }
 
       case 'tool_execution_start':
+        this.toolCallMessageIds.set(event.toolCallId, this.currentMessageId ?? '');
         this.publish({
           type: 'tool_started',
           sequence: null,
@@ -309,6 +314,12 @@ export class EventBridge {
         break;
 
       case 'tool_execution_end': {
+        // Every `tool_execution_start` sets an entry (above); only `add_list_item`/
+        // `update_list_item`'s own `execute()` ever consumes it via `.take()`. This `.take()`
+        // guarantees every other tool call's entry is still evicted here once it settles, so the
+        // cache never accumulates an unbounded number of stale entries — a harmless no-op for the
+        // two tools that already consumed theirs.
+        this.toolCallMessageIds.take(event.toolCallId);
         const resultText = extractResultText(event.result);
         this.publish({
           type: 'tool_completed',

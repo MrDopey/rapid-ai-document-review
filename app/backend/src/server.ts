@@ -22,6 +22,7 @@ import { PiService } from './pi/pi-service.ts';
 import { PrimaryMutex } from './pi/primary-mutex.ts';
 import { TurnRunner } from './pi/turn-runner.ts';
 import { RunBuffer } from './events/run-buffer.ts';
+import { ToolCallMessageIdCache } from './events/tool-call-message-id-cache.ts';
 import { ConflictService } from './edit/conflict-service.ts';
 import { EditService } from './edit/edit-service.ts';
 import { ListItemService } from './list-items/list-item-service.ts';
@@ -112,7 +113,14 @@ export function buildApp() {
   const listItemService = new ListItemService(storage, eventService, eventHub);
 
   const runBuffer = new RunBuffer();
-  const piService = new PiService(storage, automergeHolder, primaryMutex, listItemService);
+  const toolCallMessageIds = new ToolCallMessageIdCache();
+  const piService = new PiService(
+    storage,
+    automergeHolder,
+    primaryMutex,
+    listItemService,
+    toolCallMessageIds,
+  );
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
   // Shared turn-starting wiring (EventBridge + ConcurrencyLimiter admission), depended on by both
   // EditService (requestReplacement) and ConversationService (send) instead of each independently
@@ -125,6 +133,7 @@ export function buildApp() {
     runBuffer,
     piService,
     concurrencyLimiter,
+    toolCallMessageIds,
   );
 
   // ConflictService never depends on PiService/ConversationService — a conflict discovered

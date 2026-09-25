@@ -2,6 +2,7 @@ import { newId } from '../ids.ts';
 import type { EventHub } from '../events/event-hub.ts';
 import type { EventService } from '../events/event-service.ts';
 import type { RunBuffer } from '../events/run-buffer.ts';
+import type { ToolCallMessageIdCache } from '../events/tool-call-message-id-cache.ts';
 import type { AcquireResult, ConcurrencyLimiter } from '../conversation/concurrency-limiter.ts';
 import type { ConversationRow, StorageAdapter } from '../storage/storage-adapter.ts';
 import { EventBridge } from './event-bridge.ts';
@@ -22,6 +23,7 @@ export class TurnRunner {
   private readonly runBuffer: RunBuffer;
   private readonly piService: PiService;
   private readonly concurrencyLimiter: ConcurrencyLimiter;
+  private readonly toolCallMessageIds: ToolCallMessageIdCache;
 
   constructor(
     storage: StorageAdapter,
@@ -30,6 +32,7 @@ export class TurnRunner {
     runBuffer: RunBuffer,
     piService: PiService,
     concurrencyLimiter: ConcurrencyLimiter,
+    toolCallMessageIds: ToolCallMessageIdCache,
   ) {
     this.storage = storage;
     this.eventService = eventService;
@@ -37,6 +40,7 @@ export class TurnRunner {
     this.runBuffer = runBuffer;
     this.piService = piService;
     this.concurrencyLimiter = concurrencyLimiter;
+    this.toolCallMessageIds = toolCallMessageIds;
   }
 
   /**
@@ -54,6 +58,7 @@ export class TurnRunner {
       this.eventService,
       this.eventHub,
       this.runBuffer,
+      this.toolCallMessageIds,
       { documentId: conversation.documentId, conversationId: conversation.id, turnId },
       () => this.concurrencyLimiter.release(conversation.documentId, conversation.id),
     );

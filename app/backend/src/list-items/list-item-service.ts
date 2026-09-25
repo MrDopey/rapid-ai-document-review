@@ -11,6 +11,8 @@ export interface ListItemDto {
   id: string;
   text: string;
   contentHash: string;
+  conversationId: string | null;
+  messageId: string | null;
 }
 
 export class ListItemNotFoundError extends Error {}
@@ -42,7 +44,13 @@ export interface UpdateOrRemoveOptions {
 }
 
 function toDto(row: ListItemRow): ListItemDto {
-  return { id: row.id, text: row.text, contentHash: computeContentHash(row.text) };
+  return {
+    id: row.id,
+    text: row.text,
+    contentHash: computeContentHash(row.text),
+    conversationId: row.conversationId,
+    messageId: row.messageId,
+  };
 }
 
 /**
@@ -73,6 +81,7 @@ export class ListItemService {
     list: ListName,
     text: string,
     conversationId: string | null,
+    messageId: string | null,
   ): ListItemRow {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -86,6 +95,8 @@ export class ListItemService {
       text: trimmed,
       createdAt: now,
       updatedAt: now,
+      conversationId,
+      messageId,
     });
     this.publisher.publish(documentId, conversationId, 'list_item_added', {
       list,
@@ -99,7 +110,7 @@ export class ListItemService {
     id: string,
     text: string,
     conversationId: string | null,
-    options: UpdateOrRemoveOptions = {},
+    options: UpdateOrRemoveOptions & { messageId?: string | null } = {},
   ): ListItemRow {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -108,7 +119,14 @@ export class ListItemService {
     const row = this.findScoped(documentId, id, options.list);
     this.checkContentHash(row, options.expectedContentHash);
 
-    const updated = this.storage.updateListItemText(id, trimmed, new Date().toISOString());
+    // `messageId` omitted (the HTTP path's case) leaves the item's existing link untouched — only
+    // the agent path ever supplies an explicit pair, so a human fixing a typo never severs
+    // provenance.
+    const updated = this.storage.updateListItem(id, {
+      text: trimmed,
+      updatedAt: new Date().toISOString(),
+      ...('messageId' in options ? { conversationId, messageId: options.messageId } : {}),
+    });
     this.publisher.publish(documentId, conversationId, 'list_item_updated', {
       list: updated.list,
       item: toDto(updated),

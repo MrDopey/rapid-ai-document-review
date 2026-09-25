@@ -5,6 +5,7 @@ import { EventHub, type DocumentSnapshot } from '../../src/events/event-hub.js';
 import { AutomergeStoreHolder } from '../../src/document/automerge-store-holder.js';
 import { RevisionService } from '../../src/document/revision-service.js';
 import { RunBuffer } from '../../src/events/run-buffer.js';
+import { ToolCallMessageIdCache } from '../../src/events/tool-call-message-id-cache.js';
 import { TurnRunner } from '../../src/pi/turn-runner.js';
 import { PrimaryMutex } from '../../src/pi/primary-mutex.js';
 import { PiService } from '../../src/pi/pi-service.js';
@@ -47,7 +48,8 @@ function buildHarness() {
     primaryMutex,
   );
   const runBuffer = new RunBuffer();
-  const piService = new PiService(storage, automerge, primaryMutex);
+  const toolCallMessageIds = new ToolCallMessageIdCache();
+  const piService = new PiService(storage, automerge, primaryMutex, undefined, toolCallMessageIds);
   const concurrencyLimiter = new ConcurrencyLimiter(storage, eventService, eventHub);
   const turnRunner = new TurnRunner(
     storage,
@@ -56,6 +58,7 @@ function buildHarness() {
     runBuffer,
     piService,
     concurrencyLimiter,
+    toolCallMessageIds,
   );
   const conflictService = new ConflictService(storage, eventService, eventHub, automerge);
   const editService = new EditService(

@@ -14,6 +14,7 @@ import {
   type ListItemService,
 } from '../../list-items/list-item-service.ts';
 import type { StorageAdapter } from '../../storage/storage-adapter.ts';
+import type { ToolCallMessageIdCache } from '../../events/tool-call-message-id-cache.ts';
 import { textResult } from './common.ts';
 
 /** `defineTool`'s TypeBox mirrors of the Zod schemas in `agent-tools.ts` (see `ReadDocumentToolParams`
@@ -58,6 +59,7 @@ export interface ListItemToolDeps {
   storage: StorageAdapter;
   listItemService: ListItemService;
   conversationId: string;
+  toolCallMessageIds: ToolCallMessageIdCache;
 }
 
 /** Resolves the document this tool call's conversation belongs to, or `null` if either has
@@ -118,7 +120,7 @@ export function createAddListItemTool(deps: ListItemToolDeps) {
       'you to add something to one of these lists. Never use this as your own task list or memory.',
     promptSnippet: 'add_list_item(list, text) — add an item, only when the user explicitly asks',
     parameters: AddListItemToolParams,
-    execute: async (_toolCallId, rawParams) => {
+    execute: async (toolCallId, rawParams) => {
       const params = addListItemParams.parse(rawParams);
       const documentId = resolveDocumentId(deps);
       if (!documentId) {
@@ -131,6 +133,7 @@ export function createAddListItemTool(deps: ListItemToolDeps) {
           params.list,
           params.text,
           deps.conversationId,
+          deps.toolCallMessageIds.take(toolCallId),
         );
         return textResult(
           `Added to the ${params.list === 'todo' ? 'Todo' : 'Parking Lot'} list: "${row.text}"`,
@@ -172,7 +175,7 @@ export function createUpdateListItemTool(deps: ListItemToolDeps) {
     promptSnippet:
       'update_list_item(list, id, expected_content_hash, text) — update an item, only when asked',
     parameters: UpdateListItemToolParams,
-    execute: async (_toolCallId, rawParams) => {
+    execute: async (toolCallId, rawParams) => {
       const params = updateListItemParams.parse(rawParams);
       const documentId = resolveDocumentId(deps);
       if (!documentId) {
@@ -185,7 +188,11 @@ export function createUpdateListItemTool(deps: ListItemToolDeps) {
           params.id,
           params.text,
           deps.conversationId,
-          { list: params.list, expectedContentHash: params.expected_content_hash },
+          {
+            list: params.list,
+            expectedContentHash: params.expected_content_hash,
+            messageId: deps.toolCallMessageIds.take(toolCallId),
+          },
         );
         return textResult(`Updated. New text: "${row.text}"`, {
           id: row.id,
