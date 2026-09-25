@@ -47,6 +47,26 @@ export default defineConfig({
       dependencies: ['stories'],
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'thread-branch-layout',
+      // Backfill (013-playwright-visual-regression-backfill): self-contained, same
+      // ordering-only 'stories' dependency as 'history-diff'/'thread-mode-hud' above.
+      testMatch: /thread-branch-layout\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'thread-hotkeys',
+      testMatch: /thread-hotkeys\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'overlay-dialogs',
+      testMatch: /overlay-dialogs\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: [
     {

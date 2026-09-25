@@ -52,3 +52,117 @@ export async function focusExclusively(
     timeout: 10_000,
   });
 }
+
+/**
+ * Playwright backfill (013): creates a fresh Thread-mode document via the document switcher,
+ * mirroring `thread-mode-hud.spec.ts`'s own inline setup steps. Navigates to `/` first, so this
+ * assumes no unsaved state the caller needs to preserve.
+ */
+export async function createThreadDocument(page: Page): Promise<void> {
+  await page.goto('/');
+  const pasteHeading = page.getByRole('heading', { name: 'Paste your document' });
+  if (await pasteHeading.isVisible().catch(() => false)) {
+    await page.getByLabel('Document content').fill('# Thread fixture\n\nHello world.');
+    await page.getByRole('button', { name: 'Start reviewing' }).click();
+    await expect(page.locator('.preview-pane')).toBeVisible();
+  }
+  await page.locator('.document-switcher-toggle').click();
+  await page.locator('.document-switcher-create', { hasText: 'New threaded conversation' }).click();
+  await expect(page.locator('.thread-mode-hud')).toBeVisible();
+}
+
+/**
+ * Playwright backfill (013): fills and sends a message via whichever `ThreadComposer.vue` textarea
+ * is currently open at a thread/branch's tip (`textarea[id^="thread-composer-"]` — the same
+ * selector `thread-mode-hud.spec.ts` uses), then waits for it to render as a sent message.
+ */
+export async function sendThreadMessage(page: Page, text: string): Promise<void> {
+  const textarea = page.locator('textarea[id^="thread-composer-"]').first();
+  const sendButton = page.locator('.thread-send-button').first();
+  // A just-created Thread document's composer can still be finishing its own initial mount for a
+  // moment after `.thread-mode-hud` itself becomes visible (the HUD and the root thread's own
+  // `ThreadCard`/composer load on separate async paths) — retry the fill if the send button
+  // hasn't picked up the typed text yet (`:disabled="!draft.trim() || ..."`, ThreadComposer.vue),
+  // rather than assuming one `fill()` always lands in the final, stable textarea instance.
+  await expect(async () => {
+    await textarea.fill(text);
+    await expect(sendButton).toBeEnabled({ timeout: 1_000 });
+    await sendButton.click({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await expect(page.locator('.thread-segment-message', { hasText: text })).toBeVisible();
+  // FakeAgentSession's reply is near-instant but not synchronous — give it a moment to land
+  // before a caller selects text for branching (see `branchFromFirstMessage`'s own doc comment on
+  // why the tip message matters), matching `thread-mode-hud.spec.ts`'s own convention.
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Playwright backfill (013): selects the full text of the FIRST rendered thread message and
+ * clicks "Branch from here" (`HighlightBranchMenu.vue`), mirroring `thread-mode-hud.spec.ts`'s own
+ * selection+branch steps. Deliberately `.first()`, not `.last()`: `ThreadCard.vue`'s
+ * `canBranchFromSelection` refuses to offer "Branch from here" (only "Quote" instead) for a
+ * selection on the thread's own TIP message — by the time this runs, `FakeAgentSession`'s
+ * near-instant reply has usually already landed, making the assistant reply (not the message this
+ * helper means to branch from) the new tip. Waits for the branch to actually mount (a second
+ * `.conversation-row` in the HUD) before returning, since the click itself resolves before the new
+ * thread finishes loading.
+ */
+export async function branchFromFirstMessage(page: Page): Promise<void> {
+  const firstMessage = page.locator('.thread-segment-message').first();
+  await firstMessage.evaluate((el) => {
+    const textEl = el.querySelector('.message-text') ?? el;
+    const range = document.createRange();
+    range.selectNodeContents(textEl);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  });
+  await firstMessage.dispatchEvent('mouseup');
+  await page.locator('.highlight-branch-button', { hasText: 'Branch from here' }).click();
+}
+
+/**
+ * Playwright backfill (013): generalizes the ad hoc `document.elementFromPoint` stacking check
+ * already used inline in `history-diff.spec.ts` — asserts that the real topmost painted element at
+ * `point` (default: the center of `target`'s own bounding box) is `target` itself or nested inside
+ * it. `toBeVisible()`/`toBeInViewport()` alone don't catch a z-index/stacking regression: both pass
+ * even when a *different*, unrelated element is actually painted on top at that pixel.
+ */
+export async function assertElementOnTop(
+  page: Page,
+  target: Locator,
+  point?: { x: number; y: number },
+): Promise<void> {
+  const box = point ?? (await target.boundingBox());
+  if (!box) throw new Error('assertElementOnTop: target has no bounding box');
+  const { x, y } = 'width' in box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : box;
+  const topElementHandle = await page.evaluateHandle(
+    ({ x, y }) => document.elementFromPoint(x, y),
+    { x, y },
+  );
+  const targetHandle = await target.elementHandle();
+  const isOnTop = await page.evaluate(
+    ([topEl, targetEl]) => !!topEl && !!targetEl && targetEl.contains(topEl),
+    [topElementHandle, targetHandle],
+  );
+  expect(
+    isOnTop,
+    `expected ${await target.evaluate((el) => el.className)} to be on top at (${x}, ${y})`,
+  ).toBe(true);
+}
+
+/**
+ * Playwright backfill (013): clicks whichever `App.vue` toolbar icon button opens a given
+ * page-level dialog (Keyboard shortcuts / Help / System prompt — all share the same
+ * `.modal-overlay.blocking-overlay` wrapper, `--z-overlay-blocking` tier, style.css), then waits
+ * for that overlay to actually mount.
+ */
+export async function openAppDialog(
+  page: Page,
+  ariaLabel: 'Keyboard shortcuts' | 'Help' | 'System prompt',
+): Promise<Locator> {
+  await page.getByRole('button', { name: ariaLabel }).click();
+  const overlay = page.locator('.modal-overlay.blocking-overlay');
+  await expect(overlay).toBeVisible();
+  return overlay;
+}
