@@ -67,6 +67,17 @@ export default defineConfig({
       dependencies: ['stories'],
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'hud-bar-height',
+      // Self-contained spec (creates its own canvas + thread documents) — same
+      // ordering-only 'stories' dependency as 'history-diff'/'thread-mode-hud' above. Real-browser
+      // regression coverage for the HUD bar's (`.toolbar`/`.thread-mode-hud`) own rendered height
+      // staying within a small buffer of its current height — jsdom performs no real box-layout
+      // math, so only a real rendered viewport can catch it growing taller again.
+      testMatch: /hud-bar-height\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: [
     {

@@ -1218,10 +1218,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
           </div>
         </div>
         <div class="hud-bar-right">
-          <!-- Global Actions: two side-by-side columns — checkboxes on the left, buttons on the
-               right — now `.hud-bar-right`'s only content, since Primary's own visible chrome moved
-               into `ConversationThreadBox.vue`/`ConversationView.vue`'s own per-conversation action
-               rows (see `composables/primaryAction.ts`). -->
+          <!-- Global Actions: three side-by-side columns — checkboxes, pane-visibility buttons,
+               list-visibility buttons — now `.hud-bar-right`'s only content, since Primary's own
+               visible chrome moved into `ConversationThreadBox.vue`/`ConversationView.vue`'s own
+               per-conversation action rows (see `composables/primaryAction.ts`). Split from two
+               columns to three because a single 5-button column overflowed `.hud-bar-right`'s
+               vertical space. -->
           <div class="actions-group">
             <div class="actions-col actions-col-checkboxes">
               <label class="reasoning-toggle">
@@ -1280,10 +1282,12 @@ async function onToggleReasoning(event: Event): Promise<void> {
               >
                 {{ editorVisible ? 'Hide editor' : 'Show editor' }}
               </button>
-              <!-- 012-todo-parking-lists: the rail itself always shows once a conversation is
-                   focused (see `.conversation-detail-overlay` below) — these two HUD buttons only
-                   toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
-                   comment on `isVisible`. -->
+            </div>
+            <!-- 012-todo-parking-lists: the rail itself always shows once a conversation is
+                 focused (see `.conversation-detail-overlay` below) — these two HUD buttons only
+                 toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
+                 comment on `isVisible`. -->
+            <div class="actions-col actions-col-buttons">
               <button
                 type="button"
                 :aria-pressed="listItemsStore.todoVisible"

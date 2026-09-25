@@ -313,6 +313,9 @@ async function onExportDocument(): Promise<void> {
           </div>
         </div>
         <div class="hud-bar-right">
+          <!-- Two side-by-side columns — thread actions, list-visibility buttons — split from one
+               column because a single 5-button column overflowed `.hud-bar-right`'s vertical
+               space. -->
           <div class="actions-group">
             <div class="actions-col actions-col-buttons">
               <button
@@ -334,9 +337,11 @@ async function onExportDocument(): Promise<void> {
               <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
                 Done ({{ doneCount }})
               </button>
-              <!-- 012-todo-parking-lists: the rail always shows — these two HUD buttons only
-                   toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
-                   comment on `isVisible`. -->
+            </div>
+            <!-- 012-todo-parking-lists: the rail always shows — these two HUD buttons only
+                 toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
+                 comment on `isVisible`. -->
+            <div class="actions-col actions-col-buttons">
               <button
                 type="button"
                 :aria-pressed="listItemsStore.todoVisible"
