@@ -111,6 +111,7 @@ vi.mock('../../src/transport/http-client.js', () => ({
     branchConversation: vi.fn(),
     renameConversation: vi.fn(),
     designatePrimary: vi.fn(),
+    listListItems: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status = 0;
@@ -527,6 +528,9 @@ describe('z-index scale — App.vue overlays', () => {
       .mockResolvedValue(listConversationsResponse);
     vi.mocked(httpClient.getSettings).mockReset().mockResolvedValue(settingsFixture);
     vi.mocked(httpClient.patchSettings).mockReset().mockResolvedValue(settingsFixture);
+    // 012-todo-parking-lists: fetched unconditionally on every document load/switch
+    // (App.vue's loadActiveDocumentThreadOrConversations).
+    vi.mocked(httpClient.listListItems).mockReset().mockResolvedValue({ todo: [], parkingLot: [] });
   });
 
   afterEach(() => {

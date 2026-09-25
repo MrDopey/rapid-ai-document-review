@@ -68,6 +68,10 @@ const settingsFixture: UserSettingsDto = {
   softWordCountThreshold: 20_000,
 };
 
+// 012-todo-parking-lists: `loadActiveDocumentThreadOrConversations` (App.vue) unconditionally
+// fetches list items alongside conversations/threads on every document load/switch.
+const listItemsResponse = { todo: [], parkingLot: [] };
+
 vi.mock('../../src/transport/http-client.js', () => ({
   httpClient: {
     getDocument: vi.fn(async () => getDocumentResponse),
@@ -75,6 +79,7 @@ vi.mock('../../src/transport/http-client.js', () => ({
     listConversations: vi.fn(async () => listConversationsResponse),
     getSettings: vi.fn(async () => settingsFixture),
     patchSettings: vi.fn(async () => settingsFixture),
+    listListItems: vi.fn(async () => listItemsResponse),
     // Used only by the "auto-focus on branch" suite below — the other suites in this file never
     // branch, so this stays unset (undefined resolution) for them.
     branchConversation: vi.fn(),
