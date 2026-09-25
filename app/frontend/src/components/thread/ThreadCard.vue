@@ -573,14 +573,41 @@ const CARD_WIDTH_PX = 420;
          grows to fit however many sibling columns this fork has; columns never wrap, and if the row
          ends up wider than the viewport, `ThreadModeView.vue`'s own `.thread-mode-list` page-level
          `overflow-x: auto` picks up the scroll instead. -->
-    <div v-if="currentRunChildren.length > 0" class="thread-branch-row" :style="branchRowStyle">
-      <div
-        v-for="childId in currentRunChildren"
-        :key="childId"
-        :class="isFan ? 'thread-branch-column' : 'thread-branch-fork'"
-      >
-        <ThreadCard :thread-id="childId" :depth="depth + 1" :active-thread-id="activeThreadId" />
+    <!-- `.thread-branch-group` is just a `position: relative` positioning root for the connector
+         below when BOTH a branch row and a continuation exist off this same run (a run that forks
+         at a non-tip segment always has a continuation — see `runs`' own doc comment above: a run
+         only ends early, without also being the tip, when it hits a fork). Its own box has no
+         explicit width, so it shrink-wraps to the branch row's real rendered footprint exactly the
+         way `.thread-branch-row` did on its own before — this wrapper changes positioning context
+         only, not layout/sizing. -->
+    <div v-if="currentRunChildren.length > 0" class="thread-branch-group">
+      <div class="thread-branch-row" :style="branchRowStyle">
+        <div
+          v-for="childId in currentRunChildren"
+          :key="childId"
+          :class="isFan ? 'thread-branch-column' : 'thread-branch-fork'"
+        >
+          <ThreadCard :thread-id="childId" :depth="depth + 1" :active-thread-id="activeThreadId" />
+        </div>
       </div>
+      <!-- Bug fix: when this run BOTH forks (branch row above) AND continues, the connector must
+           visually join THIS run's own card to THIS run's own continuation — the full distance,
+           past the branch row's height, not just the near flex-gap edge adjacent to the branch row
+           (bug report: the line "only joins the gap created by the forked conversation from the
+           parent" instead of running from the run card all the way down). `position: absolute`
+           (via `.thread-fork-connector--spanning`, CSS below) takes it out of flex flow entirely
+           and stretches it to exactly cover `.thread-branch-group`'s own box — i.e. running the
+           full height of the branch row, whatever that happens to be, with zero JS measurement —
+           and its existing `::before`/`::after` pseudo-elements (unchanged, shared with the
+           non-spanning connector below) then extend that same 0.4rem past the group's own top/
+           bottom edges into the flex gaps on both sides, reaching this run's own card border above
+           and the continuation's card border below exactly as they already do in the no-branch-row
+           case. -->
+      <div
+        v-if="hasContinuation"
+        class="thread-fork-connector thread-fork-connector--spanning"
+        aria-hidden="true"
+      ></div>
     </div>
 
     <!-- This run's own continuation: this SAME thread, self-mounted one run deeper at the SAME
@@ -591,7 +618,14 @@ const CARD_WIDTH_PX = 420;
          forking again) each measure their own `margin-left` from the same fixed per-depth
          constant, with nothing carried over from what the earlier fork's subtree needed. -->
     <template v-if="hasContinuation">
-      <div class="thread-fork-connector" aria-hidden="true"></div>
+      <!-- No branch row above this run: the simple, original in-flow connector (contributes its
+           own 1.25rem of reserved flex height, unlike the spanning variant above which is
+           absolutely positioned and reserves none of its own). -->
+      <div
+        v-if="currentRunChildren.length === 0"
+        class="thread-fork-connector"
+        aria-hidden="true"
+      ></div>
       <ThreadCard
         :thread-id="threadId"
         :run-start-index="runStartIndex + 1"
@@ -778,11 +812,19 @@ const CARD_WIDTH_PX = 420;
   border-top: none;
   padding-top: 0;
 }
-/* The continuation's own straight-down connector — a normal block-level element (NOT positioned
-   relative to anything shared with the branch row above; see this file's own top doc comment for
-   why continuation and branches are sequential blocks, not flex-row siblings), sitting directly
-   between the branch row (or run-card, if this run didn't fork) and the continuation's own nested
-   `.thread-node` immediately below. Plain vertical line + downward arrowhead. */
+/* The continuation's own straight-down connector. Two variants share this base rule plus the
+   `::before`/`::after` pseudo-elements below:
+    - No branch row on this run: a normal in-flow block-level element (NOT positioned relative to
+      anything shared with a branch row; see this file's own top doc comment for why continuation
+      and branches are sequential blocks, not flex-row siblings), sitting directly between the
+      run-card and the continuation's own nested `.thread-node` immediately below.
+    - A branch row DOES exist on this run (`.thread-fork-connector--spanning`, rendered inside
+      `.thread-branch-group` alongside that row rather than as this run's own flex-column
+      sibling): absolutely positioned to stretch across the branch row's own full (dynamic)
+      height instead of the fixed `1.25rem` box below, so the line reaches past the row rather
+      than stopping at its near edge. See `.thread-fork-connector--spanning`'s own rule further
+      down for the override.
+   Either way: plain vertical line + downward arrowhead. */
 .thread-fork-connector {
   position: relative;
   height: 1.25rem;
@@ -791,8 +833,15 @@ const CARD_WIDTH_PX = 420;
 .thread-fork-connector::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
+  /* `.thread-node`'s own `gap: 0.4rem` (flex column, CSS above) inserts that same 0.4rem of blank
+     space both above this element (between it and the run-card/branch-row before it) and below it
+     (between it and the continuation's own `.thread-node` after it) — space this pseudo-element's
+     box doesn't otherwise cover, which is exactly what read as "disjointed" (the line stopping
+     short of both boxes with a visible break on each end). Extending top/bottom past this box's own
+     edges by that same 0.4rem makes the line span the full gap on both sides, flush against the
+     card border above and the continuation's card border below, instead of floating between them. */
+  top: -0.4rem;
+  bottom: -0.4rem;
   left: 1.5rem;
   width: 0;
   border-left: 2px solid var(--neutral-muted-color, #4b5563);
@@ -800,13 +849,38 @@ const CARD_WIDTH_PX = 420;
 .thread-fork-connector::after {
   content: '';
   position: absolute;
-  bottom: -1px;
+  /* Same 0.4rem extension as `::before` above, so the arrowhead's tip lands flush against (1px
+     into) the continuation's card border instead of stopping short in the flex gap above it. */
+  bottom: calc(-0.4rem - 1px);
   left: calc(1.5rem - 5px);
   width: 0;
   height: 0;
   border: 5px solid transparent;
   border-top-color: var(--neutral-muted-color, #4b5563);
   border-bottom-width: 0;
+}
+/* Positioning root for the spanning connector variant below — a run that both forks and
+   continues needs the connector to reach past the branch row's own (dynamic, unmeasured) height,
+   not just the flex gap immediately beside itself. No explicit width/height: this wrapper's own
+   box shrink-wraps to `.thread-branch-row`'s real rendered footprint exactly as that row did
+   un-wrapped before (see template's own doc comment) — this only changes the positioning context
+   for `.thread-fork-connector--spanning`, not this run's layout/sizing. */
+.thread-branch-group {
+  position: relative;
+}
+/* Same visual line/arrowhead as the plain `.thread-fork-connector` above (shares its
+   `::before`/`::after` rules unchanged — those are keyed off `.thread-fork-connector`, not this
+   modifier, and both apply together via the template's dual class binding) but taken out of flex
+   flow and stretched to cover `.thread-branch-group`'s own full height instead of a fixed
+   1.25rem box, so the line runs the branch row's entire (dynamic) height rather than stopping at
+   the near edge. `height: auto` (overriding the base rule's fixed `1.25rem`) is load-bearing: an
+   absolutely positioned box with `top`/`bottom` both set only stretches to fill the gap between
+   them when `height` doesn't also pin it, per CSS's over-constrained-box resolution rules. */
+.thread-fork-connector--spanning {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  height: auto;
 }
 /* FR-005b: the branch row for one fork point — a SEPARATE block below the run-card (never a
    flex-row sibling of the continuation; see this file's own top doc comment), indented via its own
