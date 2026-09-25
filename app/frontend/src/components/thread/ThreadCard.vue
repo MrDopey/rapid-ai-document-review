@@ -742,7 +742,13 @@ const CARD_WIDTH_PX = 420;
      it, `.thread-node`'s `align-items: flex-start` would let this header shrink-wrap to just its own
      title/button content instead of reading as the run-card's own full-width lid. */
   margin: 0;
-  padding: 0.15rem 0.75rem;
+  /* Vertical padding matches canvas mode's `.thread-header` exactly (0.55rem top / 0.4rem
+     bottom) — not a smaller placeholder value, since the sticky header's own `-0.4rem` flush-seam
+     margin below (`.thread-card-header + .thread-card.thread-card--flush-header`) is tuned to
+     close exactly this much bottom padding; a smaller bottom padding here would let that negative
+     margin overshoot and pull the box below up into this header's own title/actions row, cutting
+     it off abruptly once the header engages `position: sticky`. */
+  padding: 0.55rem 0.75rem 0.4rem;
   border: 1px solid var(--border-color, #ccc);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
