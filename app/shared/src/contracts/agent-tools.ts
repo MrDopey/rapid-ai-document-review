@@ -54,7 +54,19 @@ export const webFetchParams = z.object({
 
 // ---- Todo & Parking Lot lists (012-todo-parking-lists) ----
 
-const listItemList = z.enum(['todo', 'parking_lot']).describe('Which list: Todo or Parking Lot.');
+// Bug fix: a validation failure against this enum (or its TypeBox mirror, pi/tools/list-items.ts's
+// `ListNameToolParam`) reports only a generic "must be equal to constant"/"must be one of the
+// allowed values" message with no clue what the accepted value(s) actually are — this description
+// is the one place that can proactively tell the agent the exact literal strings, before it ever
+// guesses a plausible-looking variant (`"parking-lot"`, `"Parking Lot"`) that then fails with no
+// useful correction.
+const listItemList = z
+  .enum(['todo', 'parking_lot'])
+  .describe(
+    "Which list. Must be exactly one of these two literal strings: 'todo' or 'parking_lot' " +
+      "(snake_case, lowercase, exactly as spelled here — not 'parking-lot', 'Parking Lot', or " +
+      'any other variant).',
+  );
 
 export const listItemsParams = z.object({});
 

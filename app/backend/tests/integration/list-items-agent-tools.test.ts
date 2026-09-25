@@ -161,6 +161,34 @@ describe.each([
     expect(ctx.storage.listListItems(ctx.documentId)).toHaveLength(0);
   });
 
+  // Bug fix: `contentHash` must appear in the tool's own rendered `text` (what the model actually
+  // reads back), never just in the `details` object alongside it — `details` is a
+  // logs/UI-rendering-only slot the model never sees (event-bridge.ts's own doc comment on
+  // `AgentToolResult.details`). Without this, the model has no way to learn the hash it must pass
+  // to a later update_list_item/remove_list_item call, despite every tool's own description
+  // promising add_list_item/update_list_item/list_items as valid hash sources.
+  it('returns contentHash in the tool result text itself, from add_list_item, list_items, and update_list_item', async () => {
+    await callTool(ctx, 'add_list_item', { list, text: 'fix the intro paragraph' });
+    const addResult = await lastToolCallResult(ctx, 'add_list_item');
+    const addHash = computeContentHash('fix the intro paragraph');
+    expect(addResult).toContain(addHash);
+    const id = ctx.storage.listListItems(ctx.documentId)[0]!.id;
+
+    await callTool(ctx, 'list_items', {});
+    const listResult = await lastToolCallResult(ctx, 'list_items');
+    expect(listResult).toContain(addHash);
+    expect(listResult).toContain(id);
+
+    await callTool(ctx, 'update_list_item', {
+      list,
+      id,
+      expected_content_hash: addHash,
+      text: 'fix the intro',
+    });
+    const updateResult = await lastToolCallResult(ctx, 'update_list_item');
+    expect(updateResult).toContain(computeContentHash('fix the intro'));
+  });
+
   it('returns a not-found error for an unknown id, leaving both lists unchanged (FR-007)', async () => {
     await callTool(ctx, 'add_list_item', { list, text: 'existing item' });
     const before = ctx.storage.listListItems(ctx.documentId);

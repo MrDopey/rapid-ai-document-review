@@ -19,8 +19,21 @@ import { textResult } from './common.ts';
 
 /** `defineTool`'s TypeBox mirrors of the Zod schemas in `agent-tools.ts` (see `ReadDocumentToolParams`
  *  for why both exist). */
+// Bug fix: the SDK's own tool-call param validation (`@earendil-works/pi-ai`'s
+// `validateToolArguments`) rejects a bad `list` value BEFORE this tool's own `execute` (and its
+// zod `addListItemParams.parse`, etc.) ever runs — its error message is a generic TypeBox one
+// ("must be equal to constant", "must match a schema in anyOf") that never names the actual
+// accepted literal(s), and this codebase has no way to customize that vendored error text
+// (Constitution Principle II: pi-service.ts is the only module allowed to touch the SDK at all).
+// The one lever available from here is this `description` — spelling out the exact accepted
+// strings up front is what stops the model from ever guessing a plausible-looking variant (e.g.
+// `"parking-lot"` hyphenated, or `"Parking Lot"` title-cased) that then fails with no useful clue
+// which spelling was actually expected.
 const ListNameToolParam = Type.Union([Type.Literal('todo'), Type.Literal('parking_lot')], {
-  description: 'Which list: Todo or Parking Lot.',
+  description:
+    "Which list. Must be exactly one of these two literal strings: 'todo' or 'parking_lot' " +
+    "(snake_case, lowercase, exactly as spelled here — not 'parking-lot', 'Parking Lot', or any " +
+    'other variant).',
 });
 
 const ListItemsToolParams = Type.Object({});
@@ -69,9 +82,19 @@ function resolveDocumentId(deps: ListItemToolDeps): string | null {
   return conversation?.documentId ?? null;
 }
 
-function renderListSection(title: string, items: { id: string; text: string }[]): string {
+/** The rendered `text` is what the model actually reads back as this tool call's result — the
+ *  structured `details` object passed alongside `textResult` (below) is for logs/UI only, never
+ *  surfaced to the model (see `event-bridge.ts`'s own doc comment on `details`) — so `contentHash`
+ *  must appear in this text itself, not just in `details`, for the tool's own documented promise
+ *  ("call list_items... to get the exact contentHash to pass") to actually hold. */
+function renderListSection(
+  title: string,
+  items: { id: string; text: string; contentHash: string }[],
+): string {
   if (items.length === 0) return `${title}: No items.`;
-  const lines = items.map((item) => `  ${item.id}: ${item.text}`);
+  const lines = items.map(
+    (item) => `  ${item.id} (contentHash: ${item.contentHash}): ${item.text}`,
+  );
   return [`${title}:`, ...lines].join('\n');
 }
 
@@ -135,9 +158,11 @@ export function createAddListItemTool(deps: ListItemToolDeps) {
           deps.conversationId,
           deps.toolCallMessageIds.take(toolCallId),
         );
+        const contentHash = computeContentHash(row.text);
         return textResult(
-          `Added to the ${params.list === 'todo' ? 'Todo' : 'Parking Lot'} list: "${row.text}"`,
-          { id: row.id, list: row.list, contentHash: computeContentHash(row.text) },
+          `Added to the ${params.list === 'todo' ? 'Todo' : 'Parking Lot'} list (id: ${row.id}, ` +
+            `contentHash: ${contentHash}): "${row.text}"`,
+          { id: row.id, list: row.list, contentHash },
         );
       } catch (err) {
         if (err instanceof EmptyListItemTextError) {
@@ -194,10 +219,14 @@ export function createUpdateListItemTool(deps: ListItemToolDeps) {
             messageId: deps.toolCallMessageIds.take(toolCallId),
           },
         );
-        return textResult(`Updated. New text: "${row.text}"`, {
+        const contentHash = computeContentHash(row.text);
+        // The item's NEW contentHash must appear in the text itself — the tool's own description
+        // promises a further update_list_item/remove_list_item call may use "a prior
+        // update_list_item" as its hash source, which only holds if this result actually says it.
+        return textResult(`Updated (new contentHash: ${contentHash}). New text: "${row.text}"`, {
           id: row.id,
           list: row.list,
-          contentHash: computeContentHash(row.text),
+          contentHash,
         });
       } catch (err) {
         if (err instanceof EmptyListItemTextError) {
