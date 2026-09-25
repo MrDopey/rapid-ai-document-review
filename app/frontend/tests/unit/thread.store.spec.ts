@@ -174,6 +174,17 @@ describe('thread store — handleServerFrame: agent-turn status/error events', (
       accepted: true,
       status: 'working',
     });
+    // handleServerFrame only processes frames while the active document is documentType: 'thread'
+    // (011-linear-thread-mode's canvas/Thread mode exclusivity guard) — a real page always has
+    // this set alongside activeDocumentId by the time any frame arrives.
+    useDocumentStore().document = {
+      id: 'doc-1',
+      title: 'Doc',
+      currentRevision: 1,
+      documentType: 'thread',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
   });
 
   function statusChangedFrame(status: 'idle' | 'working' | 'errored' | 'closed'): ServerFrame {

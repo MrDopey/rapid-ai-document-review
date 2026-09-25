@@ -348,6 +348,19 @@ export const useConversationsStore = defineStore('conversations', {
     },
 
     handleServerFrame(frame: ServerFrame): void {
+      // 011-linear-thread-mode: canvas's `conversationsStore` and Thread mode's `threadStore` are
+      // loaded exclusively, never both (App.vue's `loadActiveDocumentThreadOrConversations`) — but
+      // every store's `subscribeToFrames` stays registered on the one shared WS connection
+      // regardless of which mode is active, so without this guard a Thread document's own events
+      // (e.g. its root conversation's seed message) would still reach this store and populate
+      // `messagesByConversation` with a Thread conversation's id. `pruneStaleConversationState`
+      // only runs from `load()`, which is itself skipped while in Thread mode, so that id would
+      // survive indefinitely and could resurface later as a bogus cross-document lookup once a
+      // different (or the same, reloaded) canvas document becomes active and `resyncAfterGap`
+      // refetches every key in `messagesByConversation` (bug: spurious `CONVERSATION_NOT_FOUND`
+      // after switching into/out of Thread mode).
+      if (useDocumentStore().document?.documentType === 'thread') return;
+
       if (frame.kind === 'subscribed') {
         this.conversations = frame.frame.snapshot.conversations;
         this.lastEventSequence = frame.frame.currentSequence;
@@ -593,7 +606,18 @@ export const useConversationsStore = defineStore('conversations', {
      *  conversation's detail unconditionally would be far more requests than necessary for
      *  conversations nothing is currently rendering). */
     async resyncAfterGap(): Promise<void> {
+      const documentId = activeDocumentId();
       await this.load();
+      // The active document can change while `load()`'s own request is in flight (e.g. the user
+      // creates/switches to a different document before this resync's single await resolves) —
+      // `load()` itself is still correct for whichever document was active when IT started
+      // (`activeDocumentId()` is read fresh inside it), but blindly continuing here would refetch
+      // detail for ids that belonged to that now-superseded document against whatever document is
+      // active NOW (`loadDetail`'s own `activeDocumentId()` read), pairing a stale conversationId
+      // with the wrong documentId and surfacing a bogus `CONVERSATION_NOT_FOUND`. The newly active
+      // document gets its own fresh `subscribed` snapshot/resync cycle regardless, so abandoning
+      // this one is safe.
+      if (activeDocumentId() !== documentId) return;
       const conversationIds = Object.keys(this.messagesByConversation);
       await Promise.all(conversationIds.map((id) => this.loadDetail(id)));
     },

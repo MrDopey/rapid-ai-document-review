@@ -283,6 +283,14 @@ export const useThreadStore = defineStore('thread', {
     },
 
     handleServerFrame(frame: ServerFrame): void {
+      // Symmetric guard to `conversations.ts`'s own (see that file's doc comment on the same
+      // line): this store's per-message handlers below (`message_started`/`text_delta`/etc.) key
+      // straight off `event.conversationId` with no `kind` check, so without this a canvas
+      // document's events would otherwise populate `messagesByThread` with a canvas conversation's
+      // id — every store's `subscribeToFrames` stays registered on the one shared WS connection
+      // regardless of which mode is active.
+      if (useDocumentStore().document?.documentType !== 'thread') return;
+
       if (frame.kind === 'subscribed') {
         // Every Thread lives in the `conversation` table alongside canvas conversations
         // (data-model.md) — the snapshot's `conversations` array carries both kinds for a
@@ -466,9 +474,13 @@ export const useThreadStore = defineStore('thread', {
       }
     },
 
-    /** Full resync once a gap is detected — mirrors `conversations.ts`'s own `resyncAfterGap`. */
+    /** Full resync once a gap is detected — mirrors `conversations.ts`'s own `resyncAfterGap`,
+     *  including its same active-document-changed-mid-flight abandon guard (see that file's doc
+     *  comment for the full rationale). */
     async resyncAfterGap(): Promise<void> {
+      const documentId = activeDocumentId();
       await this.load();
+      if (activeDocumentId() !== documentId) return;
       const threadIds = Object.keys(this.messagesByThread);
       await Promise.all(threadIds.map((id) => this.loadDetail(id)));
     },
