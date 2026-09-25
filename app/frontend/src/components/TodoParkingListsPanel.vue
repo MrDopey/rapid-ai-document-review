@@ -19,6 +19,16 @@ function itemsFor(list: ListName): ListItemDto[] {
   return list === 'todo' ? listItemsStore.todo : listItemsStore.parkingLot;
 }
 
+// Independent per-section visibility: each list can be shown/hidden without affecting the other.
+// Whichever section(s) stay visible split the rail's vertical space evenly (see
+// `.list-section--expanded` below) — collapsing one hands its share to the other instead of
+// leaving dead space.
+const sectionVisible = reactive<Record<ListName, boolean>>({ todo: true, parking_lot: true });
+
+function toggleSection(list: ListName): void {
+  sectionVisible[list] = !sectionVisible[list];
+}
+
 const newItemText = reactive<Record<ListName, string>>({ todo: '', parking_lot: '' });
 const editingId = reactive<Record<ListName, string | null>>({ todo: null, parking_lot: null });
 const editingText = reactive<Record<ListName, string>>({ todo: '', parking_lot: '' });
@@ -75,40 +85,55 @@ async function removeItem(itemId: string): Promise<void> {
       v-for="section in sections"
       :key="section.list"
       class="list-section"
-      :class="section.sectionClass"
+      :class="[section.sectionClass, { 'list-section--expanded': sectionVisible[section.list] }]"
     >
-      <h3 class="list-section-title">{{ section.title }}</h3>
-      <ul class="list-items">
-        <li v-for="item in itemsFor(section.list)" :key="item.id" class="list-item-row">
-          <template v-if="editingId[section.list] === item.id">
-            <input
-              v-model="editingText[section.list]"
-              class="list-item-edit-input"
-              type="text"
-              :aria-label="`Edit ${section.title} item`"
-              @keydown.enter="commitEdit(section.list, item.id)"
-              @keydown.esc="cancelEdit(section.list)"
-            />
-            <button type="button" @click="commitEdit(section.list, item.id)">Save</button>
-            <button type="button" @click="cancelEdit(section.list)">Cancel</button>
-          </template>
-          <template v-else>
-            <span class="list-item-text">{{ item.text }}</span>
-            <button type="button" @click="startEdit(section.list, item)">Edit</button>
-            <button type="button" @click="removeItem(item.id)">Delete</button>
-          </template>
-        </li>
-        <li v-if="itemsFor(section.list).length === 0" class="list-item-empty">No items.</li>
-      </ul>
-      <form class="add-item-form" @submit.prevent="addItem(section.list)">
-        <input
-          v-model="newItemText[section.list]"
-          type="text"
-          :placeholder="`Add to ${section.title}`"
-          :aria-label="`Add a ${section.title} item`"
-        />
-        <button type="submit" :disabled="!newItemText[section.list].trim()">Add</button>
-      </form>
+      <h3 class="list-section-title">
+        <span>{{ section.title }} ({{ itemsFor(section.list).length }})</span>
+        <button
+          type="button"
+          class="list-section-toggle"
+          :aria-expanded="sectionVisible[section.list]"
+          :aria-label="
+            sectionVisible[section.list] ? `Hide ${section.title}` : `Show ${section.title}`
+          "
+          @click="toggleSection(section.list)"
+        >
+          {{ sectionVisible[section.list] ? 'Hide' : 'Show' }}
+        </button>
+      </h3>
+      <div v-if="sectionVisible[section.list]" class="list-section-body">
+        <ul class="list-items">
+          <li v-for="item in itemsFor(section.list)" :key="item.id" class="list-item-row">
+            <template v-if="editingId[section.list] === item.id">
+              <input
+                v-model="editingText[section.list]"
+                class="list-item-edit-input"
+                type="text"
+                :aria-label="`Edit ${section.title} item`"
+                @keydown.enter="commitEdit(section.list, item.id)"
+                @keydown.esc="cancelEdit(section.list)"
+              />
+              <button type="button" @click="commitEdit(section.list, item.id)">Save</button>
+              <button type="button" @click="cancelEdit(section.list)">Cancel</button>
+            </template>
+            <template v-else>
+              <span class="list-item-text">{{ item.text }}</span>
+              <button type="button" @click="startEdit(section.list, item)">Edit</button>
+              <button type="button" @click="removeItem(item.id)">Delete</button>
+            </template>
+          </li>
+          <li v-if="itemsFor(section.list).length === 0" class="list-item-empty">No items.</li>
+        </ul>
+        <form class="add-item-form" @submit.prevent="addItem(section.list)">
+          <input
+            v-model="newItemText[section.list]"
+            type="text"
+            :placeholder="`Add to ${section.title}`"
+            :aria-label="`Add a ${section.title} item`"
+          />
+          <button type="submit" :disabled="!newItemText[section.list].trim()">Add</button>
+        </form>
+      </div>
     </section>
   </aside>
 </template>
@@ -118,10 +143,26 @@ async function removeItem(itemId: string): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  overflow-y: auto;
   height: 100%;
   padding: 0.75rem;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Each section is a flex sibling of the other in this column: `flex: 1 1 0%` on both makes them
+   split the rail's vertical space evenly (50/50) whenever both are expanded. A collapsed section
+   drops to `flex: 0 0 auto` (header-only height), so the other one's `flex: 1 1 0%` grows to fill
+   the space the collapsed section would otherwise have wasted — see `list-section--expanded`. */
+.list-section {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.list-section--expanded {
+  flex: 1 1 0%;
+  overflow: hidden;
 }
 
 .list-section-title {
@@ -130,6 +171,25 @@ async function removeItem(itemId: string): Promise<void> {
   text-transform: uppercase;
   letter-spacing: 0.02em;
   opacity: 0.75;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.list-section-toggle {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 1;
+}
+
+.list-section-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .list-items {
@@ -139,6 +199,9 @@ async function removeItem(itemId: string): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .list-item-row {
@@ -164,6 +227,7 @@ async function removeItem(itemId: string): Promise<void> {
 .add-item-form {
   display: flex;
   gap: 0.375rem;
+  flex: 0 0 auto;
 }
 
 .add-item-form input {
