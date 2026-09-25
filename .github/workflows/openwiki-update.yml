@@ -29,7 +29,7 @@ jobs:
           node-version: "22"
 
       - name: Install OpenWiki
-        run: npm install --global openwiki@0.5.2 mermaid@11.16.0 jsdom@29.1.1
+        run: npm install --global openwiki@0.6.0 mermaid@11.16.0 jsdom@29.1.1
 
       - name: Run OpenWiki
         id: openwiki
@@ -43,15 +43,12 @@ jobs:
       # file, even though staging below is already scoped to doc paths only.
       # Safety net: never let the bot commit changes to its own workflow
       - name: Exclude workflow changes
-        if: ${{ !cancelled() }}
         run: git checkout -- .github/workflows/openwiki-update.yml
 
       - name: Remove transient OpenWiki run state
-        if: ${{ !cancelled() }}
         run: rm -f -- openwiki/.run.json
 
       - name: Commit and push OpenWiki update
-        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           if [[ -z "$(git status --porcelain -- openwiki AGENTS.md)" ]]; then
