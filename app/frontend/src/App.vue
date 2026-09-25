@@ -53,9 +53,6 @@ const listItemsStore = useListItemsStore();
 
 const pasteText = ref('');
 const historyOpen = ref(false);
-// 012-todo-parking-lists: disabled until a conversation is focused (FR-021) — see the
-// `.hud-bar-right` button and `.conversation-detail-overlay` rail below.
-const listsOpen = ref(false);
 const shortcutsOpen = ref(false);
 const helpOpen = ref(false);
 const systemPromptOpen = ref(false);
@@ -629,9 +626,9 @@ async function loadActiveDocumentThreadOrConversations(): Promise<void> {
     await conversationsStore.load();
   }
   // 012-todo-parking-lists: list items are document-scoped, not conversation-scoped, so this
-  // reloads regardless of mode — otherwise the `[Lists (n)]` button's own count (read directly off
-  // this store, whether or not the panel/rail has ever been opened) would keep showing the
-  // previously active document's count until something happened to open the panel for this one.
+  // reloads regardless of mode — the rail (`TodoParkingListsPanel.vue`) always renders once a
+  // conversation is focused, so without this it would keep showing the previously active
+  // document's items until something else happened to refetch for this one.
   await listItemsStore.fetchListItems(store.activeDocumentId!);
 }
 
@@ -1237,19 +1234,29 @@ async function onToggleReasoning(event: Event): Promise<void> {
               >
                 {{ editorVisible ? 'Hide editor' : 'Show editor' }}
               </button>
+              <!-- 012-todo-parking-lists: the rail itself always shows once a conversation is
+                   focused (see `.conversation-detail-overlay` below) — these two HUD buttons only
+                   toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
+                   comment on `isVisible`. -->
               <button
                 type="button"
-                :disabled="orderedFocusedConversations.length === 0"
-                :title="
-                  orderedFocusedConversations.length === 0
-                    ? 'Focus a conversation to show the Todo/Parking Lot lists'
-                    : listsOpen
-                      ? 'Hide the Todo/Parking Lot lists'
-                      : 'Show the Todo/Parking Lot lists'
-                "
-                @click="listsOpen = !listsOpen"
+                :aria-pressed="listItemsStore.todoVisible"
+                :title="listItemsStore.todoVisible ? 'Hide the Todo list' : 'Show the Todo list'"
+                @click="listItemsStore.toggleVisibility('todo')"
               >
-                Lists ({{ listItemsStore.todo.length + listItemsStore.parkingLot.length }})
+                {{ listItemsStore.todoVisible ? 'Hide Todo' : 'Show Todo' }}
+              </button>
+              <button
+                type="button"
+                :aria-pressed="listItemsStore.parkingLotVisible"
+                :title="
+                  listItemsStore.parkingLotVisible
+                    ? 'Hide the Parking Lot list'
+                    : 'Show the Parking Lot list'
+                "
+                @click="listItemsStore.toggleVisibility('parking_lot')"
+              >
+                {{ listItemsStore.parkingLotVisible ? 'Hide Parking Lot' : 'Show Parking Lot' }}
               </button>
             </div>
           </div>
@@ -1361,7 +1368,13 @@ async function onToggleReasoning(event: Event): Promise<void> {
         />
         <!-- 012-todo-parking-lists (US3): one shared rail attached to the overlay, never one per
              focused conversation regardless of how many are simultaneously focused (FR-022). -->
-        <TodoParkingListsPanel v-if="listsOpen" class="todo-parking-lists-rail" />
+        <!-- Unmounted entirely (not just visually collapsed) once both sections are hidden, so
+             this rail's own `flex: 0 0 280px` stops reserving width at all and the conversation
+             panel(s) beside it reclaim that space via their own `flex: 1 1 auto`. -->
+        <TodoParkingListsPanel
+          v-if="listItemsStore.todoVisible || listItemsStore.parkingLotVisible"
+          class="todo-parking-lists-rail"
+        />
       </div>
     </div>
   </div>
@@ -1568,7 +1581,18 @@ async function onToggleReasoning(event: Event): Promise<void> {
    full-bleed panel, so it reads as a narrow companion rail rather than a second detail view. */
 .todo-parking-lists-rail {
   flex: 0 0 280px;
-  background: var(--surface-color, #fff);
+  /* Pinned to half of `.conversation-detail-overlay`'s own height (the viewport's available space
+     below the toolbar/HUD, via that element's `inset: 0` against its grid-cell containing block)
+     rather than `align-items: stretch` matching whatever height the focused conversation panel(s)
+     happen to need — a short conversation used to squeeze the rail down to a sliver. */
+  height: 50%;
+  align-self: center;
+  /* Contrast fix: `--surface-color` isn't a real token anywhere in style.css, so this silently
+     fell back to a hardcoded white in BOTH color schemes — in dark mode that left the rail's own
+     inherited light (`--text-color: #e8e8e8`) text nearly unreadable against a white card.
+     `--panel-bg` is the same light/dark-aware token every other floating panel in this app already
+     uses for this exact "card surface" role (e.g. HistoryPanel.vue's `.history-panel`). */
+  background: var(--panel-bg, #f7f7f8);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }

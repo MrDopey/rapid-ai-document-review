@@ -19,14 +19,14 @@ function itemsFor(list: ListName): ListItemDto[] {
   return list === 'todo' ? listItemsStore.todo : listItemsStore.parkingLot;
 }
 
-// Independent per-section visibility: each list can be shown/hidden without affecting the other.
+// Independent per-section visibility, but the toggle CONTROL itself lives in the HUD (App.vue's/
+// ThreadModeView.vue's own Todo/Parking Lot buttons next to "Lists (n)"), not on the rail — this
+// component only reads `listItemsStore.todoVisible`/`parkingLotVisible` to decide what to render.
 // Whichever section(s) stay visible split the rail's vertical space evenly (see
 // `.list-section--expanded` below) — collapsing one hands its share to the other instead of
 // leaving dead space.
-const sectionVisible = reactive<Record<ListName, boolean>>({ todo: true, parking_lot: true });
-
-function toggleSection(list: ListName): void {
-  sectionVisible[list] = !sectionVisible[list];
+function isVisible(list: ListName): boolean {
+  return list === 'todo' ? listItemsStore.todoVisible : listItemsStore.parkingLotVisible;
 }
 
 const newItemText = reactive<Record<ListName, string>>({ todo: '', parking_lot: '' });
@@ -85,23 +85,12 @@ async function removeItem(itemId: string): Promise<void> {
       v-for="section in sections"
       :key="section.list"
       class="list-section"
-      :class="[section.sectionClass, { 'list-section--expanded': sectionVisible[section.list] }]"
+      :class="[section.sectionClass, { 'list-section--expanded': isVisible(section.list) }]"
     >
       <h3 class="list-section-title">
         <span>{{ section.title }} ({{ itemsFor(section.list).length }})</span>
-        <button
-          type="button"
-          class="list-section-toggle"
-          :aria-expanded="sectionVisible[section.list]"
-          :aria-label="
-            sectionVisible[section.list] ? `Hide ${section.title}` : `Show ${section.title}`
-          "
-          @click="toggleSection(section.list)"
-        >
-          {{ sectionVisible[section.list] ? 'Hide' : 'Show' }}
-        </button>
       </h3>
-      <div v-if="sectionVisible[section.list]" class="list-section-body">
+      <div v-if="isVisible(section.list)" class="list-section-body">
         <ul class="list-items">
           <li v-for="item in itemsFor(section.list)" :key="item.id" class="list-item-row">
             <template v-if="editingId[section.list] === item.id">
@@ -171,18 +160,7 @@ async function removeItem(itemId: string): Promise<void> {
   text-transform: uppercase;
   letter-spacing: 0.02em;
   opacity: 0.75;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
   flex: 0 0 auto;
-}
-
-.list-section-toggle {
-  font-size: 0.75rem;
-  text-transform: none;
-  letter-spacing: normal;
-  opacity: 1;
 }
 
 .list-section-body {

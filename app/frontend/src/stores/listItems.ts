@@ -6,7 +6,11 @@ import type { ServerFrame, WsClient } from '../transport/ws-client.js';
 export interface ListItemsState {
   todo: ListItemDto[];
   parkingLot: ListItemDto[];
+  todoVisible: boolean;
+  parkingLotVisible: boolean;
 }
+
+export type ListItemsListName = 'todo' | 'parking_lot';
 
 /**
  * Todo & Parking Lot list state for whichever document is currently active (012-todo-parking-lists).
@@ -17,13 +21,28 @@ export interface ListItemsState {
  * same backend `ListItemService`, so a change from either source arrives here identically.
  */
 export const useListItemsStore = defineStore('listItems', {
-  state: (): ListItemsState => ({ todo: [], parkingLot: [] }),
+  state: (): ListItemsState => ({
+    todo: [],
+    parkingLot: [],
+    todoVisible: true,
+    parkingLotVisible: true,
+  }),
 
   actions: {
     async fetchListItems(documentId: string): Promise<void> {
       const response = await httpClient.listListItems(documentId);
       this.todo = response.todo;
       this.parkingLot = response.parkingLot;
+    },
+
+    // Show/hide is a reviewer-wide preference driven from the HUD's own Todo/Parking Lot toggle
+    // buttons (App.vue/ThreadModeView.vue), not a per-section control on the rail itself — kept
+    // here rather than as local component state so both the HUD (which owns the buttons) and
+    // `TodoParkingListsPanel.vue` (which reads them to decide what to render) share one source of
+    // truth regardless of which mounts the rail.
+    toggleVisibility(list: ListItemsListName): void {
+      if (list === 'todo') this.todoVisible = !this.todoVisible;
+      else this.parkingLotVisible = !this.parkingLotVisible;
     },
 
     handleServerFrame(frame: ServerFrame): void {

@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import TodoParkingListsPanel from '../../src/components/TodoParkingListsPanel.vue';
 import { useDocumentStore } from '../../src/stores/document.js';
+import { useListItemsStore } from '../../src/stores/listItems.js';
 import { httpClient } from '../../src/transport/http-client.js';
 
 vi.mock('../../src/transport/http-client.js', () => ({
@@ -94,19 +95,21 @@ describe('TodoParkingListsPanel', () => {
     expect(httpClient.deleteListItem).toHaveBeenCalledWith('doc_1', 'li_2');
   });
 
-  // Contract fix: the two sections must split the rail's vertical space evenly by default, and
-  // each has its own show/hide toggle independent of the other.
+  // Contract fix: the two sections must split the rail's vertical space evenly by default. The
+  // show/hide toggle CONTROL itself lives in the HUD (App.vue/ThreadModeView.vue), not on the
+  // rail — this panel only reflects `listItemsStore.todoVisible`/`parkingLotVisible`.
   it('both sections start expanded and carry the 50/50-split class', async () => {
     const wrapper = await mountPanel();
     expect(wrapper.find('.todo-list-section').classes()).toContain('list-section--expanded');
     expect(wrapper.find('.parking-lot-section').classes()).toContain('list-section--expanded');
   });
 
-  it('hiding one section collapses only that section, leaving the other expanded', async () => {
+  it('hiding one section via the store collapses only that section, leaving the other expanded', async () => {
     const wrapper = await mountPanel();
-    const todoSection = wrapper.find('.todo-list-section');
-    await todoSection.find('.list-section-toggle').trigger('click');
+    useListItemsStore().toggleVisibility('todo');
+    await wrapper.vm.$nextTick();
 
+    const todoSection = wrapper.find('.todo-list-section');
     expect(todoSection.classes()).not.toContain('list-section--expanded');
     expect(todoSection.find('.list-section-body').exists()).toBe(false);
     const parkingSection = wrapper.find('.parking-lot-section');
@@ -114,11 +117,11 @@ describe('TodoParkingListsPanel', () => {
     expect(parkingSection.find('.list-section-body').exists()).toBe(true);
   });
 
-  it('toggling a section back on restores its expanded body independent of the other section', async () => {
+  it('toggling a section back on via the store restores its expanded body independent of the other section', async () => {
     const wrapper = await mountPanel();
-    const parkingToggle = wrapper.find('.parking-lot-section .list-section-toggle');
-    await parkingToggle.trigger('click');
-    await parkingToggle.trigger('click');
+    useListItemsStore().toggleVisibility('parking_lot');
+    useListItemsStore().toggleVisibility('parking_lot');
+    await wrapper.vm.$nextTick();
 
     expect(wrapper.find('.parking-lot-section').classes()).toContain('list-section--expanded');
     expect(wrapper.find('.parking-lot-section .list-section-body').exists()).toBe(true);

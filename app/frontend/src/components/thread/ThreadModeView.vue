@@ -20,9 +20,6 @@ import TodoParkingListsPanel from '../TodoParkingListsPanel.vue';
 const store = useThreadStore();
 const listItemsStore = useListItemsStore();
 const doneOpen = ref(false);
-// 012-todo-parking-lists (FR-023): always enabled in Thread mode, unlike Canvas mode's
-// focus-gated equivalent (App.vue) — Thread mode has no conversation-focus concept to gate on.
-const listsOpen = ref(false);
 
 onMounted(() => {
   if (!store.loaded) void store.load();
@@ -272,15 +269,28 @@ async function onExportDocument(): Promise<void> {
               <button type="button" class="thread-mode-done-toggle" @click="doneOpen = true">
                 Done ({{ doneCount }})
               </button>
+              <!-- 012-todo-parking-lists: the rail always shows — these two HUD buttons only
+                   toggle each section's own visibility, per `TodoParkingListsPanel.vue`'s own doc
+                   comment on `isVisible`. -->
               <button
                 type="button"
-                class="thread-mode-lists-toggle"
-                :title="
-                  listsOpen ? 'Hide the Todo/Parking Lot lists' : 'Show the Todo/Parking Lot lists'
-                "
-                @click="listsOpen = !listsOpen"
+                :aria-pressed="listItemsStore.todoVisible"
+                :title="listItemsStore.todoVisible ? 'Hide the Todo list' : 'Show the Todo list'"
+                @click="listItemsStore.toggleVisibility('todo')"
               >
-                Lists ({{ listItemsStore.todo.length + listItemsStore.parkingLot.length }})
+                {{ listItemsStore.todoVisible ? 'Hide Todo' : 'Show Todo' }}
+              </button>
+              <button
+                type="button"
+                :aria-pressed="listItemsStore.parkingLotVisible"
+                :title="
+                  listItemsStore.parkingLotVisible
+                    ? 'Hide the Parking Lot list'
+                    : 'Show the Parking Lot list'
+                "
+                @click="listItemsStore.toggleVisibility('parking_lot')"
+              >
+                {{ listItemsStore.parkingLotVisible ? 'Hide Parking Lot' : 'Show Parking Lot' }}
               </button>
             </div>
           </div>
@@ -310,7 +320,13 @@ async function onExportDocument(): Promise<void> {
       <!-- 012-todo-parking-lists (US3, FR-023/FR-024): a fixed rail hugging the right edge,
            outside `.thread-mode-content` — narrows it via this row's flex layout rather than
            covering it. -->
-      <TodoParkingListsPanel v-if="listsOpen" class="thread-mode-lists-rail" />
+      <!-- Unmounted entirely (not just visually collapsed) once both sections are hidden, so this
+           rail's own `flex: 0 0 280px` stops reserving width and `.thread-mode-content`'s own
+           `flex: 1 1 auto` reclaims it. -->
+      <TodoParkingListsPanel
+        v-if="listItemsStore.todoVisible || listItemsStore.parkingLotVisible"
+        class="thread-mode-lists-rail"
+      />
     </div>
 
     <Transition name="modal">
@@ -363,11 +379,20 @@ async function onExportDocument(): Promise<void> {
    `.thread-mode-content` (narrowing it via `flex: 1 1 auto` + `min-width: 0` below) instead of
    overlapping it. A plain flex row, not `.thread-mode-view`'s own scroll container — the rail
    scrolls its own contents internally (TodoParkingListsPanel.vue's `overflow-y: auto`). */
+/* `flex: 1 1 auto` + `min-height: 0` makes this row always fill exactly the space
+   `.thread-mode-view` has left below the HUD (that outer height is itself already fixed to the
+   viewport-minus-toolbar via the `.thread-mode-panes`/`.thread-mode-body` chain, App.vue) —
+   regardless of how much/little thread content there is. `.thread-mode-content` below scrolls its
+   own overflow internally instead of growing this row past that fixed height, which is what makes
+   `.thread-mode-lists-rail`'s `height: 50%` a stable "50% of the viewport's available space"
+   rather than 50% of whatever a short/tall thread's own content happened to need. */
 .thread-mode-row {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: stretch;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .thread-mode-content {
   display: flex;
@@ -375,11 +400,13 @@ async function onExportDocument(): Promise<void> {
   gap: 0.75rem;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 1rem;
 }
 .thread-mode-lists-rail {
   flex: 0 0 280px;
-  align-self: stretch;
+  height: 50%;
   border-left: 1px solid var(--border-color, #ddd);
   background: var(--panel-bg, #f7f7f8);
 }
