@@ -1043,6 +1043,19 @@ const actions = computed<ActionDescriptor[]>(() => {
   min-height: 2.5rem;
   min-block-size: 3lh;
   field-sizing: content;
+  /* `field-sizing: content` grows this textarea's height to fit its own content — including its
+     placeholder when empty. `ConversationDetailPanel.vue`'s own panel width deliberately shrinks
+     toward 0 rather than ever overlap a neighboring pane (see that file's `min-width: 0` doc
+     comment, the fix for the "overlay bleeds into Preview" bug) — at the resulting very narrow
+     widths, the placeholder text wraps across many lines, and `field-sizing: content` then grows
+     height to fit ALL of them (observed: 300+px), stretching `.composer`'s whole row (default
+     `align-items: stretch`) and starving `.transcript-edits`'s sibling flex space down toward
+     zero, the same failure mode `.composer-hint`'s own `max-height` above guards against. Cap it
+     the same way; `overflow-y: auto` keeps the rest of a genuinely long typed draft reachable by
+     scrolling within the textarea itself, same as the user's own manual `resize: vertical` would
+     produce. */
+  max-height: 6rem;
+  overflow-y: auto;
 }
 .composer-hint {
   display: flex;
@@ -1054,6 +1067,19 @@ const actions = computed<ActionDescriptor[]>(() => {
   color: var(--info-color, #1e3a8a);
   border-top: 1px solid var(--info-border, #bfdbfe);
   font-size: 0.75rem;
+  /* `.input-area` is `flex: 0 0 auto` (flex-shrink: 0) in `.conversation-view`'s column, so this
+     banner's own content height is never negotiated against its siblings — in a narrow panel
+     (many sidebar conversations + History drawer open at once) its un-abbreviated sentence wraps
+     across enough lines to starve `.transcript-edits` (flex: 1; min-height: 0, which *does*
+     shrink) down toward zero height, at which point the now-invisible EditsList's rows still
+     occupy their own DOM position underneath this now-huge banner, so a click meant for a button
+     in one of those rows lands on this banner's text instead ("Tip: highlight text..." intercepts
+     pointer events — reproduced via us6.spec.ts's own restore-flow test, whose accumulated shared
+     state narrows this panel to ~107px). Cap it here instead of only wrapping harder.
+     `max-height`, not a line-clamp, keeps the dismiss ("Got it") button reachable via this
+     banner's own scroll rather than pushing it out of the flex row. */
+  max-height: 4.5rem;
+  overflow-y: auto;
 }
 /* `.dismiss-notice-button` shared shape now lives in style.css (shared with PrimaryPanel.vue's
    Primary-notice dismiss button). */
@@ -1069,6 +1095,16 @@ const actions = computed<ActionDescriptor[]>(() => {
   background: var(--panel-bg-alt, #eef0f3);
   color: var(--text-color, #111);
   border: 1px solid var(--border-color, #ccc);
+  /* Neither button sets its own width, so a squeezed `.composer` row (many sidebar conversations
+     + History open at once can narrow this panel well below either label's natural width) would
+     otherwise wrap "Refresh + Send" onto several lines — `.composer`'s default `align-items:
+     stretch` then stretches the whole row (textarea included) to match that wrapped button's new
+     height, which can starve `.transcript-edits` (flex: 1; min-height: 0, the sibling that
+     actually shrinks) down toward zero and make its EditsList rows visually sit underneath this
+     footer instead (same failure mode `.composer-hint`'s own `max-height` above guards against).
+     `flex-shrink: 0` lets the `flex: 1` textarea give up its own width first instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .send-button:disabled,
 .refresh-send-button:disabled {

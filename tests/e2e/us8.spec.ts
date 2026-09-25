@@ -144,12 +144,30 @@ async function ensureFixtureDocument(page: Page): Promise<string> {
 /** Selects the line containing `markerText` via keyboard-only navigation (mirrors
  *  us7.spec.ts/us6.spec.ts's branchFromMarker) and starts a conversation from it. CodeMirror
  *  virtualizes long documents, so `Control+End` + `scrollIntoViewIfNeeded` are needed to actually
- *  render a marker line that isn't near the top. */
+ *  render a marker line that isn't near the top.
+ *
+ *  This document is shared across every usN spec in the same `npm run test:e2e` run (and across
+ *  US8's own several test()s within this file, each further branching/editing it) — by the time a
+ *  LATER US8 test calls this, the true end (where `Control+End` lands) can have drifted far enough
+ *  past `US8-MARKER-FIRST` that CodeMirror's virtualizer never renders that line at all, so the
+ *  `.cm-line` locator itself never resolves and `scrollIntoViewIfNeeded` times out just waiting for
+ *  it (observed: US8's 2nd/3rd tests). A single jump-then-scroll only works if the target is
+ *  already within the virtualizer's rendered-or-nearby window; walk `PageUp` instead, one virtual
+ *  screen at a time, so each keypress causes CodeMirror to actually render the newly-revealed lines
+ *  before checking again — the same mechanism a real user scrolling up would trigger. */
 async function branchFromMarker(page: Page, markerText: string): Promise<void> {
   await page.locator('.editor-host').click();
   await page.keyboard.press('Control+End');
   const line = page.locator('.cm-line', { hasText: markerText });
-  await line.scrollIntoViewIfNeeded();
+  // CodeMirror keeps recycling/re-virtualizing nearby lines even without further input, so a
+  // found-then-scroll done as two separate one-shot steps can still race a line that vanishes
+  // again right as `scrollIntoViewIfNeeded` re-resolves the locator. Retry the whole
+  // "nudge if missing, then scroll" unit until it holds still long enough to succeed, rather than
+  // trusting a single snapshot in between.
+  await expect(async () => {
+    if ((await line.count()) === 0) await page.keyboard.press('PageUp');
+    await line.scrollIntoViewIfNeeded({ timeout: 2_000 });
+  }).toPass({ timeout: 25_000 });
   await line.click();
   await page.keyboard.press('Home');
   await page.keyboard.press('Shift+End');

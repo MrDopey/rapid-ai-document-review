@@ -159,6 +159,26 @@ test.describe('US1 — create and edit a document with tracked history', () => {
       await expect(editor).not.toContainText('undo-redo-probe');
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+y');
       await expect(editor).toContainText('undo-redo-probe');
+
+      // The redo above left an edit that hasn't synced yet — the debounced PATCH (seeded to
+      // 2000ms, see playwright.config.ts) is still pending when this step returns. Every e2e spec
+      // shares one backend/document for the whole run (env.ts), so if this test ends before that
+      // PATCH fires, it lands during whichever *next* test happens to be running ~2s later,
+      // silently inserting a surprise revision into ITS history list (observed: us3.spec.ts's own
+      // "history now leads with this conversation's revision" check flaking because us1's own
+      // trailing debounce revision won the race and landed on top instead). Wait for the PATCH to
+      // actually land — not a blind sleep — before moving on.
+      const documentId = await getActiveDocumentId(page.request);
+      await expect
+        .poll(
+          async () => {
+            const res = await page.request.get(`/api/documents/${documentId}`);
+            const body = await res.json();
+            return body.content as string;
+          },
+          { timeout: 5_000, intervals: [300] },
+        )
+        .toContain('undo-redo-probe');
     });
 
     await test.step('export downloads the current Markdown', async () => {

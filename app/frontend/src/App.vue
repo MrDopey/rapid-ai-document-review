@@ -123,18 +123,32 @@ const hudItems = computed<HudItem[]>(() =>
 // just the canvas column.
 const MIN_FOCUSED_PANEL_WIDTH_PX = 420; // ConversationDetailPanel.vue's own `min(480px, 92vw)` plus breathing room
 const FOCUSED_PANEL_GAP_PX = 16; // `.conversation-detail-overlay`'s own `gap`
+// 012-todo-parking-lists: `.todo-parking-lists-rail`'s own `flex: 0 0 280px` (never shrinks) — this
+// calc used to assume every bit of `panesWidth` was up for grabs between focused panels, so once
+// that rail started rendering (default-on, `v-if="listItemsStore.todoVisible ||
+// listItemsStore.parkingLotVisible"` below) it silently ate 280px + its own `gap` out of the
+// overlay without `viewportFitCount` ever knowing, and a since-shrinkable `ConversationDetailPanel`
+// (`min-width: 0`, the "overlay bleeds into Preview" fix) absorbed the deficit instead of erroring
+// — reproduced by us6.spec.ts's own restore-flow test, whose single focused panel measured 107px
+// wide (well under the intended 420px floor) with the rail visible at its default width alongside.
+const TODO_PARKING_RAIL_WIDTH_PX = 280;
 const panesWidth = ref(0);
-const viewportFitCount = computed(() =>
-  panesWidth.value <= 0
+const viewportFitCount = computed(() => {
+  const railBudget =
+    listItemsStore.todoVisible || listItemsStore.parkingLotVisible
+      ? TODO_PARKING_RAIL_WIDTH_PX + FOCUSED_PANEL_GAP_PX
+      : 0;
+  const availableWidth = panesWidth.value - railBudget;
+  return availableWidth <= 0
     ? 1
     : Math.max(
         1,
         Math.floor(
-          (panesWidth.value + FOCUSED_PANEL_GAP_PX) /
+          (availableWidth + FOCUSED_PANEL_GAP_PX) /
             (MIN_FOCUSED_PANEL_WIDTH_PX + FOCUSED_PANEL_GAP_PX),
         ),
-      ),
-);
+      );
+});
 const focusCap = useFocusCap(viewportFitCount);
 
 const {
@@ -832,9 +846,24 @@ function scrollBoxIntoView(id: string): void {
   // ambiguously match whichever of the two comes first in document order (the HUD row itself,
   // since it's higher up in the toolbar) instead of the canvas box this is actually meant to
   // scroll to.
-  document
-    .querySelector(`.conversation-thread-box[data-conversation-id="${id}"]`)
-    ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  //
+  // Deferred one `nextTick`, same reason as `scrollComposerIntoView` below: every caller invokes
+  // this immediately after `toggleFocus`/`replaceFocus`, whose `is-focused`/`at-focus-cap` prop
+  // changes feed into `computeConversationLayout` and can shift *this same box's* `entry.top`.
+  //
+  // `behavior: 'instant'`, not `'smooth'`: toggling focus also mounts a brand-new
+  // `ConversationDetailPanel` whose own focus-trap moves keyboard focus into its composer
+  // (`useFocusTrap`'s `getPreferredInitialFocus`) on the very same tick — that programmatic focus
+  // change triggers the browser's own default "scroll the newly focused element into view"
+  // behavior, which cancels this element's in-flight *smooth* scroll animation on
+  // `.document-canvas` partway through (confirmed: us8.spec.ts's own HUD click-to-scroll test
+  // still landed the target off-screen even waited out well past any normal smooth-scroll
+  // duration). An instant jump can't be interrupted mid-animation the same way.
+  void nextTick(() => {
+    document
+      .querySelector(`.conversation-thread-box[data-conversation-id="${id}"]`)
+      ?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+  });
 }
 
 /** Keyboard-only counterpart to `scrollBoxIntoView` above: that one nudges the always-rendered
@@ -1580,7 +1609,18 @@ async function onToggleReasoning(event: Event): Promise<void> {
    conversation) — a fixed-width flex sibling of the ConversationDetailPanel(s) above, not another
    full-bleed panel, so it reads as a narrow companion rail rather than a second detail view. */
 .todo-parking-lists-rail {
-  flex: 0 0 280px;
+  /* Was `flex: 0 0 280px` (never shrinks) — paired with `ConversationDetailPanel.vue`'s own
+     `min-width: 0` (fully shrinkable, by design: see that file's doc comment on why it must never
+     refuse to shrink), a rigid rail took 100% of any width deficit out of the conversation panel
+     alone once Canvas's own column couldn't fit both at their preferred sizes (reproduced by
+     us6.spec.ts's restore-flow test: a single focused panel measured 107px wide, well under
+     ConversationDetailPanel's intended ~420px floor, while this rail sat untouched at its full
+     280px). `flex-shrink: 1` + a `min-width` floor lets both sides share the squeeze
+     proportionally instead — this rail bottoms out well above unusable, and
+     `TodoParkingListsPanel.vue` already handles narrow widths via its own internal
+     `overflow: hidden`/`overflow-y: auto`. */
+  flex: 0 1 280px;
+  min-width: 120px;
   /* Full height of `.conversation-detail-overlay` (the viewport's available space below the
      toolbar/HUD, via that element's `inset: 0` against its grid-cell containing block) rather than
      `align-items: stretch` matching whatever height the focused conversation panel(s) happen to
