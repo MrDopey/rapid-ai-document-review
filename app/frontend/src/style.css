@@ -417,6 +417,26 @@ body {
   opacity: 0.7;
 }
 
+/* Shared auto-growing inline-edit textarea — currently used by
+   `TodoParkingListsPanel.vue` for its todo/parking-lot item edit field. Sizes to its text via
+   `field-sizing: content` (grows in height, never wider than its flex container) instead of a
+   fixed `rows`/`cols`, and disables manual resize so it stays a clean inline control rather than a
+   free-form textarea. `flex: 1 1 auto` assumes the host places it as a flex child alongside
+   sibling controls (e.g. action buttons) in the same row, matching its current usage. This class
+   deliberately omits `min-block-size` — `field-sizing: content` alone can start the textarea
+   shorter than one line of text in some browsers. Hosts MUST set their own `min-block-size` using
+   `lh` units (e.g. `min-block-size: 1lh` for a single-line control) so the minimum height tracks
+   the host's own `font-size`/`line-height` rather than a hardcoded px value. */
+.auto-size-textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  field-sizing: content;
+  resize: none;
+}
+
 /* Shared "agent turn errored" banner (parity fix, 011-linear-thread-mode follow-up): originally
    `ConversationView.vue`-only, hoisted here (same convention as `.thread-rename-button`/
    `.rename-error` above) so `ThreadCard.vue`'s own Retry banner can be pixel-identical rather than

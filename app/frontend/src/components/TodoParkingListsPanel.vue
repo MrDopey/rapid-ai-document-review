@@ -101,16 +101,18 @@ const emit = defineEmits<{
         <ul class="list-items">
           <li v-for="item in itemsFor(section.list)" :key="item.id" class="list-item-row">
             <template v-if="editingId[section.list] === item.id">
-              <input
+              <textarea
                 v-model="editingText[section.list]"
-                class="list-item-edit-input"
-                type="text"
+                class="auto-size-textarea"
+                rows="1"
                 :aria-label="`Edit ${section.title} item`"
-                @keydown.enter="commitEdit(section.list, item.id)"
+                @keydown.enter.prevent="commitEdit(section.list, item.id)"
                 @keydown.esc="cancelEdit(section.list)"
-              />
-              <button type="button" @click="commitEdit(section.list, item.id)">Save</button>
-              <button type="button" @click="cancelEdit(section.list)">Cancel</button>
+              ></textarea>
+              <div class="list-item-edit-actions">
+                <button type="button" @click="commitEdit(section.list, item.id)">Save</button>
+                <button type="button" @click="cancelEdit(section.list)">Cancel</button>
+              </div>
             </template>
             <template v-else>
               <span
@@ -205,6 +207,17 @@ const emit = defineEmits<{
   gap: 0.375rem;
 }
 
+.list-item-row button {
+  flex: 0 0 auto;
+}
+
+.list-item-edit-actions {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 0.375rem;
+}
+
 .list-item-text {
   flex: 1 1 auto;
   word-break: break-word;
@@ -219,8 +232,10 @@ const emit = defineEmits<{
   cursor: pointer;
 }
 
-.list-item-edit-input {
-  flex: 1 1 auto;
+/* .auto-size-textarea (style.css) sets shape; this host must still supply its own
+   min-block-size per that class's comment. */
+.auto-size-textarea {
+  min-block-size: 1lh;
 }
 
 .list-item-empty {
