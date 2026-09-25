@@ -1,22 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 2.4.0 → 2.5.0
-Rationale: MINOR — further extends the "Pi export viewing" carve-out established in v2.4.0
-(Technology & Platform Constraints) so it also permits rendering the ENTIRE shared Pi session tree
-for a threaded-conversation document — every thread/branch together, not just one thread's own
-root-to-leaf path — in the browser. This whole-tree view MUST be obtained exclusively via the Pi
-SDK's own whole-tree export primitive (`AgentSession.exportToHtml()`); the boundary the v2.4.0
-carve-out already drew is otherwise unchanged and continues to apply in full: the application still
-MUST NOT read or write Pi's underlying session storage format directly (Principle II is unaffected),
-and this still does not license fabricating, reformatting, or otherwise reconstructing a substitute
-for Pi's own export by any other means. This is a further loosening of the same existing scope
-boundary, not a new principle and not a redefinition of one, and does not make any previously-
-compliant plan non-compliant, so it is versioned as MINOR (materially expanded guidance), consistent
-with the prior 2.2.0 → 2.3.0 and 2.3.0 → 2.4.0 amendments to this same non-goals list.
+Version change: 2.5.0 → 2.6.0
+Rationale: MINOR — adds a new, narrowly-scoped carve-out to the same "Explicit v1 non-goals" list in
+Technology & Platform Constraints, permitting the specific agent tool calls required by
+specs/012-todo-parking-lists: add/remove/update of simple string items, by id, on a document's Todo
+list and Parking Lot list, with server-issued short-hash optimistic-concurrency checks (that spec's
+FR-003 through FR-009). This does not redefine any Core Principle: these two lists are simple,
+document-attached application state analogous to the "conversation metadata"/"UI state" the
+application backend already solely owns under Principle I, not "document state" in the
+Markdown/Automerge-CRDT sense that Principle III's staged-edit pipeline governs, so no exception to
+Principle III is needed. The carve-out is deliberately narrow — it authorizes exactly those three
+operations on those two lists, not a general "agent may maintain arbitrary structured state"
+capability — so it does not make any other new agent tool compliant; any such tool remains excluded
+until it earns its own carve-out the same way. This is the same kind of narrow, additive loosening of
+an existing non-goals list as the prior web_search/web_fetch, multi-document-support, and Pi-export-
+viewing carve-outs (2.2.0 → 2.3.0, 2.3.0 → 2.4.0, 2.4.0 → 2.5.0), hence MINOR.
 Modified principles: n/a (no existing Core Principle redefined)
-Modified sections: Technology & Platform Constraints → v1 non-goals bullet ("Pi export viewing"
-rationale extended to also cover a document-wide, whole-session-tree export via
-`AgentSession.exportToHtml()`, alongside the existing single-thread export carve-out)
+Modified sections: Technology & Platform Constraints → v1 non-goals bullet (new carve-out added for
+the specs/012-todo-parking-lists agent tool calls, alongside the existing web_search/web_fetch and
+Pi-export-viewing carve-outs)
 Added sections: none
 Removed sections: none
 Deferred items: none
@@ -117,16 +119,25 @@ keeping comments sparse, durable, and focused on non-obvious gotchas keeps them 
   and service boundaries MUST NOT preclude multiple accounts in a later version. Multiple documents
   per the single local user/account are supported per specs/010-multi-document-support.
 * Explicit v1 non-goals (tracked as future scope, not to be implemented speculatively): storage
-  backends beyond SQLite, additional agent tools beyond document read/edit/web-search/web-fetch,
-  additional Markdown rendering extensions beyond Mermaid/SVG, real Git history/repository
-  integration, partial tool-call acceptance, a Pi extension (Principle VII), importable contextual
-  reference material, and multi-user/multi-account support.
+  backends beyond SQLite, additional agent tools beyond document read/edit/web-search/web-fetch/
+  todo-and-parking-lot-list management (specs/012-todo-parking-lists), additional Markdown rendering
+  extensions beyond Mermaid/SVG, real Git history/repository integration, partial tool-call
+  acceptance, a Pi extension (Principle VII), importable contextual reference material, and
+  multi-user/multi-account support.
   **Rationale**: `web_search` and `web_fetch` are carved out of the "no additional agent tools"
   non-goal because both are read-only, information-gathering tools registered as ordinary
   `customTools` — the same mechanism as `read_document` — so they neither require a Pi extension
   (Principle VII stays satisfied) nor touch the edit-proposal pipeline (Principle III stays
-  satisfied: they cannot modify the document). Any other new agent tool remains out of scope until
-  it earns its own carve-out the same way. "Multiple documents" is removed from this list entirely,
+  satisfied: they cannot modify the document). The todo/parking-lot list tool calls
+  (specs/012-todo-parking-lists) are carved out on the same narrow basis: they add, remove, and
+  update simple string items, by id, on two document-attached lists that are application state (like
+  the "conversation metadata"/"UI state" Principle I already assigns to the application backend), not
+  "document state" in the Markdown/Automerge-CRDT sense — so Principle III's staged-edit pipeline
+  does not apply to them, and no Pi extension is required (Principle VII stays satisfied). This
+  carve-out authorizes exactly those three operations on those two lists; it does not license any
+  other new agent tool, nor a general capability for the agent to maintain arbitrary structured
+  state. Any other new agent tool remains out of scope until it earns its own carve-out the same way.
+  "Multiple documents" is removed from this list entirely,
   rather than merely narrowed, because specs/010-multi-document-support implements it for the
   single local user; multi-user/multi-account support remains a distinct, still-excluded non-goal.
   "Pi export viewing" is likewise removed from this list entirely, rather than merely narrowed,
@@ -230,4 +241,4 @@ in the commit or PR description, which principle(s) changed and why.
 against these principles before implementation begins; a violation MUST either be justified in the
 plan's complexity-tracking section or the plan MUST be revised to comply.
 
-**Version**: 2.5.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-20
+**Version**: 2.6.0 | **Ratified**: 2026-08-25 | **Last Amended**: 2026-09-25
