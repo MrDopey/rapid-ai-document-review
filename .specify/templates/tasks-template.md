@@ -159,6 +159,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Review comments added/changed in this feature's diff for constitution compliance
 - [ ] TXXX Run quickstart.md validation
 - [ ] TXXX Run `./scripts/verify.sh` and fix any failures until it exits green
+- [ ] TXXX Run `npm run test:e2e` (NOT covered by `./scripts/verify.sh` — that script only runs
+      lint/format/build/backend tests) and fix any failures before marking this phase complete
 - [ ] TXXX [P] If this feature changed layout/stacking/keyboard/focus behavior, verify visually with Playwright (see below)
 
 ### Visual verification (layout/stacking/keyboard/focus changes only)
@@ -168,7 +170,11 @@ affected screens with Playwright instead of trusting unit/component tests alone:
 
 - [ ] TXXX [P] Write/update a Playwright spec covering the changed screen(s) and interaction(s) in
       `tests/e2e/` (or feature-appropriate location); assert on the actual visual/behavioral
-      regression this feature fixes or introduces, not just DOM presence
+      regression this feature fixes or introduces, not just DOM presence — run the same assertions
+      under both `page.emulateMedia({ colorScheme: 'light' })` and `{ colorScheme: 'dark' }`, since
+      this app's theme is CSS-media-query-driven (`style.css`'s `prefers-color-scheme: dark` block)
+      and a fix verified in one scheme can still be broken in the other (e.g. a z-index/contrast
+      issue that only shows up against the dark palette)
 - [ ] TXXX Run the Playwright spec against the dev server and attach/report screenshots for the
       before/after or golden-path + edge-case states
 - [ ] TXXX Fix any visual regressions found (layout shift, incorrect stacking order, broken focus
