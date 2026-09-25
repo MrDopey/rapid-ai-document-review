@@ -384,8 +384,8 @@ async function onExportDocument(): Promise<void> {
    viewport-minus-toolbar via the `.thread-mode-panes`/`.thread-mode-body` chain, App.vue) —
    regardless of how much/little thread content there is. `.thread-mode-content` below scrolls its
    own overflow internally instead of growing this row past that fixed height, which is what makes
-   `.thread-mode-lists-rail`'s `height: 50%` a stable "50% of the viewport's available space"
-   rather than 50% of whatever a short/tall thread's own content happened to need. */
+   `.thread-mode-lists-rail`'s `height: 100%` a stable "100% of the viewport's available space"
+   rather than a fraction of whatever a short/tall thread's own content happened to need. */
 .thread-mode-row {
   display: flex;
   flex-direction: row;
@@ -406,7 +406,10 @@ async function onExportDocument(): Promise<void> {
 }
 .thread-mode-lists-rail {
   flex: 0 0 280px;
-  height: 50%;
+  /* Always claims the row's full available height — the 50/50 (or full-height-to-whichever-one-
+     is-open) split between the Todo/Parking Lot sections happens inside
+     `TodoParkingListsPanel.vue` itself (`.list-section--expanded`'s `flex: 1 1 0%`), not here. */
+  height: 100%;
   border-left: 1px solid var(--border-color, #ddd);
   background: var(--panel-bg, #f7f7f8);
 }

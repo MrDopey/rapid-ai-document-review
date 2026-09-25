@@ -1581,12 +1581,15 @@ async function onToggleReasoning(event: Event): Promise<void> {
    full-bleed panel, so it reads as a narrow companion rail rather than a second detail view. */
 .todo-parking-lists-rail {
   flex: 0 0 280px;
-  /* Pinned to half of `.conversation-detail-overlay`'s own height (the viewport's available space
-     below the toolbar/HUD, via that element's `inset: 0` against its grid-cell containing block)
-     rather than `align-items: stretch` matching whatever height the focused conversation panel(s)
-     happen to need — a short conversation used to squeeze the rail down to a sliver. */
-  height: 50%;
-  align-self: center;
+  /* Full height of `.conversation-detail-overlay` (the viewport's available space below the
+     toolbar/HUD, via that element's `inset: 0` against its grid-cell containing block) rather than
+     `align-items: stretch` matching whatever height the focused conversation panel(s) happen to
+     need — a short conversation used to squeeze the rail down to a sliver. The 50/50 (or
+     full-height-to-whichever-one-is-open) split between the Todo/Parking Lot sections happens
+     inside `TodoParkingListsPanel.vue` itself (`.list-section--expanded`'s `flex: 1 1 0%`), not
+     here — this rail always claims the full available height regardless of how many of its two
+     sections are open. */
+  height: 100%;
   /* Contrast fix: `--surface-color` isn't a real token anywhere in style.css, so this silently
      fell back to a hardcoded white in BOTH color schemes — in dark mode that left the rail's own
      inherited light (`--text-color: #e8e8e8`) text nearly unreadable against a white card.

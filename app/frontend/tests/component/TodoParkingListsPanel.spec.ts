@@ -104,14 +104,12 @@ describe('TodoParkingListsPanel', () => {
     expect(wrapper.find('.parking-lot-section').classes()).toContain('list-section--expanded');
   });
 
-  it('hiding one section via the store collapses only that section, leaving the other expanded', async () => {
+  it('hiding one section via the store removes it (including its heading) entirely, leaving the other expanded', async () => {
     const wrapper = await mountPanel();
     useListItemsStore().toggleVisibility('todo');
     await wrapper.vm.$nextTick();
 
-    const todoSection = wrapper.find('.todo-list-section');
-    expect(todoSection.classes()).not.toContain('list-section--expanded');
-    expect(todoSection.find('.list-section-body').exists()).toBe(false);
+    expect(wrapper.find('.todo-list-section').exists()).toBe(false);
     const parkingSection = wrapper.find('.parking-lot-section');
     expect(parkingSection.classes()).toContain('list-section--expanded');
     expect(parkingSection.find('.list-section-body').exists()).toBe(true);

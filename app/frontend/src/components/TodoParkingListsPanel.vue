@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, watch } from 'vue';
+import { computed, onMounted, reactive, watch } from 'vue';
 import type { ListItemDto } from '@rapid-ai-document-review/shared/contracts/http';
 import { useDocumentStore } from '../stores/document.js';
 import { useListItemsStore } from '../stores/listItems.js';
@@ -20,14 +20,17 @@ function itemsFor(list: ListName): ListItemDto[] {
 }
 
 // Independent per-section visibility, but the toggle CONTROL itself lives in the HUD (App.vue's/
-// ThreadModeView.vue's own Todo/Parking Lot buttons next to "Lists (n)"), not on the rail — this
-// component only reads `listItemsStore.todoVisible`/`parkingLotVisible` to decide what to render.
-// Whichever section(s) stay visible split the rail's vertical space evenly (see
-// `.list-section--expanded` below) — collapsing one hands its share to the other instead of
-// leaving dead space.
-function isVisible(list: ListName): boolean {
-  return list === 'todo' ? listItemsStore.todoVisible : listItemsStore.parkingLotVisible;
-}
+// ThreadModeView.vue's own Todo/Parking Lot buttons), not on the rail — this component only reads
+// `listItemsStore.todoVisible`/`parkingLotVisible` to decide what to render. A hidden section
+// (including its own heading) is dropped from `v-for` entirely rather than left as a
+// collapsed-but-still-rendered header, so whichever section(s) remain split the rail's full height
+// evenly between them (see `.list-section--expanded` below) — or claim all of it, when only one is
+// open.
+const visibleSections = computed(() =>
+  sections.filter((section) =>
+    section.list === 'todo' ? listItemsStore.todoVisible : listItemsStore.parkingLotVisible,
+  ),
+);
 
 const newItemText = reactive<Record<ListName, string>>({ todo: '', parking_lot: '' });
 const editingId = reactive<Record<ListName, string | null>>({ todo: null, parking_lot: null });
@@ -82,15 +85,15 @@ async function removeItem(itemId: string): Promise<void> {
 <template>
   <aside class="todo-parking-lists-panel" aria-label="Todo and Parking Lot lists">
     <section
-      v-for="section in sections"
+      v-for="section in visibleSections"
       :key="section.list"
-      class="list-section"
-      :class="[section.sectionClass, { 'list-section--expanded': isVisible(section.list) }]"
+      class="list-section list-section--expanded"
+      :class="section.sectionClass"
     >
       <h3 class="list-section-title">
         <span>{{ section.title }} ({{ itemsFor(section.list).length }})</span>
       </h3>
-      <div v-if="isVisible(section.list)" class="list-section-body">
+      <div class="list-section-body">
         <ul class="list-items">
           <li v-for="item in itemsFor(section.list)" :key="item.id" class="list-item-row">
             <template v-if="editingId[section.list] === item.id">
