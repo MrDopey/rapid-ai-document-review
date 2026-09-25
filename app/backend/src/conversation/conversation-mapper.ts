@@ -20,27 +20,71 @@ import type {
  * offset is treated as the anchor's true current position — a true orphan is only text that no
  * longer appears anywhere in the document at all.
  */
+// Every `GET /conversations` (REST poll, WS subscribe snapshot, or resync) rebuilds every
+// conversation's DTO, and `findClosestOccurrence` below is an unbounded scan over the whole
+// document once the fast path misses — repeating that on every poll between actual document
+// edits is pure waste, and under enough concurrent polling (e.g. a11y.spec.ts's 200ms-interval
+// status poll) it's synchronous CPU work competing with this single-threaded server for time on
+// the same event loop that delivers WS status updates, delaying them. Cached per conversation id,
+// invalidated only when `currentRevision` actually advances (the one thing that can change where
+// an anchor's text now lives).
+const seedSelectionCache = new Map<
+  string,
+  {
+    revision: number;
+    // Belt-and-suspenders alongside `revision`: in real operation `currentRevision` always
+    // advances in lockstep with `documentContent` (both come from the same document read), so
+    // this is redundant there — but it's what makes the cache safe to key on `revision` alone
+    // without also requiring every caller to guarantee that lockstep (e.g. a unit test directly
+    // exercising several different fixture contents under one fixed revision number).
+    contentLength: number;
+    result: { seedSelection: ConversationSeedSelectionDto | null; anchorOrphaned: boolean };
+  }
+>();
+
 function resolveSeedSelection(
+  conversationId: string,
+  currentRevision: number,
   documentContent: string,
   seedSelection: ConversationSeedSelectionDto | null,
 ): { seedSelection: ConversationSeedSelectionDto | null; anchorOrphaned: boolean } {
   if (seedSelection === null) return { seedSelection: null, anchorOrphaned: false };
 
+  const cached = seedSelectionCache.get(conversationId);
+  if (
+    cached &&
+    cached.revision === currentRevision &&
+    cached.contentLength === documentContent.length
+  ) {
+    return cached.result;
+  }
+
+  let result: { seedSelection: ConversationSeedSelectionDto | null; anchorOrphaned: boolean };
   if (documentContent.slice(seedSelection.from, seedSelection.to) === seedSelection.text) {
     // Fast path: untouched (or only touched after this anchor), raw offset still exact.
-    return { seedSelection, anchorOrphaned: false };
+    result = { seedSelection, anchorOrphaned: false };
+  } else {
+    const foundAt = findClosestOccurrence(documentContent, seedSelection.text, seedSelection.from);
+    result =
+      foundAt === null
+        ? // The anchor text genuinely no longer exists anywhere in the document.
+          { seedSelection, anchorOrphaned: true }
+        : {
+            seedSelection: {
+              ...seedSelection,
+              from: foundAt,
+              to: foundAt + seedSelection.text.length,
+            },
+            anchorOrphaned: false,
+          };
   }
 
-  const foundAt = findClosestOccurrence(documentContent, seedSelection.text, seedSelection.from);
-  if (foundAt === null) {
-    // The anchor text genuinely no longer exists anywhere in the document.
-    return { seedSelection, anchorOrphaned: true };
-  }
-
-  return {
-    seedSelection: { ...seedSelection, from: foundAt, to: foundAt + seedSelection.text.length },
-    anchorOrphaned: false,
-  };
+  seedSelectionCache.set(conversationId, {
+    revision: currentRevision,
+    contentLength: documentContent.length,
+    result,
+  });
+  return result;
 }
 
 /** Every offset in `haystack` at which `needle` occurs; returns whichever is closest to
@@ -82,6 +126,8 @@ function buildConversationDto(
   const { settings } = ctx;
   const pendingEditCount = ctx.pendingEditCountByConversationId.get(row.id) ?? 0;
   const { seedSelection, anchorOrphaned } = resolveSeedSelection(
+    row.id,
+    currentRevision,
     documentContent,
     row.seedSelection,
   );
