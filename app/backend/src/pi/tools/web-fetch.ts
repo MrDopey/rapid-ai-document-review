@@ -141,7 +141,17 @@ export function createWebFetchTool(deps: WebFetchToolDeps) {
       try {
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) {
-          return textResult(`Could not fetch ${url}: server responded with status ${res.status}.`);
+          const responseText = await res.text();
+          const clampedText = clampWithNote(
+            responseText.length,
+            0,
+            MAX_CONTENT_CHARS,
+            'response body',
+          );
+          const preview = responseText.slice(0, clampedText.value);
+          return textResult(
+            `Request completed with error for ${url}: Server returned status ${res.status}. Response body preview: ${preview}${clampedText.note ? `\n\n(${clampedText.note})` : ''}`,
+          );
         }
 
         const contentType = res.headers.get('content-type') ?? '';
