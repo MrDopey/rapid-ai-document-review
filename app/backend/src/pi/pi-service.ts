@@ -160,6 +160,10 @@ export class PiService {
     const raw = config.piAgentModel;
     if (!raw) return undefined;
 
+    const slashIndex = raw.indexOf('/');
+    const provider = slashIndex > 0 ? raw.slice(0, slashIndex) : '';
+    let id = slashIndex > 0 ? raw.slice(slashIndex + 1) : '';
+
     const invalid = (): never => {
       throw new Error(
         `Invalid RADR_BE_PI_AGENT_MODEL value "${raw}": expected "provider/model[:thinkingLevel]" ` +
@@ -167,11 +171,20 @@ export class PiService {
       );
     };
 
-    const slashIndex = raw.indexOf('/');
     if (slashIndex <= 0 || slashIndex === raw.length - 1) invalid();
+    if (!id) invalid();
 
-    const provider = raw.slice(0, slashIndex);
-    let id = raw.slice(slashIndex + 1);
+    logger.debug({ provider: provider, id: id }, 'Parsed model');
+
+    // Some model ids legitimately contain a colon themselves (e.g. llama.cpp's GGUF quant
+    // suffix "unsloth/gemma-4-E2B-it-GGUF:Q8_K_XL"), so a trailing ":segment" is ambiguous
+    // between "part of the id" and ":thinkingLevel". Try the id as-is first — only treat the
+    // last colon segment as a thinking level (and strip it) when that's the only way the id
+    // resolves, mirroring the SDK's own resolveCliModel/parseModelPattern precedence.
+    const fullMatch = modelRuntime.getModel(provider, id);
+    if (fullMatch) {
+      return fullMatch;
+    }
 
     const colonIndex = id.lastIndexOf(':');
     if (colonIndex !== -1) {
@@ -185,13 +198,12 @@ export class PiService {
         'xhigh',
         'max',
       ]);
-      if (!validThinkingLevels.has(thinkingLevel)) invalid();
-      id = id.slice(0, colonIndex);
+      if (validThinkingLevels.has(thinkingLevel)) {
+        id = id.slice(0, colonIndex);
+      }
     }
-    if (!id) invalid();
 
-    const model = modelRuntime.getModel(provider, id);
-    if (!model) invalid();
+    const model = modelRuntime.getModel(provider, id) ?? invalid();
     return model;
   }
 
