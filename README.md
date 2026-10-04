@@ -137,6 +137,22 @@ The backend reads the following environment variables (`app/backend/src/config.t
 1. `RADR_BE_PI_AGENT_MODEL` wins for every newly created agent session in the process.
 2. `models.json` custom model definitions (in `RADR_BE_PI_CODING_AGENT_DIR`) are the lookup table that `RADR_BE_PI_AGENT_MODEL`'s `provider/model` value resolves against.
 
+**llama.cpp:** the `pi` CLI loads llama.cpp as a built-in extension, but the backend embeds the SDK without it, so a model shown by `pi --list-models` may still fail to resolve here. Define it as a provider in `models.json` instead (the `:Q8_K_XL` quant suffix is fine — a trailing `:segment` is only treated as a thinking level if it is one):
+
+```json
+{
+  "providers": {
+    "llama.cpp": {
+      "baseUrl": "http://<host>:<port>/v1",
+      "api": "openai-completions",
+      "apiKey": "llama",
+      "models": [{ "id": "unsloth/gemma-4-E2B-it-GGUF:Q8_K_XL" }]
+    }
+  }
+}
+```
+
+Then set `RADR_BE_PI_AGENT_MODEL=llama.cpp/unsloth/gemma-4-E2B-it-GGUF:Q8_K_XL`.
 ---
 
 ## Running Locally
