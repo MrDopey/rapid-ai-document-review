@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { DocumentType } from '@rapid-ai-document-review/shared/contracts/http';
-import { useDocumentStore } from './stores/document.js';
-import { useConversationsStore } from './stores/conversations.js';
-import { useThreadStore } from './stores/thread.js';
-import { useSettingsStore } from './stores/settings.js';
-import { useEditsStore } from './stores/edits.js';
+import { useDocumentStore } from './stores/document.ts';
+import { useConversationsStore } from './stores/conversations.ts';
+import { useThreadStore } from './stores/thread.ts';
+import { useSettingsStore } from './stores/settings.ts';
+import { useEditsStore } from './stores/edits.ts';
 import { useListItemsStore } from './stores/listItems.js';
-import { WsClient } from './transport/ws-client.js';
-import { mountLiveRegions } from './a11y/live-regions.js';
+import { WsClient } from './transport/ws-client.ts';
+import { mountLiveRegions } from './a11y/live-regions.ts';
 import DocumentCanvas from './components/canvas/DocumentCanvas.vue';
 import ThreadModeView from './components/thread/ThreadModeView.vue';
 import TodoParkingListsPanel from './components/TodoParkingListsPanel.vue';
@@ -22,7 +22,7 @@ import ConversationStatusBadges from './components/conversation/ConversationStat
 import KeyboardShortcutsDialog from './components/toolbar/KeyboardShortcutsDialog.vue';
 import HelpDialog from './components/toolbar/HelpDialog.vue';
 import SystemPromptDialog from './components/toolbar/SystemPromptDialog.vue';
-import { clamp, useResizeHandle } from './composables/useResizeHandle.js';
+import { clamp, useResizeHandle } from './composables/useResizeHandle.ts';
 import {
   loadPaneSizes,
   persistPaneSizes,
@@ -32,18 +32,18 @@ import {
   persistPreviewVisible,
   loadEditorVisible,
   persistEditorVisible,
-} from './composables/panePersistence.js';
-import { attachScrollSync } from './composables/scrollSync.js';
-import { scrollMessageTopIntoView } from './composables/messageScroll.js';
-import { useFocusCap } from './composables/focusConfig.js';
-import { useFocusPanelState } from './composables/focusPanelState.js';
+} from './composables/panePersistence.ts';
+import { attachScrollSync } from './composables/scrollSync.ts';
+import { scrollMessageTopIntoView } from './composables/messageScroll.ts';
+import { useFocusCap } from './composables/focusConfig.ts';
+import { useFocusPanelState } from './composables/focusPanelState.ts';
 import {
   HOTKEY_BINDINGS,
   matchesBinding,
   isEditingContext,
   isOverlayOpen,
-} from './a11y/keymap-registry.js';
-import { orderConversationsByAnchor } from './components/canvas/conversationLayout.js';
+} from './a11y/keymap-registry.ts';
+import { orderConversationsByAnchor } from './components/canvas/conversationLayout.ts';
 
 const store = useDocumentStore();
 const conversationsStore = useConversationsStore();
