@@ -2,6 +2,8 @@
 
 A self-hosted, single-user application for rapid-reviewing a Markdown document while holding multiple concurrent, branching conversations with an AI agent. The application owns the document and its history; the agent proposes edits that the user previews, accepts, or drops before they ever touch the document.
 
+This project is largely inspired by this [talk](https://www.ted.com/talks/advait_sarkar_how_to_stop_ai_from_killing_your_critical_thinking)
+
 ---
 
 ## Architecture
