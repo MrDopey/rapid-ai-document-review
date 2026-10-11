@@ -56,6 +56,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'thread-composer-focus',
+      // Self-contained spec (creates its own thread document) — same ordering-only 'stories'
+      // dependency as 'thread-hotkeys', not a shared fixture. Real-browser regression coverage
+      // for the composer losing DOM focus across a send + agent reply (the textarea's own
+      // in-flight `:disabled` used to blur it for the whole turn); jsdom's
+      // ThreadComposer.spec.ts covers the disabled-state logic, but only a real browser proves
+      // the focus survives a genuine round trip.
+      testMatch: /thread-composer-focus\.spec\.ts/,
+      dependencies: ['stories'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
       name: 'thread-hotkeys',
       testMatch: /thread-hotkeys\.spec\.ts/,
       dependencies: ['stories'],

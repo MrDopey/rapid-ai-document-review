@@ -1,5 +1,13 @@
+<script lang="ts">
+// Threads whose composer held focus when a send started. `ThreadCard.vue` renders the composer in
+// two different v-if branches (zero messages vs. the tip segment), so the first message arriving
+// REMOUNTS the textarea (once per arriving message) and the browser drops focus; each new instance
+// re-focuses while the flag is set, and the send clears it once settled.
+const refocusAfterRemount = new Set<string>();
+</script>
+
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useThreadStore } from '../../stores/thread.js';
 
 /**
@@ -15,9 +23,18 @@ const props = defineProps<{ threadId: string; disabled?: boolean }>();
 
 const store = useThreadStore();
 const sending = ref(false);
-// Surfaced the same way as every other action failure in this app (`.error-banner`, style.css) —
-// previously the draft was cleared before `store.send` resolved with no `catch` at all, so a failed
-// send (dropped network, a 409 race, …) silently discarded whatever the reviewer had just typed.
+// Focus-retention fix (bug report: "type a message, hit Enter, the agent returns a message, but
+// then I lost focus on the conversation"): `sending` used to be part of the TEXTAREA's own
+// `:disabled` too — and `conversationService.send` on the backend awaits the agent's whole turn
+// before the POST resolves, so the textarea sat `disabled` for the entire duration of the agent's
+// reply. Disabling a focused element makes the browser blur it (focus drops to `<body>`), and
+// nothing re-focused it once `sending` flipped back to `false`, so after every reply the reviewer
+// had to click back into the composer before typing their next message. The textarea now disables
+// only on the `disabled` prop (a done thread, `thread.doneAt !== null`, stays read-only); in-flight
+// sends gate the SEND BUTTON alone — exactly how canvas mode's `ConversationView.vue` composer does
+// it (its textarea has no `sending`-driven `:disabled` at all, only its send buttons do). Double-
+// sending is already impossible either way: `onSend`'s own `sending.value` guard below plus the
+// button's `:disabled` both block a second Enter/submit while the first send is in flight.
 const sendError = ref<string | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
@@ -35,6 +52,7 @@ async function onSend(): Promise<void> {
   if (!text || sending.value || props.disabled) return;
   sending.value = true;
   sendError.value = null;
+  if (document.activeElement === textareaRef.value) refocusAfterRemount.add(props.threadId);
   try {
     await store.send(props.threadId, text);
     // Only cleared once the send actually succeeds — on failure the draft (still holding `text`)
@@ -45,8 +63,15 @@ async function onSend(): Promise<void> {
     sendError.value = err instanceof Error ? err.message : 'Failed to send message.';
   } finally {
     sending.value = false;
+    // Deferred: the remount (if any) lands in the render flush right after `store.send` resolves.
+    const id = props.threadId;
+    setTimeout(() => refocusAfterRemount.delete(id), 0);
   }
 }
+
+onMounted(() => {
+  if (refocusAfterRemount.has(props.threadId)) textareaRef.value?.focus();
+});
 
 function onComposerKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
@@ -73,7 +98,7 @@ defineExpose({ focus: () => textareaRef.value?.focus() });
       ref="textareaRef"
       v-model="draft"
       placeholder="Continue this thread…"
-      :disabled="disabled || sending"
+      :disabled="disabled"
       @keydown="onComposerKeydown"
     />
     <button
